@@ -54,4 +54,8 @@ website = "https://alpha-eternum.realms.world/"
     "s1_eternum-relic_systems",
     "s1_eternum-blitz_realm_systems",
     "s1_eternum-prize_distribution_systems",
+    "s1_eternum-sharding_systems",
+    "s1_eternum-dev_realm_systems",
+    "s1_eternum-dev_config_systems",
+    "s1_eternum-dev_campaign_systems",
 ]

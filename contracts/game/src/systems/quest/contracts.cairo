@@ -771,7 +771,7 @@ mod tests {
         let resource = SingleResourceStoreImpl::retrieve(
             ref world, explorer_id, quest_tile.resource_type, ref explorer_weight, resource_weight_grams, false,
         );
-        let resource_balance_before_claim = resource.balance;
+        let resource_balance_before_claim = resource.balance();
 
         // claim reward
         let quest_system = IQuestSystemsDispatcher { contract_address: quest_system_addr };
@@ -790,7 +790,7 @@ mod tests {
 
         // assert explorer received reward
         assert!(
-            resource.balance == quest_tile.amount + resource_balance_before_claim, "Explorer did not receive reward",
+            resource.balance() == quest_tile.amount + resource_balance_before_claim, "Explorer did not receive reward",
         );
     }
 

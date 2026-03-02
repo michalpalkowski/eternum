@@ -120,7 +120,7 @@ pub impl iResourceTransferImpl of iResourceTransferTrait {
                 let mut structure_resource = SingleResourceStoreImpl::retrieve(
                     ref world, structure_id, resource_type, ref structure_weight, resource_weight_grams, false,
                 );
-                new_total_weight += structure_resource.balance * resource_weight_grams;
+                new_total_weight += structure_resource.balance() * resource_weight_grams;
             }
 
             if new_total_weight <= structure_weight.capacity {
