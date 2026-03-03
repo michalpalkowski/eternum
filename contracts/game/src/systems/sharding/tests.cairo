@@ -72,22 +72,19 @@ fn get_sharding_dispatcher(
     (addr, IShardingSystemsDispatcher { contract_address: addr })
 }
 
-/// Get field selector for a specific field index from the Resource layout.
-/// Resource type `i` has additions at index `i*2` and subtractions at `i*2+1`.
-fn resource_field_selector(index: u32) -> felt252 {
+/// Get the storage slot for resource_type `i` (1-based) BALANCE field.
+/// Field index in layout = i - 1 (balance fields are first 56 fields of Resource).
+fn resource_balance_slot(ref world: WorldStorage, entity_id: ID, resource_type: u32) -> felt252 {
+    let ns_hash = dojo::utils::bytearray_hash(@"s1_eternum");
+    let model_selector = Model::<Resource>::selector(ns_hash);
     let layout = Model::<Resource>::layout();
-    if let Layout::Struct(fields) = layout {
-        (*fields[index]).selector
+    let field_selector = if let Layout::Struct(fields) = layout {
+        (*fields[resource_type - 1]).selector
     } else {
         panic!("Resource layout not Struct")
-    }
-}
-
-/// Write initial Resource balance values using ResourceImpl.
-fn write_test_balances(ref world: WorldStorage, entity_id: ID, stone: u128, wood: u128) {
-    // resource_type 1 = STONE, resource_type 3 = WOOD
-    ResourceImpl::write_balance(ref world, entity_id, 1, stone);
-    ResourceImpl::write_balance(ref world, entity_id, 3, wood);
+    };
+    let dojo_entity_id = entity_id_from_keys(@entity_id);
+    compute_dojo_field_slot(model_selector, dojo_entity_id, field_selector)
 }
 
 fn caller() -> ContractAddress {
@@ -98,122 +95,172 @@ fn caller() -> ContractAddress {
 // TESTS
 // ================================
 
+/// request_shard locks the balance field and balances are readable unchanged.
 #[test]
 fn test_request_shard() {
     let mut world = setup_world();
     let entity_id: ID = 42;
 
-    write_test_balances(ref world, entity_id, 100, 200);
+    // STONE(1)=100, WOOD(3)=200
+    ResourceImpl::write_balance(ref world, entity_id, 1, 100);
+    ResourceImpl::write_balance(ref world, entity_id, 3, 200);
 
     let proxy_address = deploy_mock_proxy();
     let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
 
-    // Request shard for STONE (index 0) and WOOD (index 2).
+    // Request shard for STONE (type 1) and WOOD (type 3).
     start_cheat_caller_address(system_addr, caller());
-    dispatcher.request_shard(proxy_address, entity_id, array![0, 2].span());
+    dispatcher.request_shard(proxy_address, entity_id, array![1, 3].span());
     stop_cheat_caller_address(system_addr);
 
-    // Balances should remain readable and unchanged.
+    // Balances should remain readable and unchanged after locking.
     let stone = ResourceImpl::read_balance(ref world, entity_id, 1);
     let wood = ResourceImpl::read_balance(ref world, entity_id, 3);
     assert!(stone == 100, "STONE should be 100");
     assert!(wood == 200, "WOOD should be 200");
 }
 
+/// SetLock settlement: shard value overwrites main chain — no delta math, no underflow risk.
 #[test]
-fn test_shard_add_crdt_delta() {
+fn test_shard_set_lock_overwrites() {
     let mut world = setup_world();
     let world_address = world.dispatcher.contract_address;
     let entity_id: ID = 42;
 
-    write_test_balances(ref world, entity_id, 100, 200);
+    // Initial balance: STONE=100
+    ResourceImpl::write_balance(ref world, entity_id, 1, 100);
 
     let proxy_address = deploy_mock_proxy();
     let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
 
-    // Request shard for STONE (index 0) — snapshots initial=100.
+    // Lock STONE (type 1) for the shard.
     start_cheat_caller_address(system_addr, caller());
-    dispatcher.request_shard(proxy_address, entity_id, array![0].span());
+    dispatcher.request_shard(proxy_address, entity_id, array![1].span());
     stop_cheat_caller_address(system_addr);
 
-    // Simulate mainchain change: STONE 100 → 120.
-    write_test_balances(ref world, entity_id, 120, 200);
+    // Simulate main chain independently changing STONE to 80 (e.g. spending 20).
+    // With SetLock this change will be OVERWRITTEN at settlement — not merged.
+    ResourceImpl::write_balance(ref world, entity_id, 1, 80);
 
-    // Compute the slot for STONE_ADDITIONS (field index 0).
-    let ns_hash = dojo::utils::bytearray_hash(@"s1_eternum");
-    let model_selector = Model::<Resource>::selector(ns_hash);
-    let field_selector = resource_field_selector(0);
-    let dojo_entity_id = entity_id_from_keys(@entity_id);
-    let slot = compute_dojo_field_slot(model_selector, dojo_entity_id, field_selector);
-
-    // Shard saw initial=100, produced shard_value=150 (delta=50).
+    // Shard final: STONE=70 (spent 30 on shard).
+    let slot = resource_balance_slot(ref world, entity_id, 1);
     let sharding = IContractComponentDispatcher { contract_address: world_address };
+
     start_cheat_caller_address(world_address, proxy_address);
-    sharding.update_shard_state(array![(slot, 150)]);
+    sharding.update_shard_state(array![(slot, 70)]);
     stop_cheat_caller_address(world_address);
 
-    // Expected: current(120) + (shard(150) - initial(100)) = 170
+    // SetLock: shard value (70) overwrites main chain — no double-spend risk.
     let stone = ResourceImpl::read_balance(ref world, entity_id, 1);
-    let wood = ResourceImpl::read_balance(ref world, entity_id, 3);
-    assert!(stone == 170, "Add delta: expected 170, got {}", stone);
-    assert!(wood == 200, "WOOD should be unchanged");
+    assert!(stone == 70, "SetLock: expected shard value 70, got {}", stone);
 }
 
+/// Shard spends resources: final value lower than initial — no underflow panic (vs Add CRDT).
+#[test]
+fn test_shard_spend_no_underflow() {
+    let mut world = setup_world();
+    let world_address = world.dispatcher.contract_address;
+    let entity_id: ID = 42;
+
+    // Initial STONE=1000
+    ResourceImpl::write_balance(ref world, entity_id, 1, 1000);
+
+    let proxy_address = deploy_mock_proxy();
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+
+    start_cheat_caller_address(system_addr, caller());
+    dispatcher.request_shard(proxy_address, entity_id, array![1].span());
+    stop_cheat_caller_address(system_addr);
+
+    // Shard spends 750: final balance = 250 (lower than initial — was impossible with Add CRDT).
+    let slot = resource_balance_slot(ref world, entity_id, 1);
+    let sharding = IContractComponentDispatcher { contract_address: world_address };
+
+    start_cheat_caller_address(world_address, proxy_address);
+    sharding.update_shard_state(array![(slot, 250)]);
+    stop_cheat_caller_address(world_address);
+
+    let stone = ResourceImpl::read_balance(ref world, entity_id, 1);
+    assert!(stone == 250, "After shard spend: expected 250, got {}", stone);
+}
+
+/// Selective field sharding: only locked fields are updated, others untouched.
 #[test]
 fn test_shard_selective_fields_only() {
     let mut world = setup_world();
     let world_address = world.dispatcher.contract_address;
     let entity_id: ID = 42;
 
-    write_test_balances(ref world, entity_id, 100, 200);
+    ResourceImpl::write_balance(ref world, entity_id, 1, 100); // STONE
+    ResourceImpl::write_balance(ref world, entity_id, 3, 200); // WOOD
 
     let proxy_address = deploy_mock_proxy();
     let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
 
-    // Shard STONE only (index 0), NOT WOOD.
+    // Shard STONE only (type 1), NOT WOOD.
     start_cheat_caller_address(system_addr, caller());
-    dispatcher.request_shard(proxy_address, entity_id, array![0].span());
+    dispatcher.request_shard(proxy_address, entity_id, array![1].span());
     stop_cheat_caller_address(system_addr);
 
-    // Mainchain changes STONE 100 → 120.
-    write_test_balances(ref world, entity_id, 120, 200);
-
-    // Compute slot for STONE and update via shard.
-    let ns_hash = dojo::utils::bytearray_hash(@"s1_eternum");
-    let model_selector = Model::<Resource>::selector(ns_hash);
-    let field_selector = resource_field_selector(0);
-    let dojo_entity_id = entity_id_from_keys(@entity_id);
-    let slot = compute_dojo_field_slot(model_selector, dojo_entity_id, field_selector);
-
+    let stone_slot = resource_balance_slot(ref world, entity_id, 1);
     let sharding = IContractComponentDispatcher { contract_address: world_address };
+
     start_cheat_caller_address(world_address, proxy_address);
-    sharding.update_shard_state(array![(slot, 130)]);
+    sharding.update_shard_state(array![(stone_slot, 150)]);
     stop_cheat_caller_address(world_address);
 
-    // STONE: 120 + (130 - 100) = 150
     let stone = ResourceImpl::read_balance(ref world, entity_id, 1);
-    assert!(stone == 150, "STONE: expected 150, got {}", stone);
-    // WOOD should be completely unaffected.
     let wood = ResourceImpl::read_balance(ref world, entity_id, 3);
-    assert!(wood == 200, "WOOD should be unchanged at 200");
+    assert!(stone == 150, "STONE: expected 150 (shard value), got {}", stone);
+    assert!(wood == 200, "WOOD: should be untouched at 200");
 }
 
+/// finish_shard forwards to the proxy without panicking.
 #[test]
 fn test_finish_shard() {
     let mut world = setup_world();
     let entity_id: ID = 42;
 
-    write_test_balances(ref world, entity_id, 100, 200);
+    ResourceImpl::write_balance(ref world, entity_id, 1, 100);
 
     let proxy_address = deploy_mock_proxy();
     let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
 
     start_cheat_caller_address(system_addr, caller());
-    dispatcher.request_shard(proxy_address, entity_id, array![0].span());
+    dispatcher.request_shard(proxy_address, entity_id, array![1].span());
     stop_cheat_caller_address(system_addr);
 
-    // finish_shard should not panic — forwards to proxy.end_shard().
+    // finish_shard should not panic.
     start_cheat_caller_address(system_addr, caller());
     dispatcher.finish_shard();
     stop_cheat_caller_address(system_addr);
+}
+
+/// cancel_shard unlocks the slot without changing the balance.
+#[test]
+fn test_cancel_shard_preserves_balance() {
+    let mut world = setup_world();
+    let world_address = world.dispatcher.contract_address;
+    let entity_id: ID = 42;
+
+    ResourceImpl::write_balance(ref world, entity_id, 1, 500); // STONE
+
+    let proxy_address = deploy_mock_proxy();
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+
+    start_cheat_caller_address(system_addr, caller());
+    dispatcher.request_shard(proxy_address, entity_id, array![1].span());
+    stop_cheat_caller_address(system_addr);
+
+    let stone_slot = resource_balance_slot(ref world, entity_id, 1);
+    let sharding = IContractComponentDispatcher { contract_address: world_address };
+
+    // Proxy cancels the shard (e.g. settlement failed).
+    start_cheat_caller_address(world_address, proxy_address);
+    sharding.cancel_shard_state(array![stone_slot].span());
+    stop_cheat_caller_address(world_address);
+
+    // Balance must remain unchanged after cancel.
+    let stone = ResourceImpl::read_balance(ref world, entity_id, 1);
+    assert!(stone == 500, "Cancel: balance should be unchanged at 500, got {}", stone);
 }

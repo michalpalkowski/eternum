@@ -2,25 +2,26 @@ use crate::alias::ID;
 
 #[starknet::interface]
 pub trait IShardingSystems<T> {
-    /// Request sharding for specific resource types of an entity using PN-Counter CRDT.
+    /// Request sharding for specific resource types of an entity using SetLock CRDT.
     ///
-    /// Each resource type `i` maps to two model fields: additions (P) and subtractions (N).
-    /// Both are G-Counters (grow-only), enabling concurrent add+spend on shards.
+    /// Each resource type maps to a single `*_BALANCE` field in the Resource model.
+    /// SetLock semantics: the balance field is exclusively locked for this shard; at
+    /// settlement the shard's final value overwrites the main chain. No concurrent shards
+    /// on the same slot are permitted while the lock is active.
     ///
     /// # Arguments
     /// * `proxy` - The sharding proxy contract address (operator's contract).
     /// * `entity_id` - The entity whose Resource to shard.
-    /// * `resource_indices` - Which resource types to shard (0=STONE, 1=COAL, 2=WOOD, etc.).
-    ///   Must be < 56.
+    /// * `resource_indices` - Which resource types to shard (1-based: 1=STONE, 2=COAL, 3=WOOD, …).
     fn request_shard(ref self: T, proxy: starknet::ContractAddress, entity_id: ID, resource_indices: Span<u32>);
 
     /// Request sharding for a full gameplay campaign: multiple entities, mixed CRDT types.
     ///
     /// Per entity, shards:
-    /// - Resource additions+subtractions fields with **PNCounter** CRDT
-    /// - Structure.owner (field 0) with **Lock** CRDT
-    /// - Structure.base (field 1) with **Set** CRDT
-    /// - Structure.metadata (field 5) with **SetLock** CRDT
+    /// - Resource balance fields with **SetLock** CRDT (shard owns the balance; overwrites at settlement)
+    /// - Structure.owner (field 0) with **Lock** CRDT (unchanged at settlement — owner can't change)
+    /// - Structure.base (field 1) with **Set** CRDT (level-up changes written back)
+    /// - Structure.metadata (field 5) with **SetLock** CRDT (shard metadata is authoritative)
     fn request_shard_campaign(
         ref self: T,
         proxy: starknet::ContractAddress,
@@ -43,19 +44,20 @@ pub mod sharding_systems {
     use crate::models::resource::resource::Resource;
     use crate::models::structure::Structure;
 
-    /// Max resource type index (56 resource types: STONE=0, COAL=1, ...).
+    /// Max resource type (56 types, 1-based: STONE=1 … RELIC_E18=56).
     const MAX_RESOURCE_TYPE: u32 = 56;
 
-    /// Select both additions (P) and subtractions (N) fields for a resource type.
-    /// Resource type `i` maps to model fields `i*2` (additions) and `i*2+1` (subtractions).
+    /// Select the balance field for each requested resource type.
+    ///
+    /// Resource type `i` (1-based) maps to layout field index `i - 1`
+    /// (the first 56 fields of Resource are *_BALANCE in declaration order).
     fn select_resource_fields(
         fields: Span<FieldLayout>, resource_indices: Span<u32>, ref selected: Array<FieldLayout>,
     ) {
         for idx in resource_indices {
             let idx = *idx;
-            assert!(idx < MAX_RESOURCE_TYPE, "Index must be a resource type (0-55)");
-            selected.append(*fields[idx * 2]);     // additions (P counter)
-            selected.append(*fields[idx * 2 + 1]); // subtractions (N counter)
+            assert!(idx >= 1 && idx <= MAX_RESOURCE_TYPE, "resource_index must be 1-56 (resource type)");
+            selected.append(*fields[idx - 1]); // *_BALANCE field for this resource type
         }
     }
 
@@ -74,7 +76,12 @@ pub mod sharding_systems {
                 select_resource_fields(fields, resource_indices, ref selected);
                 let partial_layout = Layout::Struct(selected.span());
                 let keys: Array<felt252> = array![entity_id.into()];
-                world.dispatcher.request_sharding(proxy, [(selector, partial_layout).shard_pn(keys.span())].span());
+                // SetLock: shard exclusively owns these balance fields.
+                // At settlement the shard value overwrites main chain — no delta math,
+                // no negative balance risk.
+                world
+                    .dispatcher
+                    .request_sharding(proxy, [(selector, partial_layout).shard_set_lock(keys.span())].span());
             } else {
                 panic!("Resource layout not Struct");
             }
@@ -100,33 +107,36 @@ pub mod sharding_systems {
                 let entity_id = *entity_id;
                 let keys: Array<felt252> = array![entity_id.into()];
 
-                // Resource additions+subtractions fields → PNCounter CRDT
+                // Resource balance fields → SetLock CRDT.
+                // Shard exclusively owns these balances; settlement overwrites main chain.
+                // Game contract must prevent main chain spending of sharded resources
+                // while the shard is active (checked via component's init_count).
                 if let Layout::Struct(fields) = resource_layout {
                     let mut selected: Array<FieldLayout> = ArrayTrait::new();
                     select_resource_fields(fields, resource_indices, ref selected);
                     models
                         .append(
-                            (resource_selector, Layout::Struct(selected.span())).shard_pn(keys.span()),
+                            (resource_selector, Layout::Struct(selected.span())).shard_set_lock(keys.span()),
                         );
                 };
 
-                // Structure fields → mixed CRDT types
+                // Structure fields — mixed CRDT types
                 if let Layout::Struct(fields) = structure_layout {
-                    // owner (field 0) → Lock
+                    // owner (field 0) → Lock: shard value discarded, ownership unchanged at settlement
                     models
                         .append(
                             (structure_selector, Layout::Struct(array![*fields[0]].span()))
                                 .shard_lock(keys.span()),
                         );
 
-                    // base (field 1) → Set
+                    // base (field 1) → Set: level-up changes (troop caps etc.) written back
                     models
                         .append(
                             (structure_selector, Layout::Struct(array![*fields[1]].span()))
                                 .shard(keys.span()),
                         );
 
-                    // metadata (field 5) → SetLock
+                    // metadata (field 5) → SetLock: shard metadata is authoritative
                     models
                         .append(
                             (structure_selector, Layout::Struct(array![*fields[5]].span()))
