@@ -15,7 +15,7 @@ pub mod dev_realm_systems {
     use crate::constants::{DEFAULT_NS, RESOURCE_PRECISION};
     use crate::models::config::{StructureCapacityConfig, WorldConfigUtilImpl};
     use crate::models::position::Coord;
-    use crate::models::resource::resource::{ResourceImpl, ResourceTrait};
+    use crate::models::resource::resource::ResourceImpl;
     use crate::models::structure::{
         StructureCategory, StructureImpl, StructureMetadata, StructureOwnerStatsImpl,
     };
