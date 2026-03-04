@@ -28,7 +28,7 @@ import { getWorldKey } from "@/hooks/use-world-availability";
 import { cn } from "@/ui/design-system/atoms/lib/utils";
 import Button from "@/ui/design-system/atoms/button";
 import { BootstrapLoadingPanel } from "@/ui/layouts/bootstrap-loading/bootstrap-loading-panel";
-import type { Chain } from "@contracts";
+import { type Chain, getGameManifest } from "@contracts";
 import type { Account } from "starknet";
 
 const DEBUG_MODAL = false;
@@ -1040,12 +1040,22 @@ export const GameEntryModal = ({
     setIsForging(true);
 
     try {
-      const factorySqlBaseUrl = getFactorySqlBaseUrl(chain);
-      if (!factorySqlBaseUrl) {
-        throw new Error(`Factory SQL base URL not configured for chain: ${chain}`);
+      let contracts: Record<string, string>;
+      if (chain === "local") {
+        const manifest = getGameManifest("local");
+        contracts = {};
+        for (const c of (manifest as any).contracts ?? []) {
+          if (c.selector && c.address) {
+            contracts[normalizeSelector(c.selector)] = c.address;
+          }
+        }
+      } else {
+        const factorySqlBaseUrl = getFactorySqlBaseUrl(chain);
+        if (!factorySqlBaseUrl) {
+          throw new Error(`Factory SQL base URL not configured for chain: ${chain}`);
+        }
+        contracts = await resolveWorldContracts(factorySqlBaseUrl, worldName);
       }
-
-      const contracts = await resolveWorldContracts(factorySqlBaseUrl, worldName);
       const selector = normalizeSelector(BLITZ_REALM_SYSTEMS_SELECTOR);
       const blitzRealmSystemsAddress = contracts[selector];
       if (!blitzRealmSystemsAddress) {

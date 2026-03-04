@@ -631,13 +631,16 @@ export const UnifiedGameGrid = ({
 
   const { isOngoing, isEnded, isUpcoming } = useGameTimeStatus();
 
-  // Fetch from both chains
+  // For local development, only show local worlds; otherwise fetch from both chains.
+  // Use raw env var — env.VITE_PUBLIC_CHAIN can be overridden by localStorage (see env.ts).
+  const isLocalChain = (import.meta.env.VITE_PUBLIC_CHAIN as string) === "local";
+  const factoryChains = isLocalChain ? ["local" as const] : ["mainnet" as const, "slot" as const];
   const {
     worlds: factoryWorlds,
     isLoading: factoryWorldsLoading,
     error: factoryError,
     refetchAll: refetchFactoryWorlds,
-  } = useFactoryWorlds(["mainnet", "slot"]);
+  } = useFactoryWorlds(factoryChains);
 
   // Fetch world availability AND player registration status together
   // When playerFeltLiteral changes (user connects), React Query will refetch

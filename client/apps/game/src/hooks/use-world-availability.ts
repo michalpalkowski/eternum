@@ -10,6 +10,7 @@ import { getRpcUrlForChain } from "@/ui/features/admin/constants";
 import type { Chain } from "@contracts";
 import { useQueries } from "@tanstack/react-query";
 import { RpcProvider } from "starknet";
+import { env } from "../../env";
 
 // Note: registration_end_at uses start_main_at because registration ends when the main game starts
 const WORLD_CONFIG_QUERY = `SELECT "season_config.start_main_at" AS start_main_at, "season_config.end_at" AS end_at, "season_config.dev_mode_on" AS dev_mode_on, "blitz_registration_config.registration_count" AS registration_count, "blitz_registration_config.entry_token_address" AS entry_token_address, "blitz_registration_config.fee_token" AS fee_token, "blitz_registration_config.fee_amount" AS fee_amount, "blitz_registration_config.registration_start_at" AS registration_start_at, "season_config.start_main_at" AS registration_end_at, "mmr_config.enabled" AS mmr_enabled, "blitz_hypers_settlement_config.max_ring_count" AS max_ring_count FROM "s1_eternum-WorldConfig" LIMIT 1;`;
@@ -29,7 +30,10 @@ const calculateHyperstructuresLeft = (maxRingCount: number, createdCount: number
   return Math.max(0, total - createdCount);
 };
 
-const buildToriiBaseUrl = (worldName: string) => `https://api.cartridge.gg/x/${worldName}/torii`;
+const buildToriiBaseUrl = (worldName: string, chain?: Chain) => {
+  if (chain === "local") return env.VITE_PUBLIC_TORII;
+  return `https://api.cartridge.gg/x/${worldName}/torii`;
+};
 
 const parseMaybeHexToNumber = (v: unknown): number | null => {
   if (v == null) return null;
@@ -318,7 +322,7 @@ const checkWorldAvailability = async (
   chain?: Chain,
   playerAddress?: string | null,
 ): Promise<{ isAvailable: boolean; meta: WorldConfigMeta | null }> => {
-  const toriiBaseUrl = buildToriiBaseUrl(worldName);
+  const toriiBaseUrl = buildToriiBaseUrl(worldName, chain);
   const isAvailable = await isToriiAvailable(toriiBaseUrl);
 
   if (!isAvailable) {

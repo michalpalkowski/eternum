@@ -8,7 +8,7 @@ import { resolveWorldContracts } from "@/runtime/world/factory-resolver";
 import { normalizeSelector } from "@/runtime/world/normalize";
 import { getRpcUrlForChain } from "@/ui/features/admin/constants";
 import { ENTRY_TOKEN_LOCK_ID } from "@bibliothecadao/eternum";
-import type { Chain } from "@contracts";
+import { Chain, getGameManifest } from "@contracts";
 import { useAccount } from "@starknet-react/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Account, CallData, RpcProvider, uint256, type Call } from "starknet";
@@ -244,10 +244,23 @@ export const useWorldRegistration = ({
   }, [enabled, address, chain, config?.feeTokenAddress, feeAmount, needsFeeBalanceCheck]);
 
   /**
-   * Resolve contract addresses from factory (cached)
+   * Resolve contract addresses from factory (cached).
+   * For local chain, reads directly from the local manifest instead of querying the factory.
    */
   const resolveContracts = useCallback(async (): Promise<Record<string, string>> => {
     if (contractsCacheRef.current) return contractsCacheRef.current;
+
+    if (chain === "local") {
+      const manifest = getGameManifest("local");
+      const map: Record<string, string> = {};
+      for (const c of (manifest as any).contracts ?? []) {
+        if (c.selector && c.address) {
+          map[normalizeSelector(c.selector)] = c.address;
+        }
+      }
+      contractsCacheRef.current = map;
+      return map;
+    }
 
     const factorySqlBaseUrl = getFactorySqlBaseUrl(chain);
     if (!factorySqlBaseUrl) throw new Error("Factory SQL not available for this chain");

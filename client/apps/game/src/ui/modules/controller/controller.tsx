@@ -26,7 +26,7 @@ export const Controller = ({ className = "" }: ControllerProps) => {
       await connectWithControllerRetry(connectAsync, connectorToUse);
       console.log("Wallet connected successfully.");
 
-      if (connector) {
+      if (connector && typeof connector.controller?.username === "function") {
         connector.controller.username()?.then((name) => setAccountName(name));
       }
     } catch (error) {
@@ -41,7 +41,7 @@ export const Controller = ({ className = "" }: ControllerProps) => {
   }, [account, connectWallet, isPending]);
 
   useEffect(() => {
-    if (!connector || !connector!.controller) return;
+    if (!connector || !connector!.controller || typeof connector.controller.username !== "function") return;
 
     try {
       connector.controller.username()?.then((name) => setAccountName(name));

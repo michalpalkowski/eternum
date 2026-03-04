@@ -14,8 +14,13 @@ const toriiBaseUrlFromName = (name: string) => `${cartridgeApiBase}/x/${name}/to
 
 /**
  * Build a WorldProfile by querying the factory and the target world's Torii.
+ * For local development, skips factory queries and uses environment variables directly.
  */
 export const buildWorldProfile = async (chain: Chain, name: string): Promise<WorldProfile> => {
+  if (chain === "local") {
+    return buildLocalWorldProfile(name);
+  }
+
   const factorySqlBaseUrl = getFactorySqlBaseUrl(chain);
   const toriiBaseUrl = toriiBaseUrlFromName(name);
 
@@ -89,6 +94,46 @@ export const buildWorldProfile = async (chain: Chain, name: string): Promise<Wor
   };
 
   // Persist immediately
+  saveWorldProfile(profile);
+  return profile;
+};
+
+/**
+ * Build a WorldProfile for local development using environment variables.
+ * No factory queries — uses VITE_PUBLIC_TORII and VITE_PUBLIC_NODE_URL directly.
+ */
+const buildLocalWorldProfile = async (name: string): Promise<WorldProfile> => {
+  const toriiBaseUrl = env.VITE_PUBLIC_TORII;
+  const rpcUrl = normalizeRpcUrl(env.VITE_PUBLIC_NODE_URL);
+
+  const normalizeAddress = (addr: unknown): string | null => {
+    if (addr == null) return null;
+    if (typeof addr === "string") return addr;
+    if (typeof addr === "bigint") return "0x" + addr.toString(16);
+    return null;
+  };
+
+  // Resolve world address from local Torii
+  let worldAddress: string | null = null;
+  try {
+    const sqlApi = new SqlApi(`${toriiBaseUrl}/sql`);
+    const fetched = await sqlApi.fetchWorldAddress();
+    worldAddress = normalizeAddress(fetched);
+  } catch {
+    // ignore — will default to 0x0
+  }
+  if (!worldAddress) worldAddress = "0x0";
+
+  const profile: WorldProfile = {
+    name,
+    chain: "local",
+    toriiBaseUrl,
+    rpcUrl,
+    worldAddress,
+    contractsBySelector: {},
+    fetchedAt: Date.now(),
+  };
+
   saveWorldProfile(profile);
   return profile;
 };

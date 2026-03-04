@@ -2,6 +2,7 @@ import { getFactorySqlBaseUrl } from "@/runtime/world";
 import type { Chain } from "@contracts";
 import { useQueries } from "@tanstack/react-query";
 import { decodePaddedFeltAscii, extractContractAddress, extractNameFelt, fetchFactoryRows } from "./factory-sql";
+import { env } from "../../env";
 
 const FACTORY_QUERY = `SELECT name, address FROM [wf-WorldDeployed] LIMIT 1000;`;
 
@@ -12,6 +13,17 @@ interface FactoryWorld {
 }
 
 const fetchFactoryWorlds = async (chain: Chain): Promise<FactoryWorld[]> => {
+  // For local development, return a synthetic world entry — there is no factory
+  if (chain === "local") {
+    return [
+      {
+        name: env.VITE_PUBLIC_SLOT || "local-dev",
+        chain: "local",
+        worldAddress: null,
+      },
+    ];
+  }
+
   const factorySqlBaseUrl = getFactorySqlBaseUrl(chain);
   if (!factorySqlBaseUrl) return [];
 

@@ -26,7 +26,7 @@ export function useCartridgeUsername(): UseCartridgeUsernameReturn {
     }
 
     const controller = connectors[0] as ControllerConnector;
-    if (!controller) {
+    if (!controller || typeof controller.username !== "function") {
       setUsername(undefined);
       setIsLoading(false);
       return;

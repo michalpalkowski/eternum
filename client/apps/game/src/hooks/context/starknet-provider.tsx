@@ -22,7 +22,7 @@ const KATANA_CHAIN_ID = shortString.encodeShortString("KATANA");
 const KATANA_CHAIN_NETWORK = "Katana Local";
 const KATANA_CHAIN_NAME = "katana";
 const KATANA_RPC_URL = "http://localhost:5050";
-const isLocal = env.VITE_PUBLIC_CHAIN === "local";
+const isLocal = (import.meta.env.VITE_PUBLIC_CHAIN as string) === "local";
 
 // ==============================================
 
