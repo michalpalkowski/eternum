@@ -1,5 +1,3 @@
-use dojo::sharding::crdt::CRDType;
-
 #[starknet::contract]
 pub mod mock_sharding_proxy {
     use dojo::sharding::crdt::CRDType;
@@ -14,8 +12,7 @@ pub mod mock_sharding_proxy {
     }
 }
 
-use dojo::meta::Layout;
-use dojo::model::{Model, ModelStorage};
+use dojo::model::Model;
 use dojo::sharding::component::{IContractComponentDispatcher, IContractComponentDispatcherTrait};
 use dojo::sharding::compute_dojo_field_slot;
 use dojo::utils::entity_id_from_keys;
@@ -31,15 +28,41 @@ use snforge_std::{
 use starknet::ContractAddress;
 use crate::alias::ID;
 use crate::constants::{DEFAULT_NS, DEFAULT_NS_STR};
-use crate::models::resource::resource::{Resource, ResourceImpl};
+use crate::models::resource::resource::{Resource, ResourceImpl, Resource_fields};
+use crate::models::structure::{Structure_fields};
 use crate::systems::sharding::contracts::{
-    IShardingSystemsDispatcher, IShardingSystemsDispatcherTrait,
+    IShardingSystemsDispatcher, IShardingSystemsDispatcherTrait, shard_helpers,
 };
+
+const NS_HASH: felt252 = 0x0; // computed lazily in helpers via Model::selector
 
 fn namespace_def() -> NamespaceDef {
     NamespaceDef {
         namespace: DEFAULT_NS_STR(),
-        resources: [TestResource::Model("Resource"), TestResource::Contract("sharding_systems"),]
+        resources: [
+            TestResource::Model("Resource"),
+            TestResource::Model("Structure"),
+            TestResource::Model("StructureBuildings"),
+            TestResource::Model("ProductionBoostBonus"),
+            TestResource::Model("TradeCount"),
+            TestResource::Model("VillageTroop"),
+            TestResource::Model("VillageRaidImmunity"),
+            TestResource::Model("Quantity"),
+            TestResource::Model("Wonder"),
+            TestResource::Model("StructureVillageSlots"),
+            TestResource::Model("QuantityTracker"),
+            TestResource::Model("ResourceAllowance"),
+            TestResource::Model("ResourceList"),
+            TestResource::Model("HyperstructureRequirements"),
+            TestResource::Model("PlayerConstructionPoints"),
+            TestResource::Model("Building"),
+            TestResource::Model("ExplorerTroops"),
+            TestResource::Model("Trade"),
+            TestResource::Model("ResourceArrival"),
+            TestResource::Model("Market"),
+            TestResource::Model("Liquidity"),
+            TestResource::Contract("sharding_systems"),
+        ]
             .span(),
     }
 }
@@ -59,6 +82,10 @@ fn setup_world() -> WorldStorage {
     world
 }
 
+fn ns_hash() -> felt252 {
+    dojo::utils::bytearray_hash(@"s1_eternum")
+}
+
 fn deploy_mock_proxy() -> ContractAddress {
     let contract_class = declare("mock_sharding_proxy").unwrap().contract_class();
     let (addr, _) = contract_class.deploy(@array![]).unwrap();
@@ -73,16 +100,9 @@ fn get_sharding_dispatcher(
 }
 
 /// Get the storage slot for resource_type `i` (1-based) BALANCE field.
-/// Field index in layout = i - 1 (balance fields are first 56 fields of Resource).
 fn resource_balance_slot(ref world: WorldStorage, entity_id: ID, resource_type: u32) -> felt252 {
-    let ns_hash = dojo::utils::bytearray_hash(@"s1_eternum");
-    let model_selector = Model::<Resource>::selector(ns_hash);
-    let layout = Model::<Resource>::layout();
-    let field_selector = if let Layout::Struct(fields) = layout {
-        (*fields[resource_type - 1]).selector
-    } else {
-        panic!("Resource layout not Struct")
-    };
+    let model_selector = Model::<Resource>::selector(ns_hash());
+    let field_selector = ResourceImpl::balance_selector(resource_type.into());
     let dojo_entity_id = entity_id_from_keys(@entity_id);
     compute_dojo_field_slot(model_selector, dojo_entity_id, field_selector)
 }
@@ -108,9 +128,10 @@ fn test_request_shard() {
     let proxy_address = deploy_mock_proxy();
     let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
 
-    // Request shard for STONE (type 1) and WOOD (type 3).
+    // Request shard for STONE (type 1) and WOOD (type 3) via shard_helpers.
+    let models = [shard_helpers::resource(ns_hash(), entity_id, array![1, 3].span())].span();
     start_cheat_caller_address(system_addr, caller());
-    dispatcher.request_shard(proxy_address, entity_id, array![1, 3].span());
+    dispatcher.request_shard(proxy_address, models);
     stop_cheat_caller_address(system_addr);
 
     // Balances should remain readable and unchanged after locking.
@@ -134,8 +155,9 @@ fn test_shard_set_lock_overwrites() {
     let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
 
     // Lock STONE (type 1) for the shard.
+    let models = [shard_helpers::resource(ns_hash(), entity_id, array![1].span())].span();
     start_cheat_caller_address(system_addr, caller());
-    dispatcher.request_shard(proxy_address, entity_id, array![1].span());
+    dispatcher.request_shard(proxy_address, models);
     stop_cheat_caller_address(system_addr);
 
     // Simulate main chain independently changing STONE to 80 (e.g. spending 20).
@@ -168,8 +190,9 @@ fn test_shard_spend_no_underflow() {
     let proxy_address = deploy_mock_proxy();
     let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
 
+    let models = [shard_helpers::resource(ns_hash(), entity_id, array![1].span())].span();
     start_cheat_caller_address(system_addr, caller());
-    dispatcher.request_shard(proxy_address, entity_id, array![1].span());
+    dispatcher.request_shard(proxy_address, models);
     stop_cheat_caller_address(system_addr);
 
     // Shard spends 750: final balance = 250 (lower than initial — was impossible with Add CRDT).
@@ -198,8 +221,9 @@ fn test_shard_selective_fields_only() {
     let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
 
     // Shard STONE only (type 1), NOT WOOD.
+    let models = [shard_helpers::resource(ns_hash(), entity_id, array![1].span())].span();
     start_cheat_caller_address(system_addr, caller());
-    dispatcher.request_shard(proxy_address, entity_id, array![1].span());
+    dispatcher.request_shard(proxy_address, models);
     stop_cheat_caller_address(system_addr);
 
     let stone_slot = resource_balance_slot(ref world, entity_id, 1);
@@ -226,8 +250,9 @@ fn test_finish_shard() {
     let proxy_address = deploy_mock_proxy();
     let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
 
+    let models = [shard_helpers::resource(ns_hash(), entity_id, array![1].span())].span();
     start_cheat_caller_address(system_addr, caller());
-    dispatcher.request_shard(proxy_address, entity_id, array![1].span());
+    dispatcher.request_shard(proxy_address, models);
     stop_cheat_caller_address(system_addr);
 
     // finish_shard should not panic.
@@ -248,8 +273,9 @@ fn test_cancel_shard_preserves_balance() {
     let proxy_address = deploy_mock_proxy();
     let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
 
+    let models = [shard_helpers::resource(ns_hash(), entity_id, array![1].span())].span();
     start_cheat_caller_address(system_addr, caller());
-    dispatcher.request_shard(proxy_address, entity_id, array![1].span());
+    dispatcher.request_shard(proxy_address, models);
     stop_cheat_caller_address(system_addr);
 
     let stone_slot = resource_balance_slot(ref world, entity_id, 1);
@@ -263,4 +289,38 @@ fn test_cancel_shard_preserves_balance() {
     // Balance must remain unchanged after cancel.
     let stone = ResourceImpl::read_balance(ref world, entity_id, 1);
     assert!(stone == 500, "Cancel: balance should be unchanged at 500, got {}", stone);
+}
+
+/// Verify that macro-generated field selector constants match selector!() values.
+#[test]
+fn test_field_selector_constants() {
+    // Resource field constants
+    assert!(Resource_fields::STONE_BALANCE == selector!("STONE_BALANCE"), "STONE_BALANCE mismatch");
+    assert!(Resource_fields::COAL_BALANCE == selector!("COAL_BALANCE"), "COAL_BALANCE mismatch");
+    assert!(Resource_fields::WOOD_BALANCE == selector!("WOOD_BALANCE"), "WOOD_BALANCE mismatch");
+
+    // Structure field constants
+    assert!(Structure_fields::OWNER == selector!("owner"), "owner mismatch");
+    assert!(Structure_fields::BASE == selector!("base"), "base mismatch");
+    assert!(Structure_fields::METADATA == selector!("metadata"), "metadata mismatch");
+}
+
+/// request_shard_all shards all game models with default Set CRDT.
+#[test]
+fn test_request_shard_all() {
+    let mut world = setup_world();
+    let entity_id: ID = 42;
+
+    ResourceImpl::write_balance(ref world, entity_id, 1, 100);
+
+    let proxy_address = deploy_mock_proxy();
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+
+    start_cheat_caller_address(system_addr, caller());
+    dispatcher.request_shard_all(proxy_address, array![entity_id].span());
+    stop_cheat_caller_address(system_addr);
+
+    // Balance should be unchanged — shard just initialized, no settlement yet.
+    let stone = ResourceImpl::read_balance(ref world, entity_id, 1);
+    assert!(stone == 100, "STONE should be 100 after shard_all init");
 }
