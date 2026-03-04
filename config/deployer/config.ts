@@ -1715,7 +1715,8 @@ export const grantCollectibleLootChestMinterRole = async (config: Config) => {
     return;
   }
 
-  if (!config.config.blitz?.registration?.collectibles_lootchest_address) {
+  const lootChestAddr = config.config.blitz?.registration?.collectibles_lootchest_address;
+  if (!lootChestAddr || BigInt(lootChestAddr) === 0n) {
     console.log(chalk.yellow("⏭️  Skipping minter role grant (No loot chest address configured)"));
     return;
   }
@@ -1754,7 +1755,8 @@ export const grantCollectibleEliteNftMinterRole = async (config: Config) => {
     return;
   }
 
-  if (!config.config.blitz?.registration?.collectibles_elitenft_address) {
+  const eliteNftAddr = config.config.blitz?.registration?.collectibles_elitenft_address;
+  if (!eliteNftAddr || BigInt(eliteNftAddr) === 0n) {
     console.log(chalk.yellow("⏭️  Skipping minter role grant (No elite NFT address configured)"));
     return;
   }

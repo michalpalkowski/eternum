@@ -82,8 +82,8 @@ export const LocalEternumGlobalConfig: Config = {
   },
   season: {
     ...CommonEternumGlobalConfig.season,
-    startSettlingAfterSeconds: 59, // 1 minute
-    startMainAfterSeconds: 60,
+    startSettlingAfterSeconds: 5, // 5 seconds (overridden by blitz registration_start_at)
+    startMainAfterSeconds: 15, // 15 seconds (overridden by blitz registration_end_at)
     durationSeconds: 60 * 60 * 24 * 30, // 1 month
     pointRegistrationCloseAfterEndSeconds: 60 * 10, // 10 minutes
   },
@@ -124,11 +124,18 @@ export const LocalEternumGlobalConfig: Config = {
   },
   blitz: {
     ...CommonEternumGlobalConfig.blitz,
+    mode: {
+      on: true,
+    },
     registration: {
       ...CommonEternumGlobalConfig.blitz.registration,
-      registration_delay_seconds: 20,
-      registration_period_seconds: 60 * 2,
-      fee_token: getSeasonAddresses(process.env.VITE_PUBLIC_CHAIN! as Chain)!.strk!,
+      fee_amount: 0n,
+      registration_delay_seconds: 5, // 5 seconds before registration opens
+      registration_period_seconds: 10, // 10 seconds registration window
+      collectible_cosmetics_address: "0x0",
+      collectible_timelock_address: "0x0",
+      collectibles_lootchest_address: "0x0",
+      collectibles_elitenft_address: "0x0",
     },
   },
 };
