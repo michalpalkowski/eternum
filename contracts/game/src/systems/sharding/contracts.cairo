@@ -255,6 +255,26 @@ pub mod shard_helpers {
         (Model::<Liquidity>::selector(ns_hash), Model::<Liquidity>::layout()).shard(keys)
     }
 
+    // ── Building ring helpers ──────────────────────────────────────────
+
+    /// Pre-register all 6 building positions adjacent to center (10,10)
+    /// for a given structure's map coordinates.
+    ///
+    /// Building center is always (10, 10) which is an even row.
+    /// Even-row hex neighbors: E(11,10) NE(11,11) NW(10,11) W(9,10) SW(10,9) SE(11,9)
+    pub fn building_ring1(
+        ns_hash: felt252, outer_col: u32, outer_row: u32,
+    ) -> Array<ShardModel> {
+        array![
+            building_all(ns_hash, outer_col, outer_row, 11, 10), // East
+            building_all(ns_hash, outer_col, outer_row, 11, 11), // NorthEast
+            building_all(ns_hash, outer_col, outer_row, 10, 11), // NorthWest
+            building_all(ns_hash, outer_col, outer_row, 9, 10),  // West
+            building_all(ns_hash, outer_col, outer_row, 10, 9),  // SouthWest
+            building_all(ns_hash, outer_col, outer_row, 11, 9),  // SouthEast
+        ]
+    }
+
     // ── Compose all (single entity_id key) ────────────────────────────
 
     /// ALL game models keyed by entity_id with default Set CRDT.
@@ -282,6 +302,7 @@ pub mod sharding_systems {
     use dojo::world::IWorldDispatcherTrait;
     use crate::alias::ID;
     use crate::constants::DEFAULT_NS;
+    use crate::models::structure::{StructureBaseStoreImpl, StructureBaseTrait};
 
     #[abi(embed_v0)]
     impl ShardingSystemsImpl of super::IShardingSystems<ContractState> {
@@ -295,7 +316,7 @@ pub mod sharding_systems {
         fn request_shard_all(
             ref self: ContractState, proxy: starknet::ContractAddress, entity_ids: Span<ID>,
         ) {
-            let world = self.world(DEFAULT_NS());
+            let mut world = self.world(DEFAULT_NS());
             let ns_hash = dojo::utils::bytearray_hash(@"s1_eternum");
 
             // Collect all models into one request — proxy handles event chunking.
@@ -305,6 +326,18 @@ pub mod sharding_systems {
                 for m in entity_models {
                     models.append(m);
                 };
+
+                // Also register Building positions (ring 1 around center) so that
+                // buildings created on the shard are settled back to main chain.
+                let base = StructureBaseStoreImpl::retrieve(ref world, *entity_id);
+                if base.exists() {
+                    let building_models = super::shard_helpers::building_ring1(
+                        ns_hash, base.coord_x, base.coord_y,
+                    );
+                    for m in building_models {
+                        models.append(m);
+                    };
+                }
             };
             world.dispatcher.request_sharding(proxy, models.span());
         }
