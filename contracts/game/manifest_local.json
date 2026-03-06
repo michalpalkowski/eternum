@@ -927,50 +927,10 @@
       "type": "struct"
     },
     {
-      "kind": "struct",
-      "members": [
-        {
-          "kind": "data",
-          "name": "storage_changes",
-          "type": "core::array::Array::<(core::felt252, core::felt252)>"
-        }
-      ],
-      "name": "dojo::sharding::component::sharding_component::ContractComponentUpdated",
-      "type": "event"
-    },
-    {
-      "kind": "struct",
-      "members": [
-        {
-          "kind": "data",
-          "name": "contract_address",
-          "type": "core::starknet::contract_address::ContractAddress"
-        },
-        {
-          "kind": "data",
-          "name": "slots_to_change",
-          "type": "core::array::Array::<(core::felt252, core::felt252)>"
-        }
-      ],
-      "name": "dojo::sharding::component::sharding_component::ContractSlotUpdated",
-      "type": "event"
-    },
-    {
       "kind": "enum",
       "name": "dojo::sharding::component::sharding_component::Event",
       "type": "event",
-      "variants": [
-        {
-          "kind": "nested",
-          "name": "ContractSlotUpdated",
-          "type": "dojo::sharding::component::sharding_component::ContractSlotUpdated"
-        },
-        {
-          "kind": "nested",
-          "name": "ContractComponentUpdated",
-          "type": "dojo::sharding::component::sharding_component::ContractComponentUpdated"
-        }
-      ]
+      "variants": []
     },
     {
       "name": "dojo::sharding::request::CRDVariant",
@@ -14853,7 +14813,7 @@
           ]
         }
       ],
-      "address": "0x5bf9d31df492551c15f29a3ad89b3912f03700bcda6544cb8690704c78c3e18",
+      "address": "0x1b20c300d95e5d6125596ac122010acf264d6edb51124042d0deb1b97520b3f",
       "class_hash": "0x754a8901be042be543786f2038eec4d833a5c069f865357be860a0ffc5521c2",
       "init_calldata": [],
       "selector": "0x39779154845217b9230e347a39ab6e47e8f2d46c1fd80c6996d13988857d770",
@@ -15122,7 +15082,7 @@
           ]
         }
       ],
-      "address": "0x2132c9bd0c613170bd100a39c7eca75a93bb0405ce060af6cc949ff7d5c7846",
+      "address": "0x5c129dc7bafa6d3693eac309c1df3596977e6d5d53303b5e53dd49354e4d1ef",
       "class_hash": "0x5332970c189cf4f9050cdb1f731578f883a36cce0aed23ea7e0daf2739e7bad",
       "init_calldata": [],
       "selector": "0x44475a775d79049bbe99567b7c00a1e4d8d582cade61a8aec07ca3bb234f6e6",
@@ -15393,7 +15353,7 @@
           ]
         }
       ],
-      "address": "0xcf670f1ec740c6e67985dda0716c4295df3cd88a47c72ddeade4961b2edd24",
+      "address": "0x7be0a6889695a0613024fd9bed024fac4ba8e13e12db1395f10eb1e0656ed85",
       "class_hash": "0x68960eb6338282a127ef20a949c3e39064b1d9856414918a62290b71a7a8801",
       "init_calldata": [],
       "selector": "0x3414be5ba2c90784f15eb572e9222b5c83a6865ec0e475a57d7dc18af9b3742",
@@ -17232,7 +17192,7 @@
           ]
         }
       ],
-      "address": "0x161986bde4db632c79c768f91159065d3e9faf469a1238352b7e598eb33e3d3",
+      "address": "0x3aa7b5f6259becd9aa6292699e5c1ef6027ecde16bcf90cfec118aea054a8a6",
       "class_hash": "0x2b03a8889720a3f8bdde688e111bcb07d653fd6551fccb33f66383a53bea699",
       "init_calldata": [],
       "selector": "0x1cb4608b18b40cb6420be7cf67ff21abe727a2bf599f2727d8eed5e36099fc2",
@@ -17477,8 +17437,8 @@
           ]
         }
       ],
-      "address": "0x224a2c5063738cf2a63b6805619903e27d43dfdd820b91716b434768d2dabf3",
-      "class_hash": "0x467529c3f245d39a0572a525b996e4e73b94759432d65dab37e8ec73915255b",
+      "address": "0x6090d91a20c97be128fd689e21f433c2c722d83f49f981c83b0d121bae2fd4b",
+      "class_hash": "0x27cf108c6296820af3ed66954ab0507fdaec28fda65616801445df4c536a5ed",
       "init_calldata": [],
       "selector": "0x30bf08de95e8ce19d3b50d7c28085e21906766e5cfe481a383a5d5a45a019e9",
       "systems": [
@@ -17677,8 +17637,8 @@
           ]
         }
       ],
-      "address": "0x6362ede1d12abf8f3a66776a21fb077e109934e85a91dacd356f9e9bddaeac5",
-      "class_hash": "0x4ddd1d544cdcd8321f0e17092446617bdd0ad65e82c513ab96546be11b2abcf",
+      "address": "0x76a34d6de7d34cd42afd44d616ee41ef780d691ab12a6f1779c0d517274698a",
+      "class_hash": "0x53c1dd2f91c570dd588792bed179cae57a801c5daf68426cfec3f3fa130962d",
       "init_calldata": [],
       "selector": "0x11f834f0265a2bcc31088ba6f8cf52a2a160b55c3fcf102a6056ed2e0b9066a",
       "systems": [
@@ -17889,7 +17849,7 @@
           ]
         }
       ],
-      "address": "0x79c2855a45d6722034f2f3dc80dd3e3831aeb901877492c5b2a7e104e96198f",
+      "address": "0x3f9b46fe732ca878ac27f62ce38128bf9541a44b9c9fbc4475a2892b2913ec8",
       "class_hash": "0x60f483463c261d91cefdd9ea97178eda4609b6eb6c2585e54daba3b31fca888",
       "init_calldata": [],
       "selector": "0x32279d1c73c6356f5f15ff0e59adc6bfc45ffcde796c785452f6944b9b36ef1",
@@ -18103,7 +18063,7 @@
           ]
         }
       ],
-      "address": "0x2970e75c9f2727e43e5f087c4d3342f1cf88cd7cc6aff688d717f9e86db593f",
+      "address": "0x4936d5a1d224d27319700bc636a719ebb1c3d5edff50b3b976949cb3d28ccb1",
       "class_hash": "0x68c470e3ba353871c52ae3b059d18ed1b53f9af37e093210a71d8b43ac1d6de",
       "init_calldata": [],
       "selector": "0x4d5cfcb90997c42faaec636a440b73118f54d7e5321a8e6e134bdb0ac946333",
@@ -18368,7 +18328,7 @@
           ]
         }
       ],
-      "address": "0x1e685105cde0f1b8141f4822da27b27d91e399dcc78f891a9953aa6b49b1e03",
+      "address": "0x1105adec8a56152735074866cf0c0cb64f07db404de0c86ae17f56fe70c594e",
       "class_hash": "0x578558cc71c5a71fc2c7ce097e5a67d6d85ccb50b48aae654abc5ac525fdcb3",
       "init_calldata": [],
       "selector": "0x15516acac71fbb80f953b9a8fac7d65ceff957f7f2d568fecbccba36bec6263",
@@ -18890,7 +18850,7 @@
           ]
         }
       ],
-      "address": "0x497efb5f836f50903d40a61355490682e5ec5a06deb0032b0e79e4ec2797b10",
+      "address": "0x3f93772d2b54e747e2b38447164eaf406b7364312bb50697d016cd2e1db33af",
       "class_hash": "0x30088055d9a9b11c6b35b4ef0f93ba964b0cf1da57f53f316dcb4278de97f5e",
       "init_calldata": [],
       "selector": "0x4de7ee78f9f01b8f7b98c172552cc0f7b81c8706ffc85e7b831021e820420d1",
@@ -19201,7 +19161,7 @@
           ]
         }
       ],
-      "address": "0x19f684ce790bf0930848315681c26feb328a8ed0ff326d4d8aca53e2e8ccefa",
+      "address": "0x5620d3d871e23c5e6d2ac69f5d756620e66936de4fc28a0df97e2049136ef7f",
       "class_hash": "0x611fa3a9e78b047001136ca90f3a0a5a2f04f79feb4d793b49ea54f9c96bbde",
       "init_calldata": [],
       "selector": "0x4bdd8bcbb935577aba3b974bd7e906698504fcb75e0c3aa34913c21342b4498",
@@ -19445,7 +19405,7 @@
           ]
         }
       ],
-      "address": "0x63f5d11fddcccbab7421a9fcef5efab0e6400259990f0ff2619c2fe442b0470",
+      "address": "0x43ccf16bd93265f6c5c4f0893c886e81efa72a815a5664dd04e8783e2c878cf",
       "class_hash": "0x36fdd3aca7b29f354469e52dbd6737b3ddd3b39f989f983aa38dc8d1361128f",
       "init_calldata": [],
       "selector": "0xf480ba1a0c3e5b85a74ba14244a1653f886654d67c71b4dd0804d9eecf1cd9",
@@ -19964,7 +19924,7 @@
           ]
         }
       ],
-      "address": "0x2d10a7d0eff0bd6ad76a71b6b0a6aa1e800ceb2a7c18d403c3a851146100dfb",
+      "address": "0x68f30a4b880369d9121025f3181bdabb58c44e0819f4602d31ceb98689794f5",
       "class_hash": "0x6927cf9da26d61b03b1ab638c6c9513887c42867e226673631d6fe8ae094a3c",
       "init_calldata": [],
       "selector": "0x567d970e2796f641f9a9c23fa16378ddaee5c8a7d27ac4e3edbd4dfa25a1743",
@@ -20175,7 +20135,7 @@
           ]
         }
       ],
-      "address": "0x8969833a70f5d160666a1de56f010b2106f6856e27e23a24c3fe275ded9055",
+      "address": "0x46cf4e53e8c2faad279bbe5538b572ed827475a09f64f83c67d73fba9d14ef7",
       "class_hash": "0x633a939859e99d5670a6c32fa5c198ddb9d32e61fe884a855d2540313cc7f1e",
       "init_calldata": [],
       "selector": "0x628d6becd2c6fa1835109109b92cc642dfe69ab9194ca331cf7c510d9e2b5ce",
@@ -20376,7 +20336,7 @@
           ]
         }
       ],
-      "address": "0x7547969dedeb0f3e9b2560bfa002f8549700e28a9ae3860421fefaa983052fb",
+      "address": "0x6ebd1bbb7d8d62221c21a27da49fdb7e8ab82a98af15e0d122bdea73ce1f143",
       "class_hash": "0x68efc734b937fbfd29559e06d2abd71a8dfbce2e860cbf17d0ded265dc67626",
       "init_calldata": [],
       "selector": "0x45b86c7ee3f36393c4d14a0da3c58fdf406677137f1d840c53f01e8544e3b80",
@@ -20596,7 +20556,7 @@
           ]
         }
       ],
-      "address": "0x624af89f6346c2953416b38e88e17ae541a3dd1b7c48a55ea7e79f2608a5be5",
+      "address": "0x43d7743d51cacb32b64aec247695344c5f6c1702bfa9ac3782b835cc0053be0",
       "class_hash": "0x4d63129a76088f9f2092286d4814822ed9d56ddf9e7125d81d05d4cc4956bb6",
       "init_calldata": [],
       "selector": "0x5045fbdb3ad9b695ea6f218e57a3ca2ce575a2964f30e15f2e710f691aa0622",
@@ -20801,7 +20761,7 @@
           ]
         }
       ],
-      "address": "0x30973aa1becda607ceea10c07a12ed1b1c418b662142089fcaffe41e73b45ed",
+      "address": "0x7cf4563644378238546465d50219295dd9686ab41d9723030d56ebba7e26dfe",
       "class_hash": "0x708c67ca62c1305467a1917eca69cca87d00d6e48518a3e5c0b9bb2b2631fef",
       "init_calldata": [],
       "selector": "0x583f59a664c37a0eb068b8a2fea20d6652fb22e8cbc1b1ffe936ebd26c545bf",
@@ -21192,7 +21152,7 @@
           ]
         }
       ],
-      "address": "0x2486751164fd35ca76837e2d28a3dbd6267ca4b6b1596be0a8195f22219296",
+      "address": "0x64395c463b28f517222a17c1e476ff216a45d60fb452c550e753cc1f11ceb55",
       "class_hash": "0x1b7cdcbfa4ea34add96295b2ee4917757bada0fcbcebc111a053a613bcbdfb",
       "init_calldata": [],
       "selector": "0x42230b5f7ccc6ce02a4ecb99c31d92ddd0f24ab472896afd617a2a763cf4179",
@@ -21775,7 +21735,7 @@
           ]
         }
       ],
-      "address": "0x544834ab9d5b91031804d444a43afc344188273e812b0e11c7c7db3aa3f213b",
+      "address": "0x4d074ce1c45cbf8a6eefabeb751b5576b1057cad865cac7ced29cc2441e11a1",
       "class_hash": "0x6ef9414bfbc38a950993e3e76b41bf2d6eae7b3330d0e818a319e7cda6b08f4",
       "init_calldata": [],
       "selector": "0x6d70095d0a6ca6efc41633bafa4ac5202f1f83c75afbba78987b58f495a4c0",
@@ -22041,7 +22001,7 @@
           ]
         }
       ],
-      "address": "0x3baed307681d743d8241234f0ee7dba576cdc69858c54cd0b6513d4b4491502",
+      "address": "0x5f8a0bce3644cdd200266dd985ac942c9d81522b342ba95160b269275b98d1f",
       "class_hash": "0x6a52a228cd97c90eada0b752ae98d2b26bdf46b8b80cb6c3352a30052c5452",
       "init_calldata": [],
       "selector": "0x4bb1850a95a41d6b0c7992a0c75bb1212f0ea054dc04866d6a6392cccec58b3",
@@ -22275,7 +22235,7 @@
           ]
         }
       ],
-      "address": "0x65a84d1e8d0ed96844dd1bac3fa6fcf608b8f410ac3855e3839030dc07d551b",
+      "address": "0x3931547a7b3e0e6eda88435c99dceffe01a8f1dc986c57830358d21542924bc",
       "class_hash": "0x11ee020704f431dacd83037be23c418c4283f1e5863b6ef7721f466e2fb55e7",
       "init_calldata": [],
       "selector": "0x3b4cc14cbb49692c85e1b132ac8536fe7d0d1361cd2fb5ba8df29f726ca02d2",
@@ -22793,7 +22753,7 @@
           ]
         }
       ],
-      "address": "0x43a003bd47e9ae2c6c042d0d671590e85ef7d9f33cc6fe6e0e3d69f64f09e80",
+      "address": "0x756d917bd39756fe03c27e030f8caacb505784791c6b4186fad304673da81fe",
       "class_hash": "0x3eb87078276da1bad6e508d689fd29655fc7712d78f6271c596e882c6f226a8",
       "init_calldata": [],
       "selector": "0x6c7d7c49c05a128b5ef90b795f638288b11b478ce950a706f6c1db5356ef6a6",
@@ -23066,7 +23026,7 @@
           ]
         }
       ],
-      "address": "0x1211a4cbbd8f57b5e56323a3d742e3a2bc0fa76a5de096b76fd12eeffc2d019",
+      "address": "0x1729561ee6ea5bb0087c7f42a78c71a0e00d52ffbc76b75b94508aea2636b12",
       "class_hash": "0x3f66b6f8e807011926a94b7219ab8f5521c8c83c5f3cc5b8fe475165912c031",
       "init_calldata": [],
       "selector": "0x632480e29dba9c95a8b4e4ba0c7ad48bd5abdd3906211ec6f8a5350249b9d0",
@@ -23352,7 +23312,7 @@
           ]
         }
       ],
-      "address": "0x1bc326cba2e78f37ae102001d06bf00b4a7951a9d2ce1d10bd4042f6d083aa3",
+      "address": "0xb17c0cd5f1496c633638311e6c1fabab017b95d9b1fbfe29225ec5277c7d46",
       "class_hash": "0x7ca16a0a08f6b972001ea2f109c44d6259bc0438508e9aea14231351ae9c22d",
       "init_calldata": [],
       "selector": "0x4f94ba58902810acb653eeeb2a36e5f8f5a7096ceac7a2705c52732281e3cd2",
@@ -23741,7 +23701,7 @@
           ]
         }
       ],
-      "address": "0x489eaf2b9a24a92a3ab483dcda5e5a7353982c2e6e515c1e4ded9929b6ec3da",
+      "address": "0x4bbbc113be445f8dc3f1b8b1caad86fef1cdb19a0440f135a7d0c263b948711",
       "class_hash": "0x7644abd4b0dafc089f3ca3aa650b95556742595eb00a81ceeb7cf89960d1cda",
       "init_calldata": [],
       "selector": "0x626970a749fd6b8230875061236c1a9446ae65287beb6107d5b88e5ca078019",
@@ -23945,7 +23905,7 @@
           ]
         }
       ],
-      "address": "0x22c175a7c81a57042225a71bd3b964b22eb345e88390429162017660357594a",
+      "address": "0x791436ddfc5c82d40f49b45e4595174ea64667d7fa2fec4ee500292d0780720",
       "class_hash": "0x37379b5a9dc17a20c3d50fb8ef5089a28a9329f4c569fd9bb391bc3ab341c92",
       "init_calldata": [],
       "selector": "0x44e1edf9ca51b11a8c1d6ffc341d3248fdbeebc7e7d3ee6314fee33174860c4",
@@ -24266,8 +24226,8 @@
           ]
         }
       ],
-      "address": "0x481abc10191d56ba95b45ea9cb74b723019eac65976814fa1c26a7fb834b68c",
-      "class_hash": "0x51f6827675eaa8959db27030685136c6e4c7250031f78b5a5cc121515ee1973",
+      "address": "0x1cde433a14991a69fa03f446fa3ae4d0ea74ae25d22a237ceedb625ccd00dc4",
+      "class_hash": "0x7dc17be2f8a60143978660ce518aecbd03cf83c42178235c6df11100b52c719",
       "init_calldata": [],
       "selector": "0x9afc8a5def42a92120c6b38ad4c2027903ee56147bf6f2d5dfd10335c97298",
       "systems": [
@@ -24468,7 +24428,7 @@
           ]
         }
       ],
-      "address": "0x6c17a4eb09ee97b9bc78fef6c9ade1e5d7ee448c1bcdc065764089da790fdb",
+      "address": "0x40fff6685d2e022e710ceb10f509f68522b929679d3e713ea66f5c0e79db136",
       "class_hash": "0x31b9a9634ee53ed0397639acea0d3947b52953a6325e23cc2eb292ec0392d20",
       "init_calldata": [],
       "selector": "0x15f0efd5ca9fd9dc6685e7555bc35ed59422d97e19589d4b218b5f7a36096fd",
@@ -24704,7 +24664,7 @@
           ]
         }
       ],
-      "address": "0x71c52933889bc1d8b11ac3a6c8bd7920b68a44fee42ad74da07371b191e2735",
+      "address": "0x38e0e0c6d0fe0a4bce49c3fd809a7fb0a2e6dbd2f86868d9fcb30a20856bb68",
       "class_hash": "0xc18b24816646847f9f5061c06ffd42a80bb5ed001616f1862f2393bf735f40",
       "init_calldata": [],
       "selector": "0x187f170f62cb2f89334e291ddc0d0f388a855abcdd2b911425fed8304d3fdc3",
@@ -24969,7 +24929,7 @@
           ]
         }
       ],
-      "address": "0x49e63325252902f82b06739f9ab61e5cb9759a5ef89458f189d921369276541",
+      "address": "0x1dbb2dc790186dcc9481d5fe19c7bb3b2a0e9f0298d639c225ae7536e5e2258",
       "class_hash": "0x63395002fa5fe043e1ddb9c1081a04ef4687b3810a5b1726491ed2a11a575e0",
       "init_calldata": [],
       "selector": "0x25205919a9c1be9b6b4c75d8435d21e748b4144575e3ed50d453ebd586f1467",
@@ -25289,7 +25249,7 @@
           ]
         }
       ],
-      "address": "0x22b2c59fbe66557752b0513d9a0196520512e191527091c0bf41f7346be5e95",
+      "address": "0x3ef76c6d389560f45849201e9e119597652d835e940ce8334f091f750d3248c",
       "class_hash": "0x572053045dbf42b0363ae487960733000733dc52559b91bdeb59d1170c47be2",
       "init_calldata": [],
       "selector": "0x473dc1d8bca81e2a2d92011b4171ffe608d47dcde63f7d112f03bb767b57aea",
@@ -25755,7 +25715,7 @@
           ]
         }
       ],
-      "address": "0x10f5b0b8ef5bb593c1c75948fa5788cb0d863da6edbb08c8af6f42e745142ab",
+      "address": "0x2ff6a20e717c4f7836f2f0d1d79ea8aa3c7af6d3436646d01524c25c32f9886",
       "class_hash": "0x19df6e33272e9c612496b2e831661a5bff4e558450b93033fdd26a43f5ad65",
       "init_calldata": [],
       "selector": "0x49b9809fc3839b4eb765c5d1db1d1a835678574e42bf24bf70235cecf2f8437",
@@ -26088,7 +26048,7 @@
           ]
         }
       ],
-      "address": "0x71af52e04bb77581bce5dc637f4c9a9d423d41ab81fcdf9b05aaf8d334eaec0",
+      "address": "0x57cdb683749ee838e9d18793dc95dbd8851acfffbb1e8d71c8e1c04ac8256f6",
       "class_hash": "0x60730d9fb643e7fafcaf0107630d38ca6619d786af9988b1ecccaf94a782935",
       "init_calldata": [],
       "selector": "0x522c38540c126c2f193f496d4eb1882a63cdc02997f64c298d41622b26ded2b",
@@ -26607,7 +26567,7 @@
           ]
         }
       ],
-      "address": "0x2c44b6c29bc8a111e75099521946c80373abe25c2f3787311e4ec475527430e",
+      "address": "0x368aec1612c3177a1b21ec37f55a6152031bc067c28ed8c3bcbd3617c8dd30e",
       "class_hash": "0x73968fb044c09b98d295ddc1a5f429e6c5dc41cc4f29c6cab8dd77db76784e3",
       "init_calldata": [],
       "selector": "0x1a8cd271b73203df04608c15bc7be031b756ed2ffc25bab756cf9ff6c8731d0",
@@ -26858,7 +26818,7 @@
           ]
         }
       ],
-      "address": "0x7f6821d51a8e92497c945aa7a1ce059281bab17dcd67b48c323f1d07e077e93",
+      "address": "0x4f6589882a829b5338b2c3f75aa30895089b86f6e33980bf85b85f69886b632",
       "class_hash": "0x7ab3f548d6b864f60c7e84775cb2c6efb98277ad43430fd325d119aea168365",
       "init_calldata": [],
       "selector": "0x2cba999742f3b0dad2f036c7ea44826e236555cf5d82930faadcf43260524",
@@ -27376,7 +27336,7 @@
           ]
         }
       ],
-      "address": "0xdea53331ca86635bba57e7c590f29da9ce589c81b6db42327a021b7941703d",
+      "address": "0x25760172e67fb199eefd3ffa04ff1fd7cdbf801ac70de2effda994b728e061b",
       "class_hash": "0x1095138cc527bb45a8d8f593d79cea3ede49486f6d7c3ea00828a125c90f08f",
       "init_calldata": [],
       "selector": "0x52ecb1dffcd93e8b7f1379f426b123cc1de850735306874424bf8fe817f3862",
@@ -27629,7 +27589,7 @@
           ]
         }
       ],
-      "address": "0x7dedf6eac60814dbbf6f9521065e8933efaa0f157ea403eb01cd02badff3c",
+      "address": "0x756f1b2fffdc6a1e8c20efe3b2ce2d445315ca6be0fad20ee26c4a85e007b8e",
       "class_hash": "0x5c23ef57b5e2dedf2238a3221f46222e4d824350b0fe2042675e0e628a767aa",
       "init_calldata": [],
       "selector": "0x7626c7e3f63dbae9658ee764d453a8dbdbc0df9797ba797fa6564759c444771",
@@ -32757,50 +32717,10 @@
         "type": "event"
       },
       {
-        "kind": "struct",
-        "members": [
-          {
-            "kind": "data",
-            "name": "contract_address",
-            "type": "core::starknet::contract_address::ContractAddress"
-          },
-          {
-            "kind": "data",
-            "name": "slots_to_change",
-            "type": "core::array::Array::<(core::felt252, core::felt252)>"
-          }
-        ],
-        "name": "dojo::sharding::component::sharding_component::ContractSlotUpdated",
-        "type": "event"
-      },
-      {
-        "kind": "struct",
-        "members": [
-          {
-            "kind": "data",
-            "name": "storage_changes",
-            "type": "core::array::Array::<(core::felt252, core::felt252)>"
-          }
-        ],
-        "name": "dojo::sharding::component::sharding_component::ContractComponentUpdated",
-        "type": "event"
-      },
-      {
         "kind": "enum",
         "name": "dojo::sharding::component::sharding_component::Event",
         "type": "event",
-        "variants": [
-          {
-            "kind": "nested",
-            "name": "ContractSlotUpdated",
-            "type": "dojo::sharding::component::sharding_component::ContractSlotUpdated"
-          },
-          {
-            "kind": "nested",
-            "name": "ContractComponentUpdated",
-            "type": "dojo::sharding::component::sharding_component::ContractComponentUpdated"
-          }
-        ]
+        "variants": []
       },
       {
         "kind": "enum",
@@ -32920,8 +32840,8 @@
         ]
       }
     ],
-    "address": "0x25dba8fd236b8027738e7a791cf2d55acde6ba0a32657a0569de0e8f42fbcc7",
-    "class_hash": "0x62c1e2d1b0797c81c10f3dac4a768b750bf5296a5b572b831a5a03f290614bc",
+    "address": "0x7276776eddcfef9d8aac20e5f65eb76b0b9a044bf4950536598098f8600cef2",
+    "class_hash": "0x4f2c61ade519488c50cd98fa7e2d51af7f7f3a4481c2f4dc301ace0793ef70f",
     "entrypoints": [
       "uuid",
       "set_metadata",

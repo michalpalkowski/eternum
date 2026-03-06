@@ -26,12 +26,13 @@ pub mod dev_campaign_systems {
         ResourceWeightImpl, SingleResourceImpl, SingleResourceStoreImpl, WeightStoreImpl,
     };
     use crate::models::structure::{
-        StructureBase, StructureBaseStoreImpl, StructureMetadata, StructureMetadataStoreImpl,
+        StructureBaseStoreImpl, StructureMetadata, StructureMetadataStoreImpl,
     };
     use crate::models::weight::Weight;
     use crate::systems::resources::contracts::resource_systems::{
         IResourceSystemsDispatcher, IResourceSystemsDispatcherTrait,
     };
+    use crate::systems::config::contracts::config_systems::assert_caller_is_admin;
     use crate::systems::structure::contracts::{
         IStructureSystemsDispatcher, IStructureSystemsDispatcherTrait,
     };
@@ -57,6 +58,7 @@ pub mod dev_campaign_systems {
             realm_b: ID,
         ) {
             let mut world: WorldStorage = self.world(DEFAULT_NS());
+            assert_caller_is_admin(world);
 
             let structure_systems = IStructureSystemsDispatcher {
                 contract_address: structure_systems_addr,
@@ -65,13 +67,7 @@ pub mod dev_campaign_systems {
                 contract_address: resource_systems_addr,
             };
 
-            // ═══════════════════════════════════════════════════════════
-            // Phase 1: Initial Economy — seed both realms with resources
-            // ═══════════════════════════════════════════════════════════
-
-            // Realm A: primary realm, gets a diverse resource base
-            // STONE(1)=10000, COAL(2)=5000, WOOD(3)=10000, COPPER(4)=3000,
-            // IRONWOOD(5)=2000, SILVER(6)=1500, GOLD(7)=5000, OBSIDIAN(8)=1000
+            // Initial economy.
             mint_resource(ref world, realm_a, 1, 10000);
             mint_resource(ref world, realm_a, 2, 5000);
             mint_resource(ref world, realm_a, 3, 10000);
@@ -81,73 +77,41 @@ pub mod dev_campaign_systems {
             mint_resource(ref world, realm_a, 7, 5000);
             mint_resource(ref world, realm_a, 8, 1000);
 
-            // Realm B: secondary realm, smaller economy
-            // STONE(1)=5000, COAL(2)=3000, WOOD(3)=5000, COPPER(4)=2000, GOLD(7)=2000
             mint_resource(ref world, realm_b, 1, 5000);
             mint_resource(ref world, realm_b, 2, 3000);
             mint_resource(ref world, realm_b, 3, 5000);
             mint_resource(ref world, realm_b, 4, 2000);
             mint_resource(ref world, realm_b, 7, 2000);
 
-            // ═══════════════════════════════════════════════════════════
-            // Phase 2: Infrastructure — level up Realm A twice
-            // ═══════════════════════════════════════════════════════════
-
-            // Level 0→1: costs 100 WOOD + 50 STONE
-            // Changes base.level, base.troop_max_guard_count, base.troop_max_explorer_count
+            // Infrastructure upgrades.
+            structure_systems.level_up(realm_a);
             structure_systems.level_up(realm_a);
 
-            // Level 1→2: costs 200 WOOD + 100 STONE + 50 COAL
-            structure_systems.level_up(realm_a);
-
-            // ═══════════════════════════════════════════════════════════
-            // Phase 3: Resource Management — burns and spending
-            // ═══════════════════════════════════════════════════════════
-
-            // Realm A burns excess obsidian and some gold (military smelting)
+            // Resource burns.
             resource_systems
                 .structure_burn(realm_a, array![(8_u8, 500_u128), (7_u8, 1000_u128)].span());
-
-            // Realm B burns coal and stone (construction waste)
             resource_systems
                 .structure_burn(realm_b, array![(2_u8, 1000_u128), (1_u8, 500_u128)].span());
 
-            // ═══════════════════════════════════════════════════════════
-            // Phase 4: Late Economy — additional resource generation
-            // ═══════════════════════════════════════════════════════════
-
-            // Realm B discovers a silver vein
+            // Late economy updates.
             mint_resource(ref world, realm_b, 6, 3000);
-
-            // Realm A gets a gold shipment
             mint_resource(ref world, realm_a, 7, 2000);
-
-            // Realm B gets additional wood from forests
             mint_resource(ref world, realm_b, 3, 1500);
 
-            // ═══════════════════════════════════════════════════════════
-            // Phase 5: Governance — update metadata on both realms
-            // ═══════════════════════════════════════════════════════════
-
-            // Realm A: established settlement with villages
+            // Governance updates.
             let mut metadata_a: StructureMetadata = StructureMetadataStoreImpl::retrieve(
                 ref world, realm_a,
             );
             metadata_a.villages_count = 42;
             StructureMetadataStoreImpl::store(metadata_a, ref world, realm_a);
 
-            // Realm B: smaller settlement
             let mut metadata_b: StructureMetadata = StructureMetadataStoreImpl::retrieve(
                 ref world, realm_b,
             );
             metadata_b.villages_count = 7;
             StructureMetadataStoreImpl::store(metadata_b, ref world, realm_b);
 
-            // ═══════════════════════════════════════════════════════════
-            // Phase 6: Final burns — clean up excess resources
-            // ═══════════════════════════════════════════════════════════
-
-            // Realm A burns some copper (overflow)
+            // Final cleanup burn.
             resource_systems.structure_burn(realm_a, array![(4_u8, 500_u128)].span());
         }
     }

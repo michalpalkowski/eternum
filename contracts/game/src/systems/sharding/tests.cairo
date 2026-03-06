@@ -15,6 +15,7 @@ pub mod mock_sharding_proxy {
 use dojo::model::Model;
 use dojo::sharding::component::{IContractComponentDispatcher, IContractComponentDispatcherTrait};
 use dojo::sharding::compute_dojo_field_slot;
+use dojo::sharding::request::ShardModel;
 use dojo::utils::entity_id_from_keys;
 use dojo::world::{IWorldDispatcherTrait, WorldStorage, WorldStorageTrait};
 use dojo_snf_test::{
@@ -30,11 +31,10 @@ use crate::alias::ID;
 use crate::constants::{DEFAULT_NS, DEFAULT_NS_STR};
 use crate::models::resource::resource::{Resource, ResourceImpl, Resource_fields};
 use crate::models::structure::{Structure_fields};
+use crate::models::config::WorldConfigUtilImpl;
 use crate::systems::sharding::contracts::{
     IShardingSystemsDispatcher, IShardingSystemsDispatcherTrait, shard_helpers,
 };
-
-const NS_HASH: felt252 = 0x0; // computed lazily in helpers via Model::selector
 
 fn namespace_def() -> NamespaceDef {
     NamespaceDef {
@@ -61,6 +61,7 @@ fn namespace_def() -> NamespaceDef {
             TestResource::Model("ResourceArrival"),
             TestResource::Model("Market"),
             TestResource::Model("Liquidity"),
+            TestResource::Model("WorldConfig"),
             TestResource::Contract("sharding_systems"),
         ]
             .span(),
@@ -79,6 +80,8 @@ fn setup_world() -> WorldStorage {
     let mut world = spawn_test_world([namespace_def()].span());
     world.sync_perms_and_inits(contract_defs());
     world.dispatcher.uuid();
+    // Set caller() as admin so sharding system auth checks pass
+    WorldConfigUtilImpl::set_member(ref world, selector!("admin_address"), caller());
     world
 }
 
@@ -111,9 +114,9 @@ fn caller() -> ContractAddress {
     0x1234_felt252.try_into().unwrap()
 }
 
-// ================================
-// TESTS
-// ================================
+fn zero_address() -> ContractAddress {
+    0x0_felt252.try_into().unwrap()
+}
 
 /// request_shard locks the balance field and balances are readable unchanged.
 #[test]
@@ -129,7 +132,7 @@ fn test_request_shard() {
     let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
 
     // Request shard for STONE (type 1) and WOOD (type 3) via shard_helpers.
-    let models = [shard_helpers::resource(ns_hash(), entity_id, array![1, 3].span())].span();
+    let models = [shard_helpers::resource_with_set_lock(ns_hash(), entity_id, array![1, 3].span())].span();
     start_cheat_caller_address(system_addr, caller());
     dispatcher.request_shard(proxy_address, models);
     stop_cheat_caller_address(system_addr);
@@ -139,6 +142,32 @@ fn test_request_shard() {
     let wood = ResourceImpl::read_balance(ref world, entity_id, 3);
     assert!(stone == 100, "STONE should be 100");
     assert!(wood == 200, "WOOD should be 200");
+}
+
+#[test]
+#[should_panic(expected: "proxy must not be zero")]
+fn test_request_shard_rejects_zero_proxy() {
+    let mut world = setup_world();
+    let entity_id: ID = 42;
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+    let models = [shard_helpers::resource_with_set_lock(ns_hash(), entity_id, array![1].span())].span();
+
+    start_cheat_caller_address(system_addr, caller());
+    dispatcher.request_shard(zero_address(), models);
+    stop_cheat_caller_address(system_addr);
+}
+
+#[test]
+#[should_panic(expected: "models must not be empty")]
+fn test_request_shard_rejects_empty_models() {
+    let mut world = setup_world();
+    let proxy_address = deploy_mock_proxy();
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+    let empty_models: Array<ShardModel> = array![];
+
+    start_cheat_caller_address(system_addr, caller());
+    dispatcher.request_shard(proxy_address, empty_models.span());
+    stop_cheat_caller_address(system_addr);
 }
 
 /// SetLock settlement: shard value overwrites main chain — no delta math, no underflow risk.
@@ -155,7 +184,7 @@ fn test_shard_set_lock_overwrites() {
     let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
 
     // Lock STONE (type 1) for the shard.
-    let models = [shard_helpers::resource(ns_hash(), entity_id, array![1].span())].span();
+    let models = [shard_helpers::resource_with_set_lock(ns_hash(), entity_id, array![1].span())].span();
     start_cheat_caller_address(system_addr, caller());
     dispatcher.request_shard(proxy_address, models);
     stop_cheat_caller_address(system_addr);
@@ -190,7 +219,7 @@ fn test_shard_spend_no_underflow() {
     let proxy_address = deploy_mock_proxy();
     let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
 
-    let models = [shard_helpers::resource(ns_hash(), entity_id, array![1].span())].span();
+    let models = [shard_helpers::resource_with_set_lock(ns_hash(), entity_id, array![1].span())].span();
     start_cheat_caller_address(system_addr, caller());
     dispatcher.request_shard(proxy_address, models);
     stop_cheat_caller_address(system_addr);
@@ -221,7 +250,7 @@ fn test_shard_selective_fields_only() {
     let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
 
     // Shard STONE only (type 1), NOT WOOD.
-    let models = [shard_helpers::resource(ns_hash(), entity_id, array![1].span())].span();
+    let models = [shard_helpers::resource_with_set_lock(ns_hash(), entity_id, array![1].span())].span();
     start_cheat_caller_address(system_addr, caller());
     dispatcher.request_shard(proxy_address, models);
     stop_cheat_caller_address(system_addr);
@@ -250,7 +279,7 @@ fn test_finish_shard() {
     let proxy_address = deploy_mock_proxy();
     let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
 
-    let models = [shard_helpers::resource(ns_hash(), entity_id, array![1].span())].span();
+    let models = [shard_helpers::resource_with_set_lock(ns_hash(), entity_id, array![1].span())].span();
     start_cheat_caller_address(system_addr, caller());
     dispatcher.request_shard(proxy_address, models);
     stop_cheat_caller_address(system_addr);
@@ -273,7 +302,7 @@ fn test_cancel_shard_preserves_balance() {
     let proxy_address = deploy_mock_proxy();
     let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
 
-    let models = [shard_helpers::resource(ns_hash(), entity_id, array![1].span())].span();
+    let models = [shard_helpers::resource_with_set_lock(ns_hash(), entity_id, array![1].span())].span();
     start_cheat_caller_address(system_addr, caller());
     dispatcher.request_shard(proxy_address, models);
     stop_cheat_caller_address(system_addr);
@@ -323,4 +352,42 @@ fn test_request_shard_all() {
     // Balance should be unchanged — shard just initialized, no settlement yet.
     let stone = ResourceImpl::read_balance(ref world, entity_id, 1);
     assert!(stone == 100, "STONE should be 100 after shard_all init");
+}
+
+#[test]
+#[should_panic(expected: "proxy must not be zero")]
+fn test_request_shard_all_rejects_zero_proxy() {
+    let mut world = setup_world();
+    let entity_id: ID = 42;
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+
+    start_cheat_caller_address(system_addr, caller());
+    dispatcher.request_shard_all(zero_address(), array![entity_id].span());
+    stop_cheat_caller_address(system_addr);
+}
+
+#[test]
+#[should_panic(expected: "entity_ids must not be empty")]
+fn test_request_shard_all_rejects_empty_entity_ids() {
+    let mut world = setup_world();
+    let proxy_address = deploy_mock_proxy();
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+    let empty_entity_ids: Array<ID> = array![];
+
+    start_cheat_caller_address(system_addr, caller());
+    dispatcher.request_shard_all(proxy_address, empty_entity_ids.span());
+    stop_cheat_caller_address(system_addr);
+}
+
+#[test]
+#[should_panic(expected: "resource_types must not be empty")]
+fn test_resource_with_set_lock_rejects_empty_resource_types() {
+    let empty_resource_types: Array<u32> = array![];
+    let _ = shard_helpers::resource_with_set_lock(ns_hash(), 42, empty_resource_types.span());
+}
+
+#[test]
+#[should_panic(expected: "resource_type must be 1..=56, got invalid")]
+fn test_resource_with_set_lock_rejects_out_of_range_type() {
+    let _ = shard_helpers::resource_with_set_lock(ns_hash(), 42, array![57_u32].span());
 }

@@ -15,14 +15,22 @@ pub mod dev_config_systems {
         CapacityConfig, SeasonConfig, StructureCapacityConfig, StructureLevelConfig, StructureMaxLevelConfig,
         TickConfig, TradeConfig, WeightConfig, WorldConfigUtilImpl,
     };
+    use core::num::traits::Zero;
     use crate::models::resource::resource::ResourceList;
+    use crate::systems::config::contracts::config_systems::assert_caller_is_admin;
 
     #[abi(embed_v0)]
     impl DevConfigSystemsImpl of super::IDevConfigSystems<ContractState> {
         fn init_test_configs(ref self: ContractState, admin_address: ContractAddress) {
             let mut world: WorldStorage = self.world(DEFAULT_NS());
 
-            // Bootstrap admin address (first call, no admin check needed)
+            // Bootstrap admin address: allow first call (zero admin), require admin thereafter
+            let current_admin: ContractAddress = WorldConfigUtilImpl::get_member(
+                world, selector!("admin_address"),
+            );
+            if current_admin.is_non_zero() {
+                assert_caller_is_admin(world);
+            }
             WorldConfigUtilImpl::set_member(ref world, selector!("admin_address"), admin_address);
 
             // Season: dev mode on, always active
