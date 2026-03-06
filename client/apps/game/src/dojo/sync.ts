@@ -307,6 +307,7 @@ export const initialSync = async (
 ) => {
   const { logging = false, reportProgress = true } = options;
   console.log("[STARTING syncEntitiesDebounced]");
+  entityStreamSubscriptionAttempt += 1;
   if (entityStreamSubscription) {
     entityStreamSubscription.cancel();
     entityStreamSubscription = null;
@@ -316,12 +317,7 @@ export const initialSync = async (
     setInitialSyncProgress(0);
   }
 
-  entityStreamSubscription = await syncEntitiesDebounced(
-    setup.network.toriiClient,
-    setup,
-    GLOBAL_STREAM_CLAUSE,
-    logging,
-  );
+  startGlobalEntityStreamSubscription(setup, logging);
 
   const contractComponents = setup.network.contractComponents as unknown as Component<Schema, Metadata, undefined>[];
 
