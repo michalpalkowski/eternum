@@ -22,6 +22,7 @@ import { buildModelKeysClause, type GlobalModelStreamConfig } from "./torii-stre
 export const EVENT_QUERY_LIMIT = 40_000;
 
 let entityStreamSubscription: { cancel: () => void } | null = null;
+let entityStreamSubscriptionAttempt = 0;
 
 /**
  * Cancel the global entity stream subscription.
@@ -29,6 +30,7 @@ let entityStreamSubscription: { cancel: () => void } | null = null;
  * stale data into RECS while the new world is being bootstrapped.
  */
 export const cancelEntityStreamSubscription = () => {
+  entityStreamSubscriptionAttempt += 1;
   if (entityStreamSubscription) {
     entityStreamSubscription.cancel();
     entityStreamSubscription = null;
@@ -270,6 +272,25 @@ export const syncEntitiesDebounced = async (
       queueProcessor.dispose();
     },
   };
+};
+
+const startGlobalEntityStreamSubscription = (
+  setup: SetupResult,
+  logging: boolean,
+): void => {
+  const attempt = entityStreamSubscriptionAttempt;
+  void syncEntitiesDebounced(setup.network.toriiClient, setup, GLOBAL_STREAM_CLAUSE, logging)
+    .then((subscription) => {
+      if (attempt !== entityStreamSubscriptionAttempt) {
+        subscription.cancel();
+        return;
+      }
+      entityStreamSubscription = subscription;
+      console.log("[sync] Global entity stream subscription ready");
+    })
+    .catch((error) => {
+      console.error("[sync] Failed to subscribe global entity stream", error);
+    });
 };
 
 // initial sync runs before the game is playable and should sync minimal data

@@ -8,7 +8,7 @@ import { saveWorldProfile } from "./store";
 import type { WorldProfile } from "./types";
 import { env, hasPublicNodeUrl } from "../../../env";
 
-const cartridgeApiBase = env.VITE_PUBLIC_CARTRIDGE_API_BASE || "https://api.cartridge.gg";
+const cartridgeApiBase = env.VITE_PUBLIC_CARTRIDGE_API_BASE;
 
 const toriiBaseUrlFromName = (name: string) => `${cartridgeApiBase}/x/${name}/torii`;
 
@@ -49,8 +49,9 @@ export const buildWorldProfile = async (chain: Chain, name: string): Promise<Wor
     worldAddress = normalizeAddress(deployment?.worldAddress) ?? deployment?.worldAddress ?? null;
   }
 
-  // As a last resort, default to 0x0 so configuration can still proceed with patched contracts
-  if (!worldAddress) worldAddress = "0x0";
+  if (!worldAddress) {
+    throw new Error(`Unable to resolve world address for ${name}`);
+  }
 
   // 3) Fetch entry token and fee token addresses from WorldConfig
   let entryTokenAddress: string | undefined;
@@ -113,16 +114,12 @@ const buildLocalWorldProfile = async (name: string): Promise<WorldProfile> => {
     return null;
   };
 
-  // Resolve world address from local Torii
-  let worldAddress: string | null = null;
-  try {
-    const sqlApi = new SqlApi(`${toriiBaseUrl}/sql`);
-    const fetched = await sqlApi.fetchWorldAddress();
-    worldAddress = normalizeAddress(fetched);
-  } catch {
-    // ignore — will default to 0x0
+  const sqlApi = new SqlApi(`${toriiBaseUrl}/sql`);
+  const fetchedWorldAddress = await sqlApi.fetchWorldAddress();
+  const worldAddress = normalizeAddress(fetchedWorldAddress);
+  if (!worldAddress) {
+    throw new Error(`Unable to resolve local world address for ${name}`);
   }
-  if (!worldAddress) worldAddress = "0x0";
 
   const profile: WorldProfile = {
     name,

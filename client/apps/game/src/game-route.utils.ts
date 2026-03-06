@@ -8,13 +8,21 @@ export const resolveGameRouteView = ({
   phase,
   hasSetupResult,
   hasAccount,
+  hasShardContext = false,
 }: {
   phase: OnboardingPhase;
   hasSetupResult: boolean;
   hasAccount: boolean;
+  hasShardContext?: boolean;
 }): GameRouteView => {
   if (hasSetupResult && hasAccount) {
     return "ready";
+  }
+
+  // Shard tabs carry session context in URL query params. Redirecting to landing
+  // would drop that context and boot the player back into main-world mode.
+  if (hasShardContext) {
+    return "loading";
   }
 
   if (REQUIRES_LANDING_PHASES.has(phase)) {

@@ -76,6 +76,10 @@ const envSchema = z.object({
   // VRF
   VITE_PUBLIC_VRF_PROVIDER_ADDRESS: z.string().startsWith("0x").optional().default("0x0"),
 
+  // Sharding
+  VITE_PUBLIC_SHARD_OPERATOR_URL: z.string().url().optional(),
+  VITE_PUBLIC_SHARD_PROXY_ADDRESS: z.string().startsWith("0x").optional(),
+
   VITE_PUBLIC_SLOT: z.string(),
 
   // Social
@@ -197,7 +201,8 @@ try {
 }
 
 const storedChain = getSelectedChain();
-if (storedChain) {
+// In local-dev, honor compile-time local chain and ignore stale browser chain selection.
+if (storedChain && env.VITE_PUBLIC_CHAIN !== "local") {
   env = { ...env, VITE_PUBLIC_CHAIN: storedChain };
 }
 

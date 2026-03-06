@@ -14,6 +14,19 @@ describe("resolveGameRouteView", () => {
     expect(resolveGameRouteView({ phase: "avatar", hasSetupResult: false, hasAccount: true })).toBe("redirect");
   });
 
+
+  it("keeps loading when shard context is present, even in onboarding phases", () => {
+    expect(
+      resolveGameRouteView({ phase: "world-select", hasSetupResult: false, hasAccount: false, hasShardContext: true }),
+    ).toBe("loading");
+    expect(
+      resolveGameRouteView({ phase: "account", hasSetupResult: false, hasAccount: false, hasShardContext: true }),
+    ).toBe("loading");
+    expect(
+      resolveGameRouteView({ phase: "avatar", hasSetupResult: false, hasAccount: true, hasShardContext: true }),
+    ).toBe("loading");
+  });
+
   it("returns loading while bootstrap/account are still converging", () => {
     expect(resolveGameRouteView({ phase: "loading", hasSetupResult: false, hasAccount: false })).toBe("loading");
     expect(resolveGameRouteView({ phase: "loading", hasSetupResult: true, hasAccount: false })).toBe("loading");

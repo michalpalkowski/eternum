@@ -5,6 +5,7 @@ import { world } from "@bibliothecadao/types";
 import { inject } from "@vercel/analytics";
 import { ReactNode } from "react";
 
+import { useShardStore } from "@/hooks/store/use-shard-store";
 import {
   ensureActiveWorldProfileWithUI,
   getActiveWorld,
@@ -15,6 +16,7 @@ import {
 } from "@/runtime/world";
 import { buildWorldProfile } from "@/runtime/world/profile-builder";
 import { setSqlApiBaseUrl } from "@/services/api";
+import { parseShardUrlParams } from "@/sharding/protocol";
 import { Chain, getGameManifest } from "@contracts";
 import { dojoConfig } from "../../dojo-config";
 import { env, hasPublicNodeUrl } from "../../env";
@@ -153,6 +155,16 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
     profile.contractsBySelector,
   );
 
+  const shardStore = useShardStore.getState();
+  // Read shard context from URL only.
+  // This prevents stale sessionStorage in the main tab from forcing shard mode.
+  const shardSession = parseShardUrlParams(window.location.search);
+  if (shardSession !== null) {
+    shardStore.enterShardMode(shardSession);
+  } else {
+    shardStore.clearShardMode();
+  }
+
   // 2) Update global dojoConfig in place (shared object reference)
   //    - Torii base URL and manifest are used by setup() downstream
   //    - For local chain, use environment variables directly
@@ -165,8 +177,14 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
   }
   (dojoConfig as any).manifest = patchedManifest;
 
+  // 2b) Shard mode override, validated by sharding protocol parser.
+  if (shardSession !== null) {
+    (dojoConfig as any).rpcUrl = shardSession.rpcUrl;
+    (dojoConfig as any).toriiUrl = shardSession.toriiUrl;
+  }
+
   // 3) Point SQL API to the active world's Torii
-  const toriiUrl = chain === "local" ? env.VITE_PUBLIC_TORII : profile.toriiBaseUrl;
+  const toriiUrl = shardSession !== null ? shardSession.toriiUrl : chain === "local" ? env.VITE_PUBLIC_TORII : profile.toriiBaseUrl;
   setSqlApiBaseUrl(`${toriiUrl}/sql`);
 
   const setupResult = await setup(

@@ -27,7 +27,12 @@ export const Controller = ({ className = "" }: ControllerProps) => {
       console.log("Wallet connected successfully.");
 
       if (connector && typeof connector.controller?.username === "function") {
-        connector.controller.username()?.then((name) => setAccountName(name));
+        connector.controller
+          .username()
+          ?.then((name) => setAccountName(name))
+          .catch((error) => {
+            console.error("Failed to get username:", error);
+          });
       }
     } catch (error) {
       console.error("Failed to connect wallet:", error);
@@ -43,11 +48,12 @@ export const Controller = ({ className = "" }: ControllerProps) => {
   useEffect(() => {
     if (!connector || !connector!.controller || typeof connector.controller.username !== "function") return;
 
-    try {
-      connector.controller.username()?.then((name) => setAccountName(name));
-    } catch (error) {
-      console.error("Failed to get username:", error);
-    }
+    connector.controller
+      .username()
+      ?.then((name) => setAccountName(name))
+      .catch((error) => {
+        console.error("Failed to get username:", error);
+      });
   }, [account, connector, setAccountName]);
 
   const handleInventoryClick = useCallback(() => {

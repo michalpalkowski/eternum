@@ -72,10 +72,16 @@ export const GameRoute = ({ backgroundImage }: { backgroundImage: string }) => {
 
   const state = useUnifiedOnboarding(backgroundImage);
   const { phase, setupResult, account } = state;
+  const hasShardContext =
+    typeof window !== "undefined" &&
+    ["shard_rpc", "shard_torii", "shard_id", "shard_operator"].some((key) =>
+      new URLSearchParams(window.location.search).has(key),
+    );
   const routeView = resolveGameRouteView({
     phase,
     hasSetupResult: setupResult !== null,
     hasAccount: account !== null,
+    hasShardContext,
   });
 
   if (routeView === "redirect") {

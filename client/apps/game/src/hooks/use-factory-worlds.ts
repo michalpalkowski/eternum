@@ -17,7 +17,7 @@ const fetchFactoryWorlds = async (chain: Chain): Promise<FactoryWorld[]> => {
   if (chain === "local") {
     return [
       {
-        name: env.VITE_PUBLIC_SLOT || "local-dev",
+        name: env.VITE_PUBLIC_SLOT,
         chain: "local",
         worldAddress: null,
       },

@@ -1184,9 +1184,10 @@ export const GameEntryModal = ({
     debugLog(worldName, "Auto-enter check - phase:", phase, "isSpectateMode:", isSpectateMode);
     if (phase === "ready") {
       debugLog(worldName, "Auto-entering game...");
+      // Give users time to see the "Ready" screen and click manually if they want
       const timer = setTimeout(() => {
         handleEnterGame();
-      }, 500);
+      }, 2000);
       return () => clearTimeout(timer);
     }
   }, [phase, handleEnterGame, worldName, isSpectateMode]);

@@ -10,6 +10,7 @@ import { Tabs } from "@/ui/design-system/atoms";
 import CircleButton from "@/ui/design-system/molecules/circle-button";
 import { ResourceIcon } from "@/ui/design-system/molecules/resource-icon";
 import { ResourceArrivals as AllResourceArrivals, MarketModal } from "@/ui/features/economy/trading";
+import { ShardRequestButton } from "@/ui/features/sharding/shard-request-button";
 import { TRANSFER_POPUP_NAME } from "@/ui/features/economy/transfers/transfer-automation-popup";
 import {
   RealtimeChatShell,
@@ -633,6 +634,11 @@ const StructureListItem = memo(
             <StructureLevelUpButton structureEntityId={structure.entityId} className="ml-auto shrink-0" />
           )}
         </div>
+        {isSelected && structure.category === StructureType.Realm && (
+          <div className="mt-2 pt-2 border-t border-gold/10">
+            <ShardRequestButton entityId={structure.entityId} />
+          </div>
+        )}
       </div>
     );
   },

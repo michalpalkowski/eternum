@@ -7,10 +7,12 @@ import { connectWithControllerRetry, pickPrimaryConnector } from "@/hooks/contex
 import { useSpectatorModeClick } from "@/hooks/helpers/use-navigate";
 import { useCartridgeUsername } from "@/hooks/use-cartridge-username";
 import { useAccountStore } from "@/hooks/store/use-account-store";
+import { useShardStore } from "@/hooks/store/use-shard-store";
 import { useUIStore } from "@/hooks/store/use-ui-store";
 import type { SetupResult } from "@/init/bootstrap";
 import { getActiveWorld, setActiveWorldName } from "@/runtime/world";
 import { useAccount, useConnect } from "@starknet-react/core";
+import { env } from "../../../env";
 
 import type { EagerBootstrapState } from "./use-eager-bootstrap";
 import { useEagerBootstrap } from "./use-eager-bootstrap";
@@ -60,6 +62,9 @@ const NULL_ACCOUNT = {
   privateKey: "0x0",
 } as const;
 
+/** Module-level flag: ensures the shard-mode onboarding skip fires only once globally. */
+let shardOnboardingSkipped = false;
+
 export const useUnifiedOnboarding = (_backgroundImage: string): UnifiedOnboardingState => {
   const bootstrap = useEagerBootstrap();
 
@@ -74,6 +79,20 @@ export const useUnifiedOnboarding = (_backgroundImage: string): UnifiedOnboardin
   const showBlankOverlay = useUIStore((state) => state.showBlankOverlay);
   const setShowBlankOverlay = useUIStore((state) => state.setShowBlankOverlay);
 
+  // In shard mode, skip the initial onboarding overlay so the player goes straight to game.
+  // Module-level flag (not useRef) because useUnifiedOnboarding is called from multiple
+  // components (PlayView, GameRoute) — each mount creates a new ref, but we only want to
+  // suppress the overlay ONCE globally. handleEnterGame() later sets showBlankOverlay(true)
+  // for GameLoadingOverlay, and we must NOT fight that.
+  const isShardMode = useShardStore((s) => s.isShardMode);
+  useEffect(() => {
+    if (isShardMode && showBlankOverlay && !shardOnboardingSkipped) {
+      shardOnboardingSkipped = true;
+      console.log("[useUnifiedOnboarding] Shard mode — skipping initial onboarding overlay");
+      setShowBlankOverlay(false);
+    }
+  }, [isShardMode, showBlankOverlay, setShowBlankOverlay]);
+
   // Check URL for spectate mode
   const urlSpectateMode =
     typeof window !== "undefined" && new URLSearchParams(window.location.search).get("spectate") === "true";
@@ -85,7 +104,8 @@ export const useUnifiedOnboarding = (_backgroundImage: string): UnifiedOnboardin
     return active?.name ?? null;
   });
   const [placeholderAccount, setPlaceholderAccount] = useState<Account | null>(null);
-  const [hasCompletedAvatar, setHasCompletedAvatar] = useState(false);
+  // Avatar onboarding is optional and currently incomplete in local-dev flow.
+  const [hasCompletedAvatar, setHasCompletedAvatar] = useState(env.VITE_PUBLIC_CHAIN === "local");
 
   // If URL has spectate param and we have a world, auto-trigger spectate mode
   useEffect(() => {
@@ -149,6 +169,14 @@ export const useUnifiedOnboarding = (_backgroundImage: string): UnifiedOnboardin
       console.error("Unable to connect wallet:", error);
     });
   }, [connectAsync, connectors, isConnected, isConnecting]);
+
+  // In shard mode the play route can skip landing UI, so proactively connect once.
+  useEffect(() => {
+    if (!isShardMode || isSpectating || isConnected === true || isConnecting === true) {
+      return;
+    }
+    connectWallet();
+  }, [isShardMode, isSpectating, isConnected, isConnecting, connectWallet]);
 
   const spectate = useCallback(() => {
     console.log("[useUnifiedOnboarding] spectate() called");

@@ -1,4 +1,5 @@
 import { EndgameModal, NotLoggedInMessage } from "@/ui/shared";
+import { ShardBanner } from "../features/sharding/shard-banner";
 import { Leva } from "leva";
 import { env } from "../../../env";
 import { Tooltip } from "../design-system/molecules/tooltip";
@@ -103,6 +104,9 @@ const ActionOverlays = () => (
  */
 const HUD = () => (
   <>
+    {/* Shard mode banner (top-center, only visible when playing on a shard) */}
+    <ShardBanner />
+
     {/* Top-left: Player info and controls */}
     <div className="absolute top-0 left-0 pointer-events-auto z-20">
       <TopHeader />

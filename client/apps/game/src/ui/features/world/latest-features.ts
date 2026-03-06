@@ -9,6 +9,13 @@ interface LatestFeature {
 
 export const latestFeatures: LatestFeature[] = [
   {
+    date: "2026-03-06",
+    title: "Stable Local Play Entry",
+    description:
+      "Fixed local development entry so shard tabs keep shard context, avoid Cartridge loopback CORS in local mode, no longer bounce back to menu, and fallback to same-tab shard navigation when popup blockers prevent opening a new tab.",
+    type: "fix",
+  },
+  {
     date: "2026-02-18",
     title: "Smoother Worldmap Chunking",
     description:
