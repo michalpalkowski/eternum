@@ -78,6 +78,20 @@ const DEFAULT_HYPERSTRUCTURE_RADIUS = 8;
 type TileOptRow = {
   data: TileDataInput;
 };
+type TileCoordRow = {
+  col: number | string;
+  row: number | string;
+};
+type TileBoundsRow = {
+  internal_entity_id: string;
+  alt: number | string | boolean;
+  col: number | string;
+  row: number | string;
+  data: string;
+};
+type WorldConfigRow = {
+  map_center_offset: number;
+};
 
 const buildCacheUrl = (baseUrl: string, path: string): URL => {
   const trimmed = baseUrl.trim().replace(/\/+$/, "");
@@ -140,6 +154,87 @@ export class SqlApi {
     const rows = await fetchWithErrorHandling<TileOptRow>(url, "Failed to fetch tiles by coords");
     console.log("Tiles Rows:", rows);
     return rows.map((row) => tileDataToTile(row.data));
+  }
+
+  /**
+   * Fetch tile coordinates inside inclusive bounds.
+   * SQL queries always return arrays.
+   */
+  async fetchTileCoordsInBounds(
+    minCol: number,
+    maxCol: number,
+    minRow: number,
+    maxRow: number,
+  ): Promise<Array<{ col: number; row: number }>> {
+    const normalizedMinCol = Math.trunc(minCol);
+    const normalizedMaxCol = Math.trunc(maxCol);
+    const normalizedMinRow = Math.trunc(minRow);
+    const normalizedMaxRow = Math.trunc(maxRow);
+
+    const query = TILES_QUERIES.TILES_COORDS_IN_BOUNDS.replace("{minCol}", normalizedMinCol.toString())
+      .replace("{maxCol}", normalizedMaxCol.toString())
+      .replace("{minRow}", normalizedMinRow.toString())
+      .replace("{maxRow}", normalizedMaxRow.toString());
+    const url = buildApiUrl(this.baseUrl, query);
+    const rows = await fetchWithErrorHandling<TileCoordRow>(url, "Failed to fetch tile coords in bounds");
+
+    return rows
+      .map((row) => ({
+        col: typeof row.col === "number" ? row.col : Number(row.col),
+        row: typeof row.row === "number" ? row.row : Number(row.row),
+      }))
+      .filter((row) => Number.isFinite(row.col) && Number.isFinite(row.row));
+  }
+
+  /**
+   * Fetch full TileOpt rows inside inclusive bounds.
+   * SQL queries always return arrays.
+   */
+  async fetchTileRowsInBounds(
+    minCol: number,
+    maxCol: number,
+    minRow: number,
+    maxRow: number,
+  ): Promise<Array<{ internalEntityId: string; alt: boolean; col: number; row: number; data: string }>> {
+    const normalizedMinCol = Math.trunc(minCol);
+    const normalizedMaxCol = Math.trunc(maxCol);
+    const normalizedMinRow = Math.trunc(minRow);
+    const normalizedMaxRow = Math.trunc(maxRow);
+
+    const query = TILES_QUERIES.TILES_ROWS_IN_BOUNDS.replace("{minCol}", normalizedMinCol.toString())
+      .replace("{maxCol}", normalizedMaxCol.toString())
+      .replace("{minRow}", normalizedMinRow.toString())
+      .replace("{maxRow}", normalizedMaxRow.toString());
+    const url = buildApiUrl(this.baseUrl, query);
+    const rows = await fetchWithErrorHandling<TileBoundsRow>(url, "Failed to fetch tile rows in bounds");
+
+    return rows
+      .map((row) => {
+        const col = typeof row.col === "number" ? row.col : Number(row.col);
+        const mappedRow = typeof row.row === "number" ? row.row : Number(row.row);
+        if (!Number.isFinite(col) || !Number.isFinite(mappedRow)) {
+          return null;
+        }
+        const alt =
+          typeof row.alt === "boolean"
+            ? row.alt
+            : typeof row.alt === "number"
+              ? row.alt !== 0
+              : row.alt === "1";
+        return {
+          internalEntityId: row.internal_entity_id,
+          alt,
+          col,
+          row: mappedRow,
+          data: row.data,
+        };
+      })
+      .filter(
+        (
+          row,
+        ): row is { internalEntityId: string; alt: boolean; col: number; row: number; data: string } =>
+          row !== null && typeof row.internalEntityId === "string" && row.internalEntityId.length > 0,
+      );
   }
 
   /**
@@ -668,6 +763,19 @@ export class SqlApi {
 
     const firstResult = extractFirstOrNull(results);
     return firstResult?.contract_address ?? null;
+  }
+
+  /**
+   * Fetch map_center_offset from WorldConfig.
+   * Returns null when row is missing.
+   */
+  async fetchWorldConfigMapCenterOffset(): Promise<number | null> {
+    const query =
+      "SELECT map_center_offset FROM `s1_eternum-WorldConfig` WHERE config_id = 4294967295 LIMIT 1";
+    const url = buildApiUrl(this.baseUrl, query);
+    const results = await fetchWithErrorHandling<WorldConfigRow>(url, "Failed to fetch world config map center offset");
+    const firstResult = extractFirstOrNull(results);
+    return firstResult?.map_center_offset ?? null;
   }
 
   /**

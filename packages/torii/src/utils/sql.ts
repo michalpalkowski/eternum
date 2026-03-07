@@ -55,12 +55,16 @@ export async function fetchWithErrorHandling<T>(url: string, errorMessage: strin
 
   const result = await response.json();
 
-  // Ensure the result is always an array (defensive programming)
-  if (!Array.isArray(result)) {
-    throw new Error(`${errorMessage}: Expected array response but got ${typeof result}`);
+  // Torii SQL responses are usually arrays, but some deployments/proxies wrap
+  // rows as `{ rows: [...] }`. Accept both shapes to keep callers deterministic.
+  if (Array.isArray(result)) {
+    return result as T[];
+  }
+  if (result && typeof result === "object" && Array.isArray((result as { rows?: unknown[] }).rows)) {
+    return (result as { rows: T[] }).rows;
   }
 
-  return result as T[];
+  throw new Error(`${errorMessage}: Expected array response but got ${typeof result}`);
 }
 
 /**

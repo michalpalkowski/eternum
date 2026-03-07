@@ -12,4 +12,25 @@ export const TILES_QUERIES = {
     FROM \`s1_eternum-TileOpt\`
     WHERE (col, row) IN ({coords});
   `,
+
+  TILES_COORDS_IN_BOUNDS: `
+    SELECT
+        col,
+        row
+    FROM \`s1_eternum-TileOpt\`
+    WHERE col BETWEEN {minCol} AND {maxCol}
+      AND row BETWEEN {minRow} AND {maxRow};
+  `,
+
+  TILES_ROWS_IN_BOUNDS: `
+    SELECT
+        internal_entity_id,
+        alt,
+        col,
+        row,
+        data
+    FROM \`s1_eternum-TileOpt\`
+    WHERE col BETWEEN {minCol} AND {maxCol}
+      AND row BETWEEN {minRow} AND {maxRow};
+  `,
 } as const;
