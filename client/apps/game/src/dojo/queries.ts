@@ -1,9 +1,10 @@
 // onload -> fetch single key entities
 
 import { HexPosition, ID, StructureType } from "@bibliothecadao/types";
+import { sqlApi } from "@/services/api";
 import { Component, Metadata, Schema, getComponentValue } from "@dojoengine/recs";
 import { AndComposeClause, MemberClause } from "@dojoengine/sdk";
-import { getEntities } from "@dojoengine/state";
+import { getEntities, setEntities } from "@dojoengine/state";
 import { PatternMatching, ToriiClient } from "@dojoengine/torii-client";
 import { Clause, LogicalOperator } from "@dojoengine/torii-wasm";
 import { getEntityIdFromKeys } from "@dojoengine/utils";
@@ -17,6 +18,10 @@ import { EVENT_QUERY_LIMIT } from "./sync";
 const isValidId = (id: unknown): id is ID => typeof id === "number" && Number.isFinite(id);
 const hasValidPosition = (position: HexPosition | undefined): position is HexPosition =>
   !!position && Number.isFinite(position.col) && Number.isFinite(position.row);
+
+const toEntityKeyHex = (id: ID): string => `0x${Math.trunc(id).toString(16)}`;
+const TILE_COORD_SYNC_BATCH_SIZE = 192;
+const TILE_ROWS_SYNC_BATCH_SIZE = 512;
 
 export const getTilesForPositionsFromTorii = async <S extends Schema>(
   client: ToriiClient,
@@ -90,7 +95,8 @@ export const getStructuresDataFromTorii = async (
         let completedQueries = 0;
         return () => {
           completedQueries += 1;
-          if (completedQueries >= 3) {
+          // Keep this aligned with the number of parallel queries below.
+          if (completedQueries >= 4) {
             onComplete();
           }
         };
@@ -120,8 +126,17 @@ export const getStructuresDataFromTorii = async (
     runOnComplete,
   );
 
+  // Keep structure occupancy tiles in sync with structure/entity hydration.
+  // Worldmap structure visuals are driven by Structure.onTileUpdate callbacks,
+  // so syncing structure models without these tiles can leave visuals empty.
+  const structureTilesPromise = getTilesForPositionsFromTorii(
+    client,
+    components as any,
+    structuresToSync.map((structure) => structure.position),
+  ).then(() => runOnComplete?.());
+
   // Execute all promises in parallel
-  return Promise.all([structuresPromise, armiesPromise, buildingsPromise]);
+  return Promise.all([structuresPromise, armiesPromise, buildingsPromise, structureTilesPromise]);
 };
 
 // For own structures, usePlayerStructureSync keeps data fresh so we only fetch if missing.
@@ -303,7 +318,7 @@ export const getHyperstructureFromTorii = async <S extends Schema>(
       operator: "Or" as LogicalOperator,
       clauses: validIds.map((id) => ({
         Keys: {
-          keys: [id.toString()],
+          keys: [toEntityKeyHex(id)],
           pattern_matching: "FixedLen" as PatternMatching,
           models: ["s1_eternum-Structure"],
         },
@@ -404,7 +419,7 @@ export const getEntitiesFromTorii = async <S extends Schema>(
     validEntityIDs.length === 1
       ? {
           Keys: {
-            keys: [validEntityIDs[0].toString()],
+            keys: [toEntityKeyHex(validEntityIDs[0])],
             pattern_matching: "VariableLen" as PatternMatching,
             models: [],
           },
@@ -415,7 +430,7 @@ export const getEntitiesFromTorii = async <S extends Schema>(
             clauses: [
               ...validEntityIDs.map((id) => ({
                 Keys: {
-                  keys: [id.toString()],
+                  keys: [toEntityKeyHex(id)],
                   pattern_matching: "VariableLen" as PatternMatching,
                   models: [],
                 },
@@ -545,20 +560,41 @@ export const getMapFromToriiExact = async <S extends Schema>(
   minRow: number,
   maxRow: number,
 ) => {
-  return getEntities(
-    client,
-    AndComposeClause([
-      MemberClause("s1_eternum-TileOpt", "col", "Gte", minCol),
-      MemberClause("s1_eternum-TileOpt", "col", "Lte", maxCol),
-      MemberClause("s1_eternum-TileOpt", "row", "Gte", minRow),
-      MemberClause("s1_eternum-TileOpt", "row", "Lte", maxRow),
-    ]).build(),
-    components as any,
-    [],
-    ["s1_eternum-TileOpt"],
-    EVENT_QUERY_LIMIT,
-    false,
+  const tileRows = (await (sqlApi as any).fetchTileRowsInBounds(
+    minCol,
+    maxCol,
+    minRow,
+    maxRow,
+  )) as Array<{ internalEntityId: string; alt: boolean; col: number; row: number; data: string }>;
+  if (tileRows.length === 0) {
+    return;
+  }
+
+  const uniqueRows = Array.from(
+    tileRows.reduce<Map<string, { internalEntityId: string; alt: boolean; col: number; row: number; data: string }>>(
+      (acc, row) => {
+        acc.set(row.internalEntityId, row);
+        return acc;
+      },
+      new Map<string, { internalEntityId: string; alt: boolean; col: number; row: number; data: string }>(),
+    ).values(),
   );
+
+  for (let index = 0; index < uniqueRows.length; index += TILE_ROWS_SYNC_BATCH_SIZE) {
+    const batch = uniqueRows.slice(index, index + TILE_ROWS_SYNC_BATCH_SIZE);
+    const entities = batch.map((row) => ({
+      hashed_keys: row.internalEntityId,
+      models: {
+        "s1_eternum-TileOpt": {
+          alt: { value: row.alt },
+          col: { value: row.col },
+          row: { value: row.row },
+          data: { value: row.data },
+        },
+      },
+    }));
+    await setEntities(entities as any, components as any, false);
+  }
 };
 
 export const getQuestsFromTorii = async (client: ToriiClient, components: Component<Schema, Metadata, undefined>[]) => {
