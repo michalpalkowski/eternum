@@ -170,7 +170,10 @@ ${STORY_EVENT_SELECT_FIELDS}
     SELECT
 ${STORY_EVENT_SELECT_FIELDS}
     FROM "s1_eternum-StoryEvent"
-    WHERE "owner.Some" = '{owner}'
+    WHERE
+      LOWER(CASE WHEN LTRIM(REPLACE("owner.Some", '0x', ''), '0') = '' THEN '0' ELSE LTRIM(REPLACE("owner.Some", '0x', ''), '0') END)
+      =
+      LOWER(CASE WHEN LTRIM(REPLACE('{owner}', '0x', ''), '0') = '' THEN '0' ELSE LTRIM(REPLACE('{owner}', '0x', ''), '0') END)
     ORDER BY timestamp DESC
     LIMIT {limit}
     OFFSET {offset}

@@ -27,7 +27,10 @@ export const RELICS_QUERIES = {
       r.*
     FROM \`s1_eternum-Structure\` s
     INNER JOIN \`s1_eternum-Resource\` r ON s.entity_id = r.entity_id
-    WHERE s.owner = '{owner}'
+    WHERE
+      LOWER(CASE WHEN LTRIM(REPLACE(s.owner, '0x', ''), '0') = '' THEN '0' ELSE LTRIM(REPLACE(s.owner, '0x', ''), '0') END)
+      =
+      LOWER(CASE WHEN LTRIM(REPLACE('{owner}', '0x', ''), '0') = '' THEN '0' ELSE LTRIM(REPLACE('{owner}', '0x', ''), '0') END)
       AND (
         (r.RELIC_E1_BALANCE > 0) OR (r.RELIC_E2_BALANCE > 0) OR (r.RELIC_E3_BALANCE > 0) OR
         (r.RELIC_E4_BALANCE > 0) OR (r.RELIC_E5_BALANCE > 0) OR (r.RELIC_E6_BALANCE > 0) OR
@@ -56,7 +59,10 @@ export const RELICS_QUERIES = {
     FROM \`s1_eternum-ExplorerTroops\` e
     INNER JOIN \`s1_eternum-Resource\` r ON e.explorer_id = r.entity_id
     INNER JOIN \`s1_eternum-Structure\` s ON s.entity_id = e.owner
-    WHERE s.owner = '{owner}'
+    WHERE
+      LOWER(CASE WHEN LTRIM(REPLACE(s.owner, '0x', ''), '0') = '' THEN '0' ELSE LTRIM(REPLACE(s.owner, '0x', ''), '0') END)
+      =
+      LOWER(CASE WHEN LTRIM(REPLACE('{owner}', '0x', ''), '0') = '' THEN '0' ELSE LTRIM(REPLACE('{owner}', '0x', ''), '0') END)
       AND (
         (r.RELIC_E1_BALANCE > 0) OR (r.RELIC_E2_BALANCE > 0) OR (r.RELIC_E3_BALANCE > 0) OR
         (r.RELIC_E4_BALANCE > 0) OR (r.RELIC_E5_BALANCE > 0) OR (r.RELIC_E6_BALANCE > 0) OR

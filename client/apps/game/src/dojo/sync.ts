@@ -2,10 +2,10 @@ import type { AppStore } from "@/hooks/store/use-ui-store";
 import { useAccountStore } from "@/hooks/store/use-account-store";
 import { type SetupResult } from "@bibliothecadao/dojo";
 
-import { sqlApi } from "@/services/api";
-import { MAP_DATA_REFRESH_INTERVAL, MapDataStore } from "@bibliothecadao/eternum";
-import type { Component, Entity, Metadata, Schema } from "@dojoengine/recs";
-import { setEntities } from "@dojoengine/state";
+import { fetchWorldConfigMapCenterOffset, sqlApi } from "@/services/api";
+import { configManager, MAP_DATA_REFRESH_INTERVAL, MapDataStore } from "@bibliothecadao/eternum";
+import { getComponentValue, Has, runQuery, type Component, Entity, Metadata, Schema } from "@dojoengine/recs";
+import { getEntities, setEntities } from "@dojoengine/state";
 import type { Clause, ToriiClient, Entity as ToriiEntity } from "@dojoengine/torii-wasm/types";
 import {
   getAddressNamesFromTorii,
@@ -20,6 +20,7 @@ import { ToriiSyncWorkerManager } from "./sync-worker-manager";
 import { buildModelKeysClause, type GlobalModelStreamConfig } from "./torii-stream-manager";
 
 export const EVENT_QUERY_LIMIT = 40_000;
+const TORII_STREAM_SUBSCRIPTION_SETUP_TIMEOUT_MS = 8_000;
 
 let entityStreamSubscription: { cancel: () => void } | null = null;
 let entityStreamSubscriptionAttempt = 0;
@@ -78,6 +79,44 @@ const PLAYER_STRUCTURE_MODELS: string[] = [
 
 const GLOBAL_STREAM_MODELS: GlobalModelStreamConfig[] = GLOBAL_NON_SPATIAL_MODELS.map((model) => ({ model }));
 const GLOBAL_STREAM_CLAUSE = buildModelKeysClause(GLOBAL_STREAM_MODELS);
+
+const MAP_CENTER_FELT = 2_147_483_646;
+const SPATIAL_BOOTSTRAP_HYDRATION_BATCH_SIZE = 64;
+
+const applyMapCenterOffset = (mapCenterOffset: number): void => {
+  const manager = configManager as any;
+  const expectedMapCenter = MAP_CENTER_FELT - Number(mapCenterOffset ?? 0);
+  let method = "none";
+
+  if (typeof manager.setMapCenterFromOffset === "function") {
+    manager.setMapCenterFromOffset(mapCenterOffset);
+    method = "setMapCenterFromOffset";
+  } else if (typeof manager.setMapCenter === "function") {
+    manager.setMapCenter(expectedMapCenter);
+    method = "setMapCenter";
+  } else if (manager && typeof manager === "object") {
+    // Some workspace/package-link combinations can expose an older runtime shape
+    // without setter methods. Write the canonical value directly as last resort.
+    (manager as { mapCenter?: number }).mapCenter = expectedMapCenter;
+    method = "direct_mapCenter_field";
+  }
+
+  let appliedMapCenter = Number(manager.getMapCenter?.());
+  let forcedFallback = false;
+  if (Number.isFinite(appliedMapCenter) && appliedMapCenter !== expectedMapCenter && typeof manager.setMapCenter === "function") {
+    manager.setMapCenter(expectedMapCenter);
+    appliedMapCenter = Number(manager.getMapCenter?.());
+    forcedFallback = true;
+  }
+
+  console.log("[sync] Applied map center from offset", {
+    mapCenterOffset,
+    expectedMapCenter,
+    appliedMapCenter,
+    method,
+    forcedFallback,
+  });
+};
 
 type BatchPayload = { upserts: ToriiEntity[]; deletions: string[] };
 
@@ -217,6 +256,29 @@ const createWorkerQueueProcessor = (
   }
 };
 
+const withSetupTimeout = async <T>(promise: Promise<T>, label: string): Promise<T> => {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise.finally(() => {
+        if (timeoutId !== null) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+      }),
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`[sync] ${label} setup timed out after ${TORII_STREAM_SUBSCRIPTION_SETUP_TIMEOUT_MS}ms`));
+        }, TORII_STREAM_SUBSCRIPTION_SETUP_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
+  }
+};
+
 export const syncEntitiesDebounced = async (
   client: ToriiClient,
   setupResult: SetupResult,
@@ -255,20 +317,39 @@ export const syncEntitiesDebounced = async (
     }
   };
 
-  const entitySub = await client.onEntityUpdated(entityKeyClause, (data: ToriiEntity) => {
+  const entitySubPromise = client.onEntityUpdated(entityKeyClause, (data: ToriiEntity) => {
     if (logging) console.log("Entity updated", data);
     queueUpdate(data, "entity");
   });
 
-  const eventSub = await client.onEventMessageUpdated(entityKeyClause, (data: ToriiEntity) => {
+  const eventSubPromise = client.onEventMessageUpdated(entityKeyClause, (data: ToriiEntity) => {
     if (logging) console.log("Event message updated", data.hashed_keys);
     queueUpdate(data, "event");
   });
 
+  // Main entity stream is critical for correctness; do not fail-fast here.
+  // It can legitimately take longer on local shards under load.
+  const entitySub = await entitySubPromise;
+
+  let eventSub: { cancel: () => void } | null = null;
+  let canceled = false;
+  void withSetupTimeout(eventSubPromise, "onEventMessageUpdated")
+    .then((subscription) => {
+      if (canceled) {
+        subscription.cancel();
+        return;
+      }
+      eventSub = subscription;
+    })
+    .catch((error) => {
+      console.warn("[sync] Event message stream unavailable, continuing with entity stream only", error);
+    });
+
   return {
     cancel: () => {
+      canceled = true;
       entitySub.cancel();
-      eventSub.cancel();
+      eventSub?.cancel();
       queueProcessor.dispose();
     },
   };
@@ -293,10 +374,136 @@ const startGlobalEntityStreamSubscription = (
     });
 };
 
+const ensureWorldConfigReady = async (
+  setup: SetupResult,
+  contractComponents: Component<Schema, Metadata, undefined>[],
+): Promise<number> => {
+  const worldConfigComponent = (setup.network.contractComponents as any).WorldConfig;
+  if (!worldConfigComponent) {
+    throw new Error("[sync] Protocol violation: WorldConfig component missing in contractComponents");
+  }
+
+  await getEntities(
+    setup.network.toriiClient,
+    {
+      Keys: {
+        keys: [undefined],
+        pattern_matching: "FixedLen",
+        models: ["s1_eternum-WorldConfig"],
+      },
+    },
+    contractComponents as any,
+    [],
+    ["s1_eternum-WorldConfig"],
+    EVENT_QUERY_LIMIT,
+    false,
+  );
+  const fetchedCount = runQuery([Has(worldConfigComponent)]).size;
+
+  const maxAttempts = 40;
+  const attemptDelayMs = 100;
+  let worldConfigEntities: Set<Entity> = new Set();
+  let worldConfig: ReturnType<typeof getComponentValue> | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    worldConfigEntities = runQuery([Has(worldConfigComponent)]);
+    const worldConfigEntity = Array.from(worldConfigEntities)[0];
+    worldConfig =
+      worldConfigEntity !== undefined
+        ? getComponentValue(worldConfigComponent, worldConfigEntity as Entity)
+        : null;
+
+    if (worldConfig) {
+      break;
+    }
+
+    if (attempt < maxAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, attemptDelayMs));
+    }
+  }
+
+  if (!worldConfig) {
+    let sqlMapCenterOffset: number | null = null;
+    try {
+      sqlMapCenterOffset = await fetchWorldConfigMapCenterOffset();
+    } catch (sqlError) {
+      console.warn("[sync] WorldConfig SQL fallback query failed", sqlError);
+    }
+
+    if (sqlMapCenterOffset !== null) {
+      applyMapCenterOffset(sqlMapCenterOffset);
+      console.warn("[sync] WorldConfig not materialized in RECS, but SQL confirms presence", {
+        fetchedCount,
+        recsEntityCount: worldConfigEntities.size,
+        mapCenterOffset: sqlMapCenterOffset,
+      });
+      return sqlMapCenterOffset;
+    }
+
+    throw new Error(
+      `[sync] Protocol violation: WorldConfig missing after bootstrap sync (attempts=${maxAttempts}, delay_ms=${attemptDelayMs}, fetched_count=${fetchedCount}, recs_entity_count=${worldConfigEntities.size})`,
+    );
+  }
+
+  const mapCenterOffset = Number(worldConfig.map_center_offset ?? 0);
+  applyMapCenterOffset(mapCenterOffset);
+  console.log("[sync] WorldConfig ready", {
+    entityCount: worldConfigEntities.size,
+    mapCenterOffset,
+  });
+  return mapCenterOffset;
+};
+
+const hydrateSpatialStructuresFromSqlSnapshot = async (
+  setup: SetupResult,
+  contractComponents: Component<Schema, Metadata, undefined>[],
+  currentRecsStructureCount: number,
+) => {
+  let structures: Array<{ entity_id: number; coord_x: number; coord_y: number }> = [];
+  try {
+    structures = await sqlApi.fetchAllStructuresMapData();
+  } catch (error) {
+    console.error("[sync] Failed to fetch SQL structure snapshot for spatial hydration", error);
+    return { sqlStructureCount: 0, hydratedCount: 0 };
+  }
+
+  const structuresToHydrate = structures
+    .filter(
+      (structure) =>
+        Number.isFinite(structure.entity_id) &&
+        Number.isFinite(structure.coord_x) &&
+        Number.isFinite(structure.coord_y),
+    )
+    .map((structure) => ({
+      entityId: structure.entity_id,
+      position: { col: structure.coord_x, row: structure.coord_y },
+    }));
+
+  if (currentRecsStructureCount >= structuresToHydrate.length) {
+    return {
+      sqlStructureCount: structuresToHydrate.length,
+      hydratedCount: 0,
+      skipped: true,
+    };
+  }
+
+  for (let i = 0; i < structuresToHydrate.length; i += SPATIAL_BOOTSTRAP_HYDRATION_BATCH_SIZE) {
+    const batch = structuresToHydrate.slice(i, i + SPATIAL_BOOTSTRAP_HYDRATION_BATCH_SIZE);
+    await getStructuresDataFromTorii(setup.network.toriiClient, contractComponents, batch);
+  }
+
+  return {
+    sqlStructureCount: structuresToHydrate.length,
+    hydratedCount: structuresToHydrate.length,
+    skipped: false,
+  };
+};
+
 // initial sync runs before the game is playable and should sync minimal data
 type InitialSyncOptions = {
   logging?: boolean;
   reportProgress?: boolean;
+  enforceProtocolChecks?: boolean;
 };
 
 export const initialSync = async (
@@ -305,7 +512,7 @@ export const initialSync = async (
   setInitialSyncProgress: (progress: number) => void,
   options: InitialSyncOptions = {},
 ) => {
-  const { logging = false, reportProgress = true } = options;
+  const { logging = false, reportProgress = true, enforceProtocolChecks = false } = options;
   console.log("[STARTING syncEntitiesDebounced]");
   entityStreamSubscriptionAttempt += 1;
   if (entityStreamSubscription) {
@@ -370,7 +577,12 @@ export const initialSync = async (
       }
     }
 
-    const firstGlobalStructure = ownedStructures.length === 0 ? await sqlApi.fetchFirstStructure() : null;
+    let firstGlobalStructure = null;
+    try {
+      firstGlobalStructure = await sqlApi.fetchFirstStructure();
+    } catch (error) {
+      console.error("[sync] Failed to fetch first global structure for initial selection", error);
+    }
     const { selectedStructure, spectator: selectAsSpectator } = resolveInitialStructureSelection({
       ownedStructures,
       firstGlobalStructure,
@@ -397,6 +609,15 @@ export const initialSync = async (
   }
 
   await getConfigFromTorii(setup.network.toriiClient, setup.network.contractComponents as any);
+  let worldConfigMapCenterOffset: number | null = null;
+  try {
+    worldConfigMapCenterOffset = await ensureWorldConfigReady(setup, contractComponents);
+  } catch (error) {
+    if (enforceProtocolChecks) {
+      throw error;
+    }
+    console.warn("[sync] Non-fatal protocol check failed on main world", error);
+  }
 
   updateProgress(50);
 
@@ -406,9 +627,40 @@ export const initialSync = async (
   await getGuildsFromTorii(setup.network.toriiClient, setup.network.contractComponents as any);
   updateProgress(90);
 
+  const structureComponent = (setup.network.contractComponents as any).Structure;
+  if (structureComponent) {
+    const structureEntityCountBeforeSpatialHydration = runQuery([Has(structureComponent)]).size;
+    const hydrationResult = await hydrateSpatialStructuresFromSqlSnapshot(
+      setup,
+      contractComponents,
+      structureEntityCountBeforeSpatialHydration,
+    );
+    const structureEntityCountAfterSpatialHydration = runQuery([Has(structureComponent)]).size;
+
+    if (hydrationResult.sqlStructureCount > 0 && structureEntityCountAfterSpatialHydration === 0) {
+      const protocolError = new Error(
+        `[sync] Protocol violation: spatial structure snapshot missing after bootstrap (sql_structures=${hydrationResult.sqlStructureCount})`,
+      );
+      if (enforceProtocolChecks) {
+        throw protocolError;
+      }
+      console.warn(protocolError);
+    } else {
+      console.log("[sync] Spatial structure snapshot state", {
+        sqlStructureCount: hydrationResult.sqlStructureCount,
+        recsStructureCountBefore: structureEntityCountBeforeSpatialHydration,
+        recsStructureCountAfter: structureEntityCountAfterSpatialHydration,
+        hydratedCount: hydrationResult.hydratedCount,
+        skipped: hydrationResult.skipped,
+      });
+    }
+  }
+
   await MapDataStore.getInstance(MAP_DATA_REFRESH_INTERVAL, sqlApi).refresh();
 
   updateProgress(100);
+
+  return { worldConfigMapCenterOffset };
 };
 
 const resubscribeEntityStream = async (

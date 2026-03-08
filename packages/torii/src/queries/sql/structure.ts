@@ -2,13 +2,19 @@ export const STRUCTURE_QUERIES = {
   STRUCTURES_BY_OWNER: `
     SELECT \`base.coord_x\` AS coord_x, \`base.coord_y\` AS coord_y, entity_id, owner 
     FROM [s1_eternum-Structure] 
-    WHERE owner = '{owner}';
+    WHERE
+      LOWER(CASE WHEN LTRIM(REPLACE(owner, '0x', ''), '0') = '' THEN '0' ELSE LTRIM(REPLACE(owner, '0x', ''), '0') END)
+      =
+      LOWER(CASE WHEN LTRIM(REPLACE('{owner}', '0x', ''), '0') = '' THEN '0' ELSE LTRIM(REPLACE('{owner}', '0x', ''), '0') END);
   `,
 
   OTHER_STRUCTURES: `
     SELECT entity_id AS entityId, \`metadata.realm_id\` AS realmId, owner, category 
     FROM [s1_eternum-Structure] 
-    WHERE owner != '{owner}';
+    WHERE
+      LOWER(CASE WHEN LTRIM(REPLACE(owner, '0x', ''), '0') = '' THEN '0' ELSE LTRIM(REPLACE(owner, '0x', ''), '0') END)
+      !=
+      LOWER(CASE WHEN LTRIM(REPLACE('{owner}', '0x', ''), '0') = '' THEN '0' ELSE LTRIM(REPLACE('{owner}', '0x', ''), '0') END);
   `,
 
   REALM_SETTLEMENTS: `
@@ -48,7 +54,10 @@ export const STRUCTURE_QUERIES = {
         \`metadata.has_wonder\` as has_wonder,
         \`base.level\` as level
     FROM \`s1_eternum-Structure\`
-    WHERE owner = '{owner}'
+    WHERE
+      LOWER(CASE WHEN LTRIM(REPLACE(owner, '0x', ''), '0') = '' THEN '0' ELSE LTRIM(REPLACE(owner, '0x', ''), '0') END)
+      =
+      LOWER(CASE WHEN LTRIM(REPLACE('{owner}', '0x', ''), '0') = '' THEN '0' ELSE LTRIM(REPLACE('{owner}', '0x', ''), '0') END)
     ORDER BY category, entity_id;
   `,
 

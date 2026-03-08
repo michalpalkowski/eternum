@@ -440,8 +440,30 @@ export class WorldUpdateListener {
 
               // Use sequential update processing to prevent race conditions
               const result = await this.processSequentialUpdate(rawOccupierId, async () => {
-                // Use DataEnhancer to fetch all enhanced data
-                const enhancedData = await this.dataEnhancer.enhanceStructureData(rawOccupierId);
+                // Protocol-first fail-safe:
+                // structure tile updates must keep flowing even if enrichment fails.
+                // This prevents partial map hydration where only a subset of structures
+                // is rendered due to non-critical enrichment errors.
+                let enhancedData: Awaited<ReturnType<typeof this.dataEnhancer.enhanceStructureData>>;
+                try {
+                  enhancedData = await this.dataEnhancer.enhanceStructureData(rawOccupierId);
+                } catch (error) {
+                  console.warn(
+                    `[WorldUpdateListener] enhanceStructureData failed for structure ${rawOccupierId}, using base fallback`,
+                    error,
+                  );
+                  enhancedData = {
+                    owner: {
+                      address: 0n,
+                      ownerName: "",
+                      guildName: "",
+                    },
+                    guardArmies: [],
+                    activeProductions: [],
+                    structureName: undefined,
+                    battleData: undefined,
+                  };
+                }
 
                 const structureComponent = getComponentValue(
                   this.setup.components.Structure,
@@ -526,7 +548,10 @@ export class WorldUpdateListener {
               return result || undefined;
             }
           },
-          false,
+          // Shard bootstrap can prehydrate TileOpt before scene listeners attach.
+          // Run on init so occupied structure tiles materialize immediately in renderer
+          // instead of waiting for a future delta update.
+          true,
         );
       },
       onStructureUpdate: (callback: (value: StructureSystemUpdate) => void) => {

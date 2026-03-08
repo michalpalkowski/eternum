@@ -57,7 +57,7 @@ import {
   Structure,
   StructureType,
 } from "@bibliothecadao/types";
-import { getComponentValue } from "@dojoengine/recs";
+import { getComponentValue, Has, runQuery } from "@dojoengine/recs";
 import { getEntityIdFromKeys } from "@dojoengine/utils";
 import throttle from "lodash/throttle";
 import { Account, AccountInterface } from "starknet";
@@ -237,18 +237,28 @@ const WORLDMAP_ZOOM_HARDENING = createWorldmapZoomHardeningConfig({
   telemetry: env.VITE_PUBLIC_WORLDMAP_ZOOM_HARDENING_TELEMETRY === true,
 });
 const TORII_BOUNDS_MODELS: BoundsModelConfig[] = [
-  { model: "s1_eternum-TileOpt", colField: "col", rowField: "row" },
   { model: "s1_eternum-Structure", colField: "base.coord_x", rowField: "base.coord_y" },
   { model: "s1_eternum-StructureBuildings", colField: "coord.x", rowField: "coord.y" },
   { model: "s1_eternum-ExplorerTroops", colField: "coord.x", rowField: "coord.y" },
-  { model: "s1_eternum-ExplorerRewardEvent", colField: "coord.x", rowField: "coord.y" },
-  { model: "s1_eternum-BattleEvent", colField: "coord.x", rowField: "coord.y" },
 ];
 const WORLDMAP_CHUNK_POLICY = createWorldmapChunkPolicy(WORLD_CHUNK_CONFIG);
+const WORLDMAP_TILE_FETCH_TIMEOUT_MS = 8_000;
+const WORLDMAP_TILE_FETCH_PAGE_SIZE = 48;
+const WORLDMAP_TILE_FETCH_MAX_CONCURRENCY = 3;
+const WORLDMAP_TILE_FETCH_INITIAL_MAX_CONCURRENCY = 1;
 type DirectionalPrefetchAnchor = {
   forwardChunkKey: string;
   movementAxis: "x" | "z";
   movementSign: -1 | 1;
+};
+
+type TileFetchPage = {
+  minCol: number;
+  maxCol: number;
+  minRow: number;
+  maxRow: number;
+  pageNumber: number;
+  totalPages: number;
 };
 
 export default class WorldmapScene extends HexagonScene {
@@ -310,6 +320,8 @@ export default class WorldmapScene extends HexagonScene {
   private readonly minCachedExploredRetentionFraction = 0.6;
   private readonly minExpectedExploredForCacheValidation = 48;
   private toriiLoadingCounter = 0;
+  private initialMapHydrationCompleted = false;
+  private initialMapHydrationStartedAtMs: number | null = null;
   private isSwitchedOff = false;
   private readonly chunkRowsAhead = WORLDMAP_CHUNK_POLICY.pin.rowsAhead;
   private readonly chunkRowsBehind = WORLDMAP_CHUNK_POLICY.pin.rowsBehind;
@@ -2383,6 +2395,8 @@ export default class WorldmapScene extends HexagonScene {
     // Clear map loading state so "Charting Territories" doesn't persist
     // when switching away while fetches are still in-flight
     this.toriiLoadingCounter = 0;
+    this.initialMapHydrationCompleted = false;
+    this.initialMapHydrationStartedAtMs = null;
     this.state.setLoading(LoadingStateKey.Map, false);
 
     this.disposeStoreSubscriptions();
@@ -3632,15 +3646,26 @@ export default class WorldmapScene extends HexagonScene {
       }
     });
 
-    // Drop cached tile data for render areas that are no longer covered.
+    this.pinnedChunkKeys = nextPinned;
+    this.pinnedRenderAreas = nextPinnedAreas;
+    this.pruneQueuedDirectionalPrefetches();
+
+    // Keep fetched areas bounded to currently relevant coverage:
+    // - pinned areas for active chunk neighborhood
+    // - directional prefetch targets still desired
     // Keep in-flight pending promises for dedupe stability while they resolve.
     removedPinnedAreas.forEach((areaKey) => {
       this.fetchedChunks.delete(areaKey);
     });
-
-    this.pinnedChunkKeys = nextPinned;
-    this.pinnedRenderAreas = nextPinnedAreas;
-    this.pruneQueuedDirectionalPrefetches();
+    this.fetchedChunks.forEach((areaKey) => {
+      if (
+        !this.pinnedRenderAreas.has(areaKey) &&
+        !this.directionalPrefetchAreaKeys.has(areaKey) &&
+        !this.pendingChunks.has(areaKey)
+      ) {
+        this.fetchedChunks.delete(areaKey);
+      }
+    });
 
     removedPinnedChunks.forEach((chunkKey) => {
       if (chunkKey !== this.currentChunk) {
@@ -3774,8 +3799,10 @@ export default class WorldmapScene extends HexagonScene {
 
   private beginToriiFetch() {
     if (this.isSwitchedOff) return;
+    if (this.initialMapHydrationCompleted) return;
     if (this.toriiLoadingCounter === 0) {
       this.state.setLoading(LoadingStateKey.Map, true);
+      this.initialMapHydrationStartedAtMs = Date.now();
     }
     this.toriiLoadingCounter += 1;
   }
@@ -3788,6 +3815,12 @@ export default class WorldmapScene extends HexagonScene {
     this.toriiLoadingCounter -= 1;
     if (this.toriiLoadingCounter === 0) {
       this.state.setLoading(LoadingStateKey.Map, false);
+      if (!this.initialMapHydrationCompleted && this.initialMapHydrationStartedAtMs !== null) {
+        const durationMs = Date.now() - this.initialMapHydrationStartedAtMs;
+        if (import.meta.env.DEV) {
+          console.info("[WorldmapScene] Initial map hydration cycle finished", { durationMs });
+        }
+      }
     }
   }
 
@@ -3833,6 +3866,97 @@ export default class WorldmapScene extends HexagonScene {
     return ownedFetchPromise;
   }
 
+  private buildTileFetchPages(minCol: number, maxCol: number, minRow: number, maxRow: number): TileFetchPage[] {
+    const pages: TileFetchPage[] = [];
+    const pageSize = Math.max(8, Math.floor(WORLDMAP_TILE_FETCH_PAGE_SIZE));
+
+    for (let pageMinCol = minCol; pageMinCol <= maxCol; pageMinCol += pageSize) {
+      const pageMaxCol = Math.min(maxCol, pageMinCol + pageSize - 1);
+      for (let pageMinRow = minRow; pageMinRow <= maxRow; pageMinRow += pageSize) {
+        const pageMaxRow = Math.min(maxRow, pageMinRow + pageSize - 1);
+        pages.push({
+          minCol: pageMinCol,
+          maxCol: pageMaxCol,
+          minRow: pageMinRow,
+          maxRow: pageMaxRow,
+          pageNumber: 0,
+          totalPages: 0,
+        });
+      }
+    }
+
+    const totalPages = pages.length;
+    for (let index = 0; index < totalPages; index += 1) {
+      pages[index].pageNumber = index + 1;
+      pages[index].totalPages = totalPages;
+    }
+
+    return pages;
+  }
+
+  private async fetchTilePage(fetchKey: string, page: TileFetchPage): Promise<void> {
+    const pageFetchPromise = getMapFromToriiExact(
+      this.dojo.network.toriiClient,
+      this.dojo.network.contractComponents as unknown as Parameters<typeof getMapFromToriiExact>[1],
+      page.minCol,
+      page.maxCol,
+      page.minRow,
+      page.maxRow,
+    );
+
+    let timeoutId: number | null = null;
+
+    await Promise.race([
+      pageFetchPromise.finally(() => {
+        if (timeoutId !== null) {
+          window.clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+      }),
+      new Promise<never>((_, reject) => {
+        timeoutId = window.setTimeout(() => {
+          reject(
+            new Error(
+              `[WorldmapScene] Tile fetch timed out after ${WORLDMAP_TILE_FETCH_TIMEOUT_MS}ms (fetchKey=${fetchKey}, page=${page.pageNumber}/${page.totalPages}, cols=${page.minCol}-${page.maxCol}, rows=${page.minRow}-${page.maxRow})`,
+            ),
+          );
+        }, WORLDMAP_TILE_FETCH_TIMEOUT_MS);
+      }),
+    ]);
+  }
+
+  private async fetchTilePages(fetchKey: string, pages: TileFetchPage[]): Promise<void> {
+    if (pages.length === 0) {
+      return;
+    }
+
+    const concurrencyCap = this.initialMapHydrationCompleted
+      ? WORLDMAP_TILE_FETCH_MAX_CONCURRENCY
+      : WORLDMAP_TILE_FETCH_INITIAL_MAX_CONCURRENCY;
+    const workerCount = Math.min(Math.max(1, concurrencyCap), pages.length);
+    let cursor = 0;
+    const nextPage = () => {
+      if (cursor >= pages.length) {
+        return null;
+      }
+      const page = pages[cursor];
+      cursor += 1;
+      return page;
+    };
+
+    await Promise.all(
+      Array.from({ length: workerCount }, async () => {
+        while (true) {
+          const page = nextPage();
+          if (page === null) {
+            return;
+          }
+          await this.fetchTilePage(fetchKey, page);
+        }
+      }),
+    );
+  }
+
   private async executeTileEntitiesFetch(
     fetchKey: string,
     minCol: number,
@@ -3842,37 +3966,120 @@ export default class WorldmapScene extends HexagonScene {
   ): Promise<boolean> {
     this.beginToriiFetch();
     try {
-      await getMapFromToriiExact(
-        this.dojo.network.toriiClient,
-        this.dojo.network.contractComponents as unknown as Parameters<typeof getMapFromToriiExact>[1],
-        minCol + FELT_CENTER(),
-        maxCol + FELT_CENTER(),
-        minRow + FELT_CENTER(),
-        maxRow + FELT_CENTER(),
-      );
-      // Only add to the fetched cache if the render area is still pinned (still relevant)
-      if (this.pinnedRenderAreas.has(fetchKey)) {
-        this.fetchedChunks.add(fetchKey);
-        const currentAreaKey = this.currentChunk !== "null" ? this.getRenderAreaKeyForChunk(this.currentChunk) : null;
-        if (
-          shouldScheduleHydratedChunkRefreshForFetch({
-            fetchAreaKey: fetchKey,
-            currentAreaKey,
-          })
-        ) {
-          this.scheduleHydratedChunkRefresh(this.currentChunk);
+      const queryMinCol = minCol + FELT_CENTER();
+      const queryMaxCol = maxCol + FELT_CENTER();
+      const queryMinRow = minRow + FELT_CENTER();
+      const queryMaxRow = maxRow + FELT_CENTER();
+      const pages = this.buildTileFetchPages(queryMinCol, queryMaxCol, queryMinRow, queryMaxRow);
+
+      if (import.meta.env.DEV) {
+        console.debug("[WorldmapScene] Fetching tile pages", {
+          fetchKey,
+          pageCount: pages.length,
+          pageSize: WORLDMAP_TILE_FETCH_PAGE_SIZE,
+          workerCount: Math.min(WORLDMAP_TILE_FETCH_MAX_CONCURRENCY, Math.max(1, pages.length)),
+          bounds: {
+            cols: `${minCol}-${maxCol}`,
+            rows: `${minRow}-${maxRow}`,
+          },
+        });
+      }
+
+      await this.fetchTilePages(fetchKey, pages);
+
+      if (this.isSwitchedOff) {
+        return false;
+      }
+
+      const tileComponent = (this.dojo.network.contractComponents as any).TileOpt;
+      const tileCount = tileComponent ? runQuery([Has(tileComponent)]).size : undefined;
+      if (tileCount === 0) {
+        const feltCenter = FELT_CENTER();
+        console.warn("[WorldmapScene] Tile fetch returned zero rows", {
+          fetchKey,
+          minCol,
+          maxCol,
+          minRow,
+          maxRow,
+          feltCenter,
+          queryMinCol: minCol + feltCenter,
+          queryMaxCol: maxCol + feltCenter,
+          queryMinRow: minRow + feltCenter,
+          queryMaxRow: maxRow + feltCenter,
+          tileCount,
+        });
+        recordChunkDiagnosticsEvent(this.chunkDiagnostics, "tile_fetch_failed");
+        return false;
+      }
+      // Mark fetch area as hydrated; updatePinnedChunks() prunes stale areas.
+      this.fetchedChunks.add(fetchKey);
+      if (!this.initialMapHydrationCompleted) {
+        this.initialMapHydrationCompleted = true;
+        if (import.meta.env.DEV) {
+          console.info("[WorldmapScene] Initial map hydration completed", {
+            fetchKey,
+            tileCount,
+            minCol,
+            maxCol,
+            minRow,
+            maxRow,
+          });
         }
+      }
+      const currentAreaKey = this.currentChunk !== "null" ? this.getRenderAreaKeyForChunk(this.currentChunk) : null;
+      if (
+        shouldScheduleHydratedChunkRefreshForFetch({
+          fetchAreaKey: fetchKey,
+          currentAreaKey,
+        })
+      ) {
+        this.scheduleHydratedChunkRefresh(this.currentChunk);
       }
       recordChunkDiagnosticsEvent(this.chunkDiagnostics, "tile_fetch_succeeded");
       return true;
     } catch (error) {
-      console.error("Error fetching tile entities:", error);
+      const isTimeoutError = error instanceof Error && error.message.includes("Tile fetch timed out");
+      if (isTimeoutError) {
+        console.warn("Tile fetch timed out:", error.message);
+      } else {
+        console.error("Error fetching tile entities:", error);
+      }
       // Don't add to fetchedChunks on error so it can be retried
       recordChunkDiagnosticsEvent(this.chunkDiagnostics, "tile_fetch_failed");
       return false;
     } finally {
       this.endToriiFetch();
     }
+  }
+
+  private hasNestedMapEntryInBounds<T>(
+    source: Map<number, Map<number, T>>,
+    minCol: number,
+    maxCol: number,
+    minRow: number,
+    maxRow: number,
+  ): boolean {
+    for (const [col, rowMap] of source) {
+      if (col < minCol || col > maxCol) {
+        continue;
+      }
+      for (const row of rowMap.keys()) {
+        if (row >= minRow && row <= maxRow) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private hasChunkSpatialFallbackData(startCol: number, startRow: number): boolean {
+    const endCol = startCol + this.chunkSize - 1;
+    const endRow = startRow + this.chunkSize - 1;
+
+    return (
+      this.hasNestedMapEntryInBounds(this.structureHexes, startCol, endCol, startRow, endRow) ||
+      this.hasNestedMapEntryInBounds(this.exploredTiles, startCol, endCol, startRow, endRow)
+    );
   }
 
   private touchMatrixCache(chunkKey: string) {
@@ -4528,21 +4735,38 @@ export default class WorldmapScene extends HexagonScene {
       this.removeCachedMatricesForChunk(startRow, startCol);
     }
 
-    // Kick off tile data fetch after invalidation so force mode truly bypasses stale caches.
-    const tileFetchPromise = this.computeTileEntities(chunkKey);
-
     this.updatePinnedChunks(surroundingChunks);
-    const toriiBoundsSwitchPromise = this.updateToriiBoundsSubscription(chunkKey, transitionToken);
-
-    // Start loading all surrounding chunks (they will deduplicate automatically)
-    surroundingChunks.forEach((chunk) => this.computeTileEntities(chunk));
+    // Kick off tile data fetch after pinning so successful fetches are retained.
+    const tileFetchPromise = this.computeTileEntities(chunkKey);
 
     // Calculate the starting position for the new chunk - this is the main visual update
     await this.updateHexagonGrid(startRow, startCol, this.renderChunkSize.height, this.renderChunkSize.width);
 
-    // Wait for core tile data before updating managers to avoid empty renders
-    const tileFetchSucceeded = await tileFetchPromise;
-    await toriiBoundsSwitchPromise;
+    let toriiBoundsSwitchPromise: Promise<void>;
+    const startupHydration = !this.initialMapHydrationCompleted;
+    if (this.initialMapHydrationCompleted) {
+      toriiBoundsSwitchPromise = this.updateToriiBoundsSubscription(chunkKey, transitionToken);
+
+      // Prefetch neighbors only after the first successful hydration cycle to avoid
+      // overwhelming shard-local Torii during startup.
+      surroundingChunks.forEach((chunk) => this.computeTileEntities(chunk));
+    } else {
+      toriiBoundsSwitchPromise = this.updateToriiBoundsSubscription(chunkKey, transitionToken);
+    }
+
+    const [tileFetchSucceeded] = await Promise.all([tileFetchPromise, toriiBoundsSwitchPromise]);
+    if (!tileFetchSucceeded && import.meta.env.DEV) {
+      console.warn(
+        startupHydration
+          ? "[WorldmapScene] Initial tile fetch did not complete successfully"
+          : "[WorldmapScene] Tile fetch did not complete successfully",
+        {
+          chunkKey,
+          startCol,
+          startRow,
+        },
+      );
+    }
     this.hydratedChunkRefreshes.delete(chunkKey);
 
     const isCurrentTransition = transitionToken === this.chunkTransitionToken;
@@ -4592,7 +4816,8 @@ export default class WorldmapScene extends HexagonScene {
     this.visibilityManager?.forceUpdate();
 
     // Update all managers concurrently once shared prerequisites are ready
-    await this.updateManagersForChunk(chunkKey, { force: effectiveForce, transitionToken });
+    const forceManagerRefresh = effectiveForce || this.hasChunkSpatialFallbackData(startCol, startRow);
+    await this.updateManagersForChunk(chunkKey, { force: forceManagerRefresh, transitionToken });
     recordChunkDiagnosticsEvent(this.chunkDiagnostics, "transition_committed");
 
     if (chunkSwitchActions.shouldUnregisterPreviousChunk && oldChunk) {
@@ -4626,20 +4851,24 @@ export default class WorldmapScene extends HexagonScene {
     const surroundingChunks = this.getSurroundingChunkKeys(startRow, startCol);
     this.removeCachedMatricesForChunk(startRow, startCol);
 
-    // Start tile data fetch after force invalidation.
-    const tileFetchPromise = this.computeTileEntities(chunkKey);
-
     this.updatePinnedChunks(surroundingChunks);
+    // Start tile data fetch after pinning so successful fetches are retained.
+    const tileFetchPromise = this.computeTileEntities(chunkKey);
     const toriiBoundsSwitchPromise = this.updateToriiBoundsSubscription(chunkKey, transitionToken);
     surroundingChunks.forEach((chunk) => this.computeTileEntities(chunk));
 
     await this.updateHexagonGrid(startRow, startCol, this.renderChunkSize.height, this.renderChunkSize.width);
 
-    // Wait for tile data before updating managers
-    const tileFetchSucceeded = await tileFetchPromise;
-    await toriiBoundsSwitchPromise;
+    const [tileFetchSucceeded] = await Promise.all([tileFetchPromise, toriiBoundsSwitchPromise]);
     this.hydratedChunkRefreshes.delete(chunkKey);
     if (!tileFetchSucceeded) {
+      if (import.meta.env.DEV) {
+        console.warn("[WorldmapScene] Tile fetch failed during refresh", {
+          chunkKey,
+          startCol,
+          startRow,
+        });
+      }
       return;
     }
 

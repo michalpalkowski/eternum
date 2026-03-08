@@ -1185,6 +1185,14 @@ export class ClientConfigManager {
   getMapCenter() {
     return this.mapCenter;
   }
+
+  setMapCenter(center: number) {
+    this.mapCenter = center;
+  }
+
+  setMapCenterFromOffset(mapCenterOffset: number) {
+    this.mapCenter = MAP_CENTER - Number(mapCenterOffset ?? 0);
+  }
 }
 
 export const configManager = ClientConfigManager.instance();

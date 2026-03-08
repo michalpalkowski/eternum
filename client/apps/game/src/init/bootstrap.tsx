@@ -15,8 +15,12 @@ import {
   resolveChain,
 } from "@/runtime/world";
 import { buildWorldProfile } from "@/runtime/world/profile-builder";
-import { setSqlApiBaseUrl } from "@/services/api";
-import { parseShardUrlParams } from "@/sharding/protocol";
+import { fetchWorldConfigMapCenterOffset, setSqlApiBaseUrl } from "@/services/api";
+import {
+  parseShardIdParts,
+  parseShardUrlParams,
+  parseTransportHealthFromStatusResponse,
+} from "@/sharding/protocol";
 import { Chain, getGameManifest } from "@contracts";
 import { dojoConfig } from "../../dojo-config";
 import { env, hasPublicNodeUrl } from "../../env";
@@ -81,6 +85,44 @@ const handleNoAccount = (modalContent: ReactNode) => {
   const uiStore = useUIStore.getState();
   uiStore.setModal(null, false);
   uiStore.setModal(modalContent, true);
+};
+
+const SHARD_TRANSPORT_HEALTH_TIMEOUT_MS = 30_000;
+const SHARD_TRANSPORT_HEALTH_POLL_INTERVAL_MS = 1_500;
+
+const waitForDelay = (delayMs: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
+
+const ensureShardTransportHealthy = async (params: { operatorUrl: string; shardId: string }): Promise<void> => {
+  const { gameContractAddress, onchainShardId } = parseShardIdParts(params.shardId);
+  const transportUrl = `${params.operatorUrl}/shard/${gameContractAddress}/${onchainShardId}/transport-health`;
+  const startedAt = Date.now();
+  let lastReason = "transport status unknown";
+
+  while (Date.now() - startedAt < SHARD_TRANSPORT_HEALTH_TIMEOUT_MS) {
+    try {
+      const response = await fetch(transportUrl);
+      if (!response.ok) {
+        lastReason = `HTTP ${response.status}`;
+      } else {
+        const payload: unknown = await response.json();
+        const transport = parseTransportHealthFromStatusResponse(payload);
+        if (transport.status === "healthy") {
+          return;
+        }
+        lastReason = transport.errorCode ?? transport.errorMessage ?? `status=${transport.status}`;
+      }
+    } catch (error) {
+      lastReason = error instanceof Error ? error.message : "transport-health fetch failed";
+    }
+    await waitForDelay(SHARD_TRANSPORT_HEALTH_POLL_INTERVAL_MS);
+  }
+
+  throw new Error(
+    `[bootstrap] Shard transport is not healthy after ${SHARD_TRANSPORT_HEALTH_TIMEOUT_MS}ms (${lastReason})`,
+  );
 };
 
 const runBootstrap = async (): Promise<BootstrapResult> => {
@@ -160,6 +202,10 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
   // This prevents stale sessionStorage in the main tab from forcing shard mode.
   const shardSession = parseShardUrlParams(window.location.search);
   if (shardSession !== null) {
+    await ensureShardTransportHealthy({
+      operatorUrl: shardSession.operatorUrl,
+      shardId: shardSession.shardId,
+    });
     shardStore.enterShardMode(shardSession);
   } else {
     shardStore.clearShardMode();
@@ -180,7 +226,7 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
   // 2b) Shard mode override, validated by sharding protocol parser.
   if (shardSession !== null) {
     (dojoConfig as any).rpcUrl = shardSession.rpcUrl;
-    (dojoConfig as any).toriiUrl = shardSession.toriiUrl;
+    (dojoConfig as any).toriiUrl = shardSession.toriiGrpcUrl;
   }
 
   // 3) Point SQL API to the active world's Torii
@@ -210,11 +256,56 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
   );
   console.log("[DOJO SETUP COMPLETED]");
 
-  await initialSync(setupResult, uiStore, syncingStore.setInitialSyncProgress);
+  const initialSyncResult = await initialSync(setupResult, uiStore, syncingStore.setInitialSyncProgress, {
+    enforceProtocolChecks: shardSession !== null,
+  });
 
   console.log("[INITIAL SYNC COMPLETED]");
 
   configManager.setDojo(setupResult.components, ETERNUM_CONFIG());
+  let mapCenterOffset = initialSyncResult.worldConfigMapCenterOffset;
+  if (mapCenterOffset === null) {
+    try {
+      mapCenterOffset = await fetchWorldConfigMapCenterOffset();
+    } catch (error) {
+      console.warn("[bootstrap] Failed to fetch world config map_center_offset fallback", error);
+    }
+  }
+  if (mapCenterOffset !== null) {
+    const manager = configManager as any;
+    const expectedMapCenter = 2_147_483_646 - Number(mapCenterOffset ?? 0);
+    let method = "none";
+
+    if (typeof manager.setMapCenterFromOffset === "function") {
+      manager.setMapCenterFromOffset(mapCenterOffset);
+      method = "setMapCenterFromOffset";
+    } else if (typeof manager.setMapCenter === "function") {
+      manager.setMapCenter(expectedMapCenter);
+      method = "setMapCenter";
+    } else if (manager && typeof manager === "object") {
+      // Fallback for stale/older runtime shape where setter methods are missing.
+      (manager as { mapCenter?: number }).mapCenter = expectedMapCenter;
+      method = "direct_mapCenter_field";
+    }
+
+    let appliedMapCenter = Number(manager.getMapCenter?.());
+    let forcedFallback = false;
+    if (Number.isFinite(appliedMapCenter) && appliedMapCenter !== expectedMapCenter && typeof manager.setMapCenter === "function") {
+      manager.setMapCenter(expectedMapCenter);
+      appliedMapCenter = Number(manager.getMapCenter?.());
+      forcedFallback = true;
+    }
+
+    console.log("[bootstrap] mapCenter applied", {
+      mapCenterOffset,
+      expectedMapCenter,
+      appliedMapCenter,
+      method,
+      forcedFallback,
+    });
+  } else {
+    console.log("[bootstrap] mapCenter unchanged", { mapCenter: configManager.getMapCenter(), mapCenterOffset });
+  }
 
   // Store the cleanup function so we can call it when navigating away
   gameRendererCleanup = initializeGameRenderer(setupResult, env.VITE_PUBLIC_GRAPHICS_DEV == true);
