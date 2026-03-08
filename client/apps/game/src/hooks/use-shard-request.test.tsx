@@ -129,4 +129,102 @@ describe("useShardRequest", () => {
     expect(current.phase).toBe("error");
     expect(current.error).toContain("shards array");
   });
+
+  it("waits until transport health becomes healthy before ready", async () => {
+    const account: ExecutableAccount = {
+      execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue(undefined),
+    };
+
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ shard_contract_address: "0x1234abcd" }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            shards: [
+              {
+                phase: "gameplay_active",
+                katana_url: "http://localhost:5050",
+                torii_url: "http://localhost:8080",
+                torii_grpc_url: "http://localhost:18090",
+                game_contract_address: "0xabc123",
+                shard_id: "0xabc123@9",
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            transport: {
+              status: "degraded",
+              torii_http_reachable: true,
+              torii_sql_reachable: true,
+              torii_grpc_reachable: false,
+              bootstrap_snapshot_present: false,
+              error_code: "bootstrap_snapshot_missing",
+              error_message: "Bootstrap snapshot not captured yet",
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            shards: [
+              {
+                phase: "gameplay_active",
+                katana_url: "http://localhost:5050",
+                torii_url: "http://localhost:8080",
+                torii_grpc_url: "http://localhost:18090",
+                game_contract_address: "0xabc123",
+                shard_id: "0xabc123@9",
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            transport: {
+              status: "healthy",
+              torii_http_reachable: true,
+              torii_sql_reachable: true,
+              torii_grpc_reachable: true,
+              bootstrap_snapshot_present: true,
+              error_code: null,
+              error_message: null,
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+
+    await act(async () => {
+      root.render(<HookHarness account={account} operatorUrl="http://localhost:3001" />);
+    });
+
+    await act(async () => {
+      await getHookState(latestState).requestShard([42]);
+    });
+    expect(getHookState(latestState).phase).toBe("waiting");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(getHookState(latestState).phase).toBe("waiting");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(getHookState(latestState).phase).toBe("ready");
+  });
 });

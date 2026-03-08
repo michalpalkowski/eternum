@@ -1,5 +1,5 @@
 import { useDojo } from "@bibliothecadao/react";
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { useShardSettlement } from "@/hooks/use-shard-settlement";
 import { useShardStore } from "@/hooks/store/use-shard-store";
 import type { ExecutableAccount } from "@/sharding/types";
@@ -8,6 +8,8 @@ export const ShardBanner = () => {
   const isShardMode = useShardStore((state) => state.isShardMode);
   const shardId = useShardStore((state) => state.shardId);
   const operatorUrl = useShardStore((state) => state.operatorUrl);
+  const mainUrl = useShardStore((state) => state.mainUrl);
+  const clearShardMode = useShardStore((state) => state.clearShardMode);
   const {
     account: { account },
   } = useDojo();
@@ -16,6 +18,15 @@ export const ShardBanner = () => {
     shardId,
     operatorUrl,
   });
+
+  useEffect(() => {
+    if (phase !== "complete") {
+      return;
+    }
+
+    clearShardMode();
+    window.location.assign(mainUrl ?? "/play");
+  }, [clearShardMode, mainUrl, phase]);
 
   const handleSettle = useCallback(async () => {
     if (phase === "error") {
@@ -42,7 +53,7 @@ export const ShardBanner = () => {
     return (
       <Banner color="green">
         <span className="font-bold text-sm tracking-wider">SETTLEMENT COMPLETE</span>
-        <span className="text-xs opacity-80">You can close this tab and return to the main chain.</span>
+        <span className="text-xs opacity-80">Returning to main instance...</span>
       </Banner>
     );
   }
@@ -77,7 +88,7 @@ const bannerStyles = {
 } as const;
 
 const Banner = ({ color, children }: { color: "amber" | "green"; children: React.ReactNode }) => (
-  <div className="fixed top-0 left-1/2 -translate-x-1/2 z-50 pointer-events-auto">
+  <div className="fixed top-14 left-1/2 -translate-x-1/2 z-40 pointer-events-auto">
     <div className={`${bannerStyles[color]} border rounded-b-lg px-6 py-2 flex items-center gap-4 shadow-lg`}>
       {children}
     </div>

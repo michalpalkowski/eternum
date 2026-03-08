@@ -5,6 +5,7 @@ import { Position } from "@bibliothecadao/eternum";
 import { ensureStructureSynced } from "@/dojo/queries";
 import { UNDEFINED_STRUCTURE_ENTITY_ID } from "@/ui/constants";
 import { SetupResult } from "@bibliothecadao/dojo";
+import { buildPlaySceneUrl } from "@/sharding/location-url";
 import { useQuery } from "@bibliothecadao/react";
 import { ID } from "@bibliothecadao/types";
 import { getComponentValue } from "@dojoengine/recs";
@@ -81,7 +82,8 @@ const useNavigateToHexView = () => {
   const { handleUrlChange } = useQuery();
 
   return (position: Position) => {
-    const url = position.toHexLocationUrl();
+    const normalized = position.getNormalized();
+    const url = buildPlaySceneUrl("hex", normalized.x, normalized.y);
 
     setIsLoadingScreenEnabled(true);
     showBlankOverlay(false);
@@ -102,7 +104,8 @@ export const useNavigateToMapView = () => {
     }
     showBlankOverlay(false);
     setPreviewBuilding(null);
-    handleUrlChange(position.toMapLocationUrl());
+    const normalized = position.getNormalized();
+    handleUrlChange(buildPlaySceneUrl("map", normalized.x, normalized.y));
   };
 };
 

@@ -7,6 +7,8 @@ interface ShardState {
   operatorUrl: string | null;
   shardRpcUrl: string | null;
   shardToriiUrl: string | null;
+  shardToriiGrpcUrl: string | null;
+  mainUrl: string | null;
   enterShardMode: (params: ShardSessionParams) => void;
   clearShardMode: () => void;
 }
@@ -17,10 +19,12 @@ export const useShardStore = create<ShardState>()((set) => ({
   operatorUrl: null,
   shardRpcUrl: null,
   shardToriiUrl: null,
-  enterShardMode: ({ shardId, operatorUrl, rpcUrl, toriiUrl }) => {
+  shardToriiGrpcUrl: null,
+  mainUrl: null,
+  enterShardMode: ({ shardId, operatorUrl, rpcUrl, toriiUrl, toriiGrpcUrl, mainUrl }) => {
     sessionStorage.setItem(
       SHARD_SESSION_STORAGE_KEY,
-      serializeShardSession({ shardId, operatorUrl, rpcUrl, toriiUrl }),
+      serializeShardSession({ shardId, operatorUrl, rpcUrl, toriiUrl, toriiGrpcUrl, mainUrl }),
     );
     set({
       isShardMode: true,
@@ -28,6 +32,8 @@ export const useShardStore = create<ShardState>()((set) => ({
       operatorUrl,
       shardRpcUrl: rpcUrl,
       shardToriiUrl: toriiUrl,
+      shardToriiGrpcUrl: toriiGrpcUrl,
+      mainUrl,
     });
   },
   clearShardMode: () => {
@@ -38,6 +44,8 @@ export const useShardStore = create<ShardState>()((set) => ({
       operatorUrl: null,
       shardRpcUrl: null,
       shardToriiUrl: null,
+      shardToriiGrpcUrl: null,
+      mainUrl: null,
     });
   },
 }));

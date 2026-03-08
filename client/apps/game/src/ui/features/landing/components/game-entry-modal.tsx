@@ -6,27 +6,28 @@
  * 2. Settlement phase - If user is registered but hasn't settled
  * 3. Auto-transitions to game when ready
  */
+import { useQueryClient } from "@tanstack/react-query";
+import { AnimatePresence, motion } from "framer-motion";
+import { Castle, Check, Eye, Loader2, MapPin, Pickaxe, Play, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
-import { X, Play, Eye, Loader2, Check, Castle, MapPin, Pickaxe, Sparkles } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
 
 import { ReactComponent as TreasureChest } from "@/assets/icons/treasure-chest.svg";
+import { refreshSessionPolicies } from "@/hooks/context/session-policy-refresh";
 import type { BootstrapTask } from "@/hooks/context/use-eager-bootstrap";
+import { useAccountStore } from "@/hooks/store/use-account-store";
+import { useSyncStore } from "@/hooks/store/use-sync-store";
+import { useUIStore } from "@/hooks/store/use-ui-store";
+import { getWorldKey } from "@/hooks/use-world-availability";
 import type { SetupResult } from "@/init/bootstrap";
 import { bootstrapGame } from "@/init/bootstrap";
 import { applyWorldSelection } from "@/runtime/world";
 import { getFactorySqlBaseUrl } from "@/runtime/world/factory-endpoints";
 import { resolveWorldContracts } from "@/runtime/world/factory-resolver";
+import { buildPlaySceneUrl } from "@/sharding/location-url";
 import { normalizeSelector } from "@/runtime/world/normalize";
-import { refreshSessionPolicies } from "@/hooks/context/session-policy-refresh";
-import { useSyncStore } from "@/hooks/store/use-sync-store";
-import { useAccountStore } from "@/hooks/store/use-account-store";
-import { useUIStore } from "@/hooks/store/use-ui-store";
-import { getWorldKey } from "@/hooks/use-world-availability";
-import { cn } from "@/ui/design-system/atoms/lib/utils";
 import Button from "@/ui/design-system/atoms/button";
+import { cn } from "@/ui/design-system/atoms/lib/utils";
 import { BootstrapLoadingPanel } from "@/ui/layouts/bootstrap-loading/bootstrap-loading-panel";
 import { type Chain, getGameManifest } from "@contracts";
 import type { Account } from "starknet";
@@ -942,17 +943,31 @@ export const GameEntryModal = ({
     // Ensure the loading overlay is visible (it may have been dismissed from a previous game)
     useUIStore.getState().setShowBlankOverlay(true);
 
-    // Set initial state — structureEntityId=0 means "not yet known".
-    // GameLoadingOverlay will update this once structures are synced into RECS.
-    const setStructureEntityId = useUIStore.getState().setStructureEntityId;
-    setStructureEntityId(0, {
-      spectator: isSpectateMode,
-      worldMapPosition: { col: 0, row: 0 },
-    });
+    const uiState = useUIStore.getState();
+    const setStructureEntityId = uiState.setStructureEntityId;
+    const currentStructureEntityId = Number(uiState.structureEntityId);
+    const currentWorldMapPosition = uiState.worldMapReturnPosition ?? { col: 0, row: 0 };
+    const hasKnownStructure = Number.isFinite(currentStructureEntityId) && currentStructureEntityId > 0;
 
-    // Navigate with placeholder coords (0,0). The loading overlay will
-    // re-navigate to the player's realm once structures are available.
-    const url = isSpectateMode ? `/play/map?col=0&row=0&spectate=true` : `/play/hex?col=0&row=0`;
+    if (isSpectateMode) {
+      setStructureEntityId(0, {
+        spectator: true,
+        worldMapPosition: currentWorldMapPosition,
+      });
+    } else if (hasKnownStructure) {
+      setStructureEntityId(currentStructureEntityId, {
+        spectator: false,
+        worldMapPosition: currentWorldMapPosition,
+      });
+    } else {
+      // Keep startup deterministic when there is still no synced owned structure.
+      setStructureEntityId(0, {
+        spectator: false,
+        worldMapPosition: currentWorldMapPosition,
+      });
+    }
+
+    const url = buildPlaySceneUrl(isSpectateMode ? "map" : "hex", currentWorldMapPosition.col, currentWorldMapPosition.row, { spectate: isSpectateMode });
     navigate(url);
     window.dispatchEvent(new Event("urlChanged"));
   }, [navigate, isSpectateMode]);
@@ -1187,7 +1202,7 @@ export const GameEntryModal = ({
       // Give users time to see the "Ready" screen and click manually if they want
       const timer = setTimeout(() => {
         handleEnterGame();
-      }, 2000);
+      }, 1000);
       return () => clearTimeout(timer);
     }
   }, [phase, handleEnterGame, worldName, isSpectateMode]);

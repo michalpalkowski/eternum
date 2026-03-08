@@ -6,6 +6,8 @@ import {
   buildShardPlayUrl,
   parseActiveShardFromStatusResponse,
   parseOperatorConfigResponse,
+  parseShardIdParts,
+  parseTransportHealthFromStatusResponse,
 } from "@/sharding/protocol";
 import type { ExecutableAccount } from "@/sharding/types";
 
@@ -96,6 +98,20 @@ export const useShardRequest = (account: ExecutableAccount | null, operatorUrl: 
                 return;
               }
 
+              const { gameContractAddress, onchainShardId } = parseShardIdParts(activeShard.shardId);
+
+              const transportResponse = await fetch(
+                `${operatorUrl}/shard/${gameContractAddress}/${onchainShardId}/transport-health`,
+              );
+              if (!transportResponse.ok) {
+                throw new Error(`Failed to fetch shard transport health: HTTP ${transportResponse.status}`);
+              }
+              const transportPayload: unknown = await transportResponse.json();
+              const transport = parseTransportHealthFromStatusResponse(transportPayload);
+              if (transport.status !== "healthy") {
+                return;
+              }
+
               stopPolling();
               setShardUrls({
                 katanaUrl: activeShard.katanaUrl,
@@ -127,15 +143,13 @@ export const useShardRequest = (account: ExecutableAccount | null, operatorUrl: 
     const shardUrl = buildShardPlayUrl(window.location.origin, {
       rpcUrl: shardUrls.katanaUrl,
       toriiUrl: shardUrls.toriiUrl,
+      toriiGrpcUrl: shardUrls.toriiGrpcUrl ?? shardUrls.toriiUrl,
       shardId: shardUrls.shardId,
       operatorUrl,
+      mainUrl: window.location.href,
     });
-    const openedWindow = window.open(shardUrl, "_blank", "noopener,noreferrer");
-    if (openedWindow === null) {
-      // Popup blocked — continue in the same tab instead of failing the shard flow.
-      window.location.assign(shardUrl);
-    }
-  }, [failRequest, operatorUrl, phase, shardUrls]);
+    window.location.assign(shardUrl);
+  }, [operatorUrl, phase, shardUrls]);
 
   const reset = useCallback(() => {
     stopPolling();

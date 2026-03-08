@@ -1,6 +1,7 @@
 import { Position } from "@bibliothecadao/eternum";
-
 import { Structure } from "@bibliothecadao/types";
+
+import { buildPlaySceneUrl } from "@/sharding/location-url";
 
 /**
  * Navigate to a structure by updating the URL and dispatching a URL change event
@@ -10,29 +11,7 @@ import { Structure } from "@bibliothecadao/types";
  * @param scene - Optional scene to navigate to ('hex' or 'map'). Defaults to current scene.
  */
 export function navigateToStructure(col: number, row: number, scene?: "hex" | "map") {
-  const url = new Position({ x: col, y: row });
-
-  // Determine which URL method to use based on scene parameter or current URL
-  let navigationUrl: string;
-  if (scene === "hex") {
-    navigationUrl = url.toHexLocationUrl();
-  } else if (scene === "map") {
-    navigationUrl = url.toMapLocationUrl();
-  } else {
-    // If no scene specified, stay in the current scene
-    const currentPath = window.location.pathname;
-    if (currentPath.includes("/hex")) {
-      navigationUrl = url.toHexLocationUrl();
-    } else {
-      navigationUrl = url.toMapLocationUrl();
-    }
-  }
-
-  // Update browser URL
-  window.history.pushState({}, "", navigationUrl);
-
-  // Dispatch URL changed event to trigger scene updates
-  window.dispatchEvent(new Event("urlChanged"));
+  navigateToPosition(col, row, scene);
 }
 
 /**
@@ -43,21 +22,22 @@ export function navigateToStructure(col: number, row: number, scene?: "hex" | "m
  * @param scene - Optional scene to navigate to ('hex' or 'map'). Defaults to current scene.
  */
 function navigateToPosition(col: number, row: number, scene?: "hex" | "map") {
-  const url = new Position({ x: col, y: row });
+  const position = new Position({ x: col, y: row });
+  const normalized = position.getNormalized();
 
   // Determine which URL method to use based on scene parameter or current URL
   let navigationUrl: string;
   if (scene === "hex") {
-    navigationUrl = url.toHexLocationUrl();
+    navigationUrl = buildPlaySceneUrl("hex", normalized.x, normalized.y);
   } else if (scene === "map") {
-    navigationUrl = url.toMapLocationUrl();
+    navigationUrl = buildPlaySceneUrl("map", normalized.x, normalized.y);
   } else {
     // If no scene specified, stay in the current scene
     const currentPath = window.location.pathname;
     if (currentPath.includes("/hex")) {
-      navigationUrl = url.toHexLocationUrl();
+      navigationUrl = buildPlaySceneUrl("hex", normalized.x, normalized.y);
     } else {
-      navigationUrl = url.toMapLocationUrl();
+      navigationUrl = buildPlaySceneUrl("map", normalized.x, normalized.y);
     }
   }
 
@@ -112,19 +92,26 @@ export function toggleMapHexView() {
     return;
   }
 
-  // Determine new path based on current path
-  let newPath: string;
+  const parsedCol = Number(col);
+  const parsedRow = Number(row);
+  if (!Number.isFinite(parsedCol) || !Number.isFinite(parsedRow)) {
+    console.warn("Invalid coordinates in URL, cannot toggle view");
+    return;
+  }
+
+  // Determine new scene based on current path
+  let nextScene: "hex" | "map";
   if (currentPath.includes("/hex")) {
-    newPath = "/map";
+    nextScene = "map";
   } else if (currentPath.includes("/map")) {
-    newPath = "/hex";
+    nextScene = "hex";
   } else {
     console.warn("Current path is neither /hex nor /map, cannot toggle");
     return;
   }
 
-  // Construct new URL with same coordinates
-  const newUrl = `${newPath}?col=${col}&row=${row}`;
+  // Construct new URL with same coordinates and existing shard context
+  const newUrl = buildPlaySceneUrl(nextScene, parsedCol, parsedRow);
 
   // Update browser URL
   window.history.pushState({}, "", newUrl);
@@ -132,5 +119,5 @@ export function toggleMapHexView() {
   // Dispatch URL changed event to trigger scene updates
   window.dispatchEvent(new Event("urlChanged"));
 
-  console.log(`Toggled view from ${currentPath} to ${newPath}`);
+  console.log(`Toggled view from ${currentPath} to ${nextScene}`);
 }

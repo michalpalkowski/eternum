@@ -5,6 +5,7 @@ import { usePlayerStructures } from "@bibliothecadao/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BootstrapTask } from "@/hooks/context/use-eager-bootstrap";
 import { BootstrapLoadingPanel } from "@/ui/layouts/bootstrap-loading/bootstrap-loading-panel";
+import { buildPlaySceneUrl } from "@/sharding/location-url";
 import {
   getSceneWarmupProgress,
   resolveEntryOverlayPhase,
@@ -36,6 +37,7 @@ const POST_MAP_LOAD_DELAY_MS = 3_000;
  */
 export const GameLoadingOverlay = () => {
   const setShowBlankOverlay = useUIStore((state) => state.setShowBlankOverlay);
+  const setIsLoadingScreenEnabled = useUIStore((state) => state.setIsLoadingScreenEnabled);
   const isSpectating = useUIStore((state) => state.isSpectating);
   const mapLoading = useUIStore((state) => state.loadingStates[LoadingStateKey.Map]);
   const playerStructures = usePlayerStructures();
@@ -54,9 +56,12 @@ export const GameLoadingOverlay = () => {
     (delayMs: number) => {
       if (hasDismissed.current) return;
       hasDismissed.current = true;
-      setTimeout(() => setShowBlankOverlay(false), delayMs);
+      setTimeout(() => {
+        setShowBlankOverlay(false);
+        setIsLoadingScreenEnabled(false);
+      }, delayMs);
     },
-    [setShowBlankOverlay],
+    [setShowBlankOverlay, setIsLoadingScreenEnabled],
   );
 
   useEffect(() => {
@@ -88,7 +93,7 @@ export const GameLoadingOverlay = () => {
     const targetCoords = { col: normalized.x, row: normalized.y };
     const ready = waitForHexceptionGridReady(targetCoords, HEXCEPTION_READY_TIMEOUT_MS);
 
-    const url = `/play/hex?col=${normalized.x}&row=${normalized.y}`;
+    const url = buildPlaySceneUrl("hex", normalized.x, normalized.y, { spectate: false });
     navigate(url);
     window.dispatchEvent(new Event("urlChanged"));
 
@@ -136,10 +141,11 @@ export const GameLoadingOverlay = () => {
       if (!hasDismissed.current) {
         hasDismissed.current = true;
         setShowBlankOverlay(false);
+        setIsLoadingScreenEnabled(false);
       }
     }, SAFETY_TIMEOUT_MS);
     return () => clearTimeout(timeout);
-  }, [setShowBlankOverlay]);
+  }, [setShowBlankOverlay, setIsLoadingScreenEnabled]);
 
   const isSlow = !isReady && elapsedMs >= SLOW_THRESHOLD_MS;
   const hasNavigatedToTarget = isSpectating ? elapsedMs >= TICK_INTERVAL_MS : playerStructures.length > 0;
