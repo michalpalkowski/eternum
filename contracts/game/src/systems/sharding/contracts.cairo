@@ -52,6 +52,21 @@ pub mod shard_helpers {
         (Model::<Resource>::selector(ns_hash), Model::<Resource>::layout()).shard(keys)
     }
 
+    /// Lock all resource balances for a shard session.
+    /// This prevents spending/building on main chain while the shard is active.
+    pub fn resource_all_balances_set_lock(ns_hash: felt252, entity_id: ID) -> ShardModel {
+        let mut resource_types: Array<u32> = ArrayTrait::new();
+        let mut resource_type: u32 = 1;
+        loop {
+            if resource_type > RESOURCE_TYPE_COUNT {
+                break;
+            }
+            resource_types.append(resource_type);
+            resource_type += 1;
+        };
+        resource_with_set_lock(ns_hash, entity_id, resource_types.span())
+    }
+
     pub fn structure_with_field_crdts(ns_hash: felt252, entity_id: ID) -> ShardModel {
         let keys = array![entity_id.into()].span();
         ShardModel {
@@ -59,7 +74,7 @@ pub mod shard_helpers {
             keys,
             fields: [
                 Structure_fields::OWNER.as_lock(),
-                Structure_fields::BASE.as_set(),
+                Structure_fields::BASE.as_set_lock(),
                 Structure_fields::METADATA.as_set_lock(),
             ].span(),
         }
@@ -72,7 +87,7 @@ pub mod shard_helpers {
 
     pub fn structure_buildings_all(ns_hash: felt252, entity_id: ID) -> ShardModel {
         let keys = array![entity_id.into()].span();
-        (Model::<StructureBuildings>::selector(ns_hash), Model::<StructureBuildings>::layout()).shard(keys)
+        (Model::<StructureBuildings>::selector(ns_hash), Model::<StructureBuildings>::layout()).shard_set_lock(keys)
     }
 
     pub fn production_boost_bonus_all(ns_hash: felt252, structure_id: ID) -> ShardModel {
@@ -97,7 +112,7 @@ pub mod shard_helpers {
 
     pub fn quantity_all(ns_hash: felt252, entity_id: ID) -> ShardModel {
         let keys = array![entity_id.into()].span();
-        (Model::<Quantity>::selector(ns_hash), Model::<Quantity>::layout()).shard(keys)
+        (Model::<Quantity>::selector(ns_hash), Model::<Quantity>::layout()).shard_set_lock(keys)
     }
 
     pub fn wonder_all(ns_hash: felt252, structure_id: ID) -> ShardModel {
@@ -112,7 +127,7 @@ pub mod shard_helpers {
 
     pub fn quantity_tracker_all(ns_hash: felt252, entity_id: felt252) -> ShardModel {
         let keys = array![entity_id].span();
-        (Model::<QuantityTracker>::selector(ns_hash), Model::<QuantityTracker>::layout()).shard(keys)
+        (Model::<QuantityTracker>::selector(ns_hash), Model::<QuantityTracker>::layout()).shard_set_lock(keys)
     }
 
     pub fn resource_allowance_all(
@@ -144,7 +159,7 @@ pub mod shard_helpers {
         ns_hash: felt252, outer_col: u32, outer_row: u32, inner_col: u32, inner_row: u32,
     ) -> ShardModel {
         let keys = array![outer_col.into(), outer_row.into(), inner_col.into(), inner_row.into()].span();
-        (Model::<Building>::selector(ns_hash), Model::<Building>::layout()).shard(keys)
+        (Model::<Building>::selector(ns_hash), Model::<Building>::layout()).shard_set_lock(keys)
     }
 
     pub fn explorer_troops_all(ns_hash: felt252, explorer_id: ID) -> ShardModel {
@@ -207,8 +222,8 @@ pub mod shard_helpers {
     /// must be registered separately via their individual helpers.
     pub fn entity_id_models(ns_hash: felt252, entity_id: ID) -> Array<ShardModel> {
         array![
-            resource_all(ns_hash, entity_id),
-            structure_all(ns_hash, entity_id),
+            resource_all_balances_set_lock(ns_hash, entity_id),
+            structure_with_field_crdts(ns_hash, entity_id),
             structure_buildings_all(ns_hash, entity_id),
             production_boost_bonus_all(ns_hash, entity_id),
             trade_count_all(ns_hash, entity_id),

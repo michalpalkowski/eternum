@@ -174,11 +174,11 @@ fn test_request_shard_rejects_empty_models() {
     stop_cheat_caller_address(system_addr);
 }
 
-/// SetLock settlement: shard value overwrites main chain — no delta math, no underflow risk.
+/// SetLock now blocks regular main-chain writes while shard is active.
 #[test]
-fn test_shard_set_lock_overwrites() {
+#[should_panic]
+fn test_set_lock_blocks_mainchain_write_during_active_shard() {
     let mut world = setup_world();
-    let world_address = world.dispatcher.contract_address;
     let entity_id: ID = 42;
 
     // Initial balance: STONE=100
@@ -193,21 +193,8 @@ fn test_shard_set_lock_overwrites() {
     dispatcher.request_shard(proxy_address, models);
     stop_cheat_caller_address(system_addr);
 
-    // Simulate main chain independently changing STONE to 80 (e.g. spending 20).
-    // With SetLock this change will be OVERWRITTEN at settlement — not merged.
+    // Main-chain gameplay write must fail while shard lock is active.
     ResourceImpl::write_balance(ref world, entity_id, 1, 80);
-
-    // Shard final: STONE=70 (spent 30 on shard).
-    let slot = resource_balance_slot(ref world, entity_id, 1);
-    let sharding = IContractComponentDispatcher { contract_address: world_address };
-
-    start_cheat_caller_address(world_address, proxy_address);
-    sharding.update_shard_state(array![(slot, 70)]);
-    stop_cheat_caller_address(world_address);
-
-    // SetLock: shard value (70) overwrites main chain — no double-spend risk.
-    let stone = ResourceImpl::read_balance(ref world, entity_id, 1);
-    assert!(stone == 70, "SetLock: expected shard value 70, got {}", stone);
 }
 
 /// Shard spends resources: final value lower than initial — no underflow panic (vs Add CRDT).
