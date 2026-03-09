@@ -9,7 +9,8 @@ sierra-replace-ids = true
 
 [dependencies]
 starknet = "2.13.1"
-dojo = { path = "/home/michal/Repos/dojo/crates/dojo/core" }
+# dojo = { path = "/home/michal/Repos/dojo/crates/dojo/core" }
+dojo = { git = "https://github.com/michalpalkowski/dojo", branch = "feature/sharding" }
 alexandria_math = { git = "https://github.com/keep-starknet-strange/alexandria.git", tag = "v0.5.2" }
 alexandria_data_structures = { git = "https://github.com/keep-starknet-strange/alexandria.git", tag = "v0.5.2" }
 achievement = { path = "/home/michal/Repos/arcade/packages/achievement" }
@@ -19,7 +20,8 @@ cubit = { git = "https://github.com/credence0x/cubit.git", branch = "feat/cairo-
 [dev-dependencies]
 snforge_std = "0.51.2"
 assert_macros = "2.13"
-dojo_snf_test = { path = "/home/michal/Repos/dojo/crates/dojo/dojo-snf-test" }
+# dojo_snf_test = { path = "/home/michal/Repos/dojo/crates/dojo/dojo-snf-test" }
+dojo_snf_test = { git = "https://github.com/michalpalkowski/dojo", branch = "feature/sharding" }
 openzeppelin_token = "2.0.0"
 openzeppelin = "2.0.0"
 
@@ -29,14 +31,14 @@ build-external-contracts = [
 	"dojo::world::world_contract::world",
 	"achievement::events::index::e_TrophyCreation",
 	"achievement::events::index::e_TrophyProgression",
-#	"budokan::components::tests::mocks::game_mock::game_mock",
-#	"budokan::components::models::game::m_GameMetadata",
-#	"budokan::components::models::game::m_GameCounter",
-#	"budokan::components::models::game::m_TokenMetadata",
-#	"budokan::components::models::game::m_Score",
-#	"budokan::components::models::game::m_Settings",
-#	"budokan::components::models::game::m_SettingsCounter",
-#	"budokan::components::models::game::m_SettingsDetails",
+	#	"budokan::components::tests::mocks::game_mock::game_mock",
+	#	"budokan::components::models::game::m_GameMetadata",
+	#	"budokan::components::models::game::m_GameCounter",
+	#	"budokan::components::models::game::m_TokenMetadata",
+	#	"budokan::components::models::game::m_Score",
+	#	"budokan::components::models::game::m_Settings",
+	#	"budokan::components::models::game::m_SettingsCounter",
+	#	"budokan::components::models::game::m_SettingsDetails",
 
 ]
 
