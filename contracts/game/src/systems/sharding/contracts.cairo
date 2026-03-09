@@ -228,7 +228,7 @@ pub mod shard_helpers {
 #[dojo::contract]
 pub mod sharding_systems {
     use dojo::sharding::request::ShardModel;
-    use dojo::world::IWorldDispatcherTrait;
+    use dojo::world::{IWorldDispatcherTrait, WorldStorage};
     use core::num::traits::Zero;
     use crate::alias::ID;
     use crate::constants::DEFAULT_NS;
@@ -237,8 +237,114 @@ pub mod sharding_systems {
     use crate::models::structure::{StructureBaseStoreImpl, StructureBaseTrait, StructureOwnerStoreImpl};
     use crate::systems::config::contracts::config_systems::assert_caller_is_admin;
 
+    const MAX_REQUEST_ENTITY_IDS: usize = 1;
+    const MAX_SHARD_MODELS_PER_REQUEST: usize = 4096;
+
     fn assert_valid_proxy(proxy: starknet::ContractAddress) {
         assert!(proxy.is_non_zero(), "proxy must not be zero");
+    }
+
+    fn append_shard_model(ref shard_models: Array<ShardModel>, shard_model: ShardModel) {
+        assert!(shard_models.len() < MAX_SHARD_MODELS_PER_REQUEST, "shard_models exceeds limit");
+        shard_models.append(shard_model);
+    }
+
+    fn build_shard_models_for_entities(ref world: WorldStorage, entity_ids: Span<ID>) -> Array<ShardModel> {
+        assert!(entity_ids.len() > 0, "entity_ids must not be empty");
+        assert!(entity_ids.len() <= MAX_REQUEST_ENTITY_IDS, "entity_ids exceeds limit");
+
+        let ns_hash = dojo::utils::bytearray_hash(DEFAULT_NS());
+        let delivery_interval = TickImpl::get_delivery_tick_interval(ref world).interval();
+        let register_arrivals = delivery_interval.is_non_zero();
+        let mut arrival_day: u64 = 0;
+        if register_arrivals {
+            let (day, _) = ResourceArrivalImpl::arrival_slot(ref world, 0);
+            arrival_day = day;
+        }
+
+        let mut shard_models: Array<ShardModel> = ArrayTrait::new();
+        let mut ids: Array<ID> = ArrayTrait::new();
+        let mut structure_owners: Array<starknet::ContractAddress> = ArrayTrait::new();
+        for entity_id in entity_ids {
+            ids.append(*entity_id);
+
+            for shard_model in super::shard_helpers::entity_id_models(ns_hash, *entity_id) {
+                append_shard_model(ref shard_models, shard_model);
+            };
+
+            append_shard_model(
+                ref shard_models, super::shard_helpers::quantity_tracker_all(ns_hash, (*entity_id).into()),
+            );
+            append_shard_model(ref shard_models, super::shard_helpers::explorer_troops_all(ns_hash, *entity_id));
+            append_shard_model(ref shard_models, super::shard_helpers::trade_all(ns_hash, *entity_id));
+            if register_arrivals {
+                append_shard_model(
+                    ref shard_models, super::shard_helpers::resource_arrival_all(ns_hash, *entity_id, arrival_day),
+                );
+                if arrival_day.is_non_zero() {
+                    append_shard_model(
+                        ref shard_models,
+                        super::shard_helpers::resource_arrival_all(ns_hash, *entity_id, arrival_day - 1),
+                    );
+                }
+                append_shard_model(
+                    ref shard_models,
+                    super::shard_helpers::resource_arrival_all(ns_hash, *entity_id, arrival_day + 1),
+                );
+            }
+            append_shard_model(
+                ref shard_models, super::shard_helpers::hyperstructure_requirements_all(ns_hash, *entity_id),
+            );
+
+            let base = StructureBaseStoreImpl::retrieve(ref world, *entity_id);
+            if base.exists() {
+                let owner = StructureOwnerStoreImpl::retrieve(ref world, *entity_id);
+                if owner.is_non_zero() {
+                    structure_owners.append(owner);
+                    append_shard_model(
+                        ref shard_models,
+                        super::shard_helpers::player_construction_points_all(ns_hash, owner, *entity_id),
+                    );
+                }
+
+                let max_building_distance: u32 = base.max_level(world).into() + 1;
+                for shard_model in super::shard_helpers::building_within_distance(
+                    ns_hash, base.coord_x, base.coord_y, max_building_distance,
+                ) {
+                    append_shard_model(ref shard_models, shard_model);
+                };
+            }
+        };
+
+        let max_resource_type = super::shard_helpers::max_resource_type();
+        let mut resource_type: u8 = 1;
+        loop {
+            if resource_type > max_resource_type {
+                break;
+            }
+
+            append_shard_model(ref shard_models, super::shard_helpers::market_all(ns_hash, resource_type));
+
+            for owner in structure_owners.span() {
+                append_shard_model(ref shard_models, super::shard_helpers::liquidity_all(ns_hash, *owner, resource_type));
+            };
+
+            for owner_entity_id in ids.span() {
+                for approved_entity_id in ids.span() {
+                    append_shard_model(
+                        ref shard_models,
+                        super::shard_helpers::resource_allowance_all(
+                            ns_hash, *owner_entity_id, *approved_entity_id, resource_type,
+                        ),
+                    );
+                };
+            };
+
+            resource_type += 1;
+        };
+
+        assert!(shard_models.len() > 0, "shard_models must not be empty");
+        shard_models
     }
 
     #[abi(embed_v0)]
@@ -257,90 +363,10 @@ pub mod sharding_systems {
             ref self: ContractState, proxy: starknet::ContractAddress, entity_ids: Span<ID>,
         ) {
             assert_valid_proxy(proxy);
-            assert!(entity_ids.len() > 0, "entity_ids must not be empty");
 
             let mut world = self.world(DEFAULT_NS());
             assert_caller_is_admin(world);
-            let ns_hash = dojo::utils::bytearray_hash(DEFAULT_NS());
-            let delivery_interval = TickImpl::get_delivery_tick_interval(ref world).interval();
-            let register_arrivals = delivery_interval.is_non_zero();
-            let mut arrival_day: u64 = 0;
-            if register_arrivals {
-                let (day, _) = ResourceArrivalImpl::arrival_slot(ref world, 0);
-                arrival_day = day;
-            }
-
-            let mut shard_models: Array<ShardModel> = ArrayTrait::new();
-            let mut ids: Array<ID> = ArrayTrait::new();
-            let mut structure_owners: Array<starknet::ContractAddress> = ArrayTrait::new();
-            for entity_id in entity_ids {
-                ids.append(*entity_id);
-
-                for shard_model in super::shard_helpers::entity_id_models(ns_hash, *entity_id) {
-                    shard_models.append(shard_model);
-                };
-
-                shard_models.append(super::shard_helpers::quantity_tracker_all(ns_hash, (*entity_id).into()));
-                shard_models.append(super::shard_helpers::explorer_troops_all(ns_hash, *entity_id));
-                shard_models.append(super::shard_helpers::trade_all(ns_hash, *entity_id));
-                if register_arrivals {
-                    shard_models.append(super::shard_helpers::resource_arrival_all(ns_hash, *entity_id, arrival_day));
-                    if arrival_day.is_non_zero() {
-                        shard_models.append(
-                            super::shard_helpers::resource_arrival_all(ns_hash, *entity_id, arrival_day - 1),
-                        );
-                    }
-                    shard_models.append(
-                        super::shard_helpers::resource_arrival_all(ns_hash, *entity_id, arrival_day + 1),
-                    );
-                }
-                shard_models.append(super::shard_helpers::hyperstructure_requirements_all(ns_hash, *entity_id));
-
-                let base = StructureBaseStoreImpl::retrieve(ref world, *entity_id);
-                if base.exists() {
-                    let owner = StructureOwnerStoreImpl::retrieve(ref world, *entity_id);
-                    if owner.is_non_zero() {
-                        structure_owners.append(owner);
-                        shard_models.append(
-                            super::shard_helpers::player_construction_points_all(ns_hash, owner, *entity_id),
-                        );
-                    }
-
-                    let max_building_distance: u32 = base.max_level(world).into() + 1;
-                    for shard_model in super::shard_helpers::building_within_distance(
-                        ns_hash, base.coord_x, base.coord_y, max_building_distance,
-                    ) {
-                        shard_models.append(shard_model);
-                    };
-                }
-            };
-
-            let max_resource_type = super::shard_helpers::max_resource_type();
-            let mut resource_type: u8 = 1;
-            loop {
-                if resource_type > max_resource_type {
-                    break;
-                }
-
-                shard_models.append(super::shard_helpers::market_all(ns_hash, resource_type));
-
-                for owner in structure_owners.span() {
-                    shard_models.append(super::shard_helpers::liquidity_all(ns_hash, *owner, resource_type));
-                };
-
-                for owner_entity_id in ids.span() {
-                    for approved_entity_id in ids.span() {
-                        shard_models.append(
-                            super::shard_helpers::resource_allowance_all(
-                                ns_hash, *owner_entity_id, *approved_entity_id, resource_type,
-                            ),
-                        );
-                    };
-                };
-
-                resource_type += 1;
-            };
-            assert!(shard_models.len() > 0, "shard_models must not be empty");
+            let mut shard_models = build_shard_models_for_entities(ref world, entity_ids);
             world.dispatcher.request_sharding(proxy, shard_models.span());
         }
 

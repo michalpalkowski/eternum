@@ -114,6 +114,10 @@ fn caller() -> ContractAddress {
     0x1234_felt252.try_into().unwrap()
 }
 
+fn non_admin_caller() -> ContractAddress {
+    0x5678_felt252.try_into().unwrap()
+}
+
 fn zero_address() -> ContractAddress {
     0x0_felt252.try_into().unwrap()
 }
@@ -376,6 +380,41 @@ fn test_request_shard_all_rejects_empty_entity_ids() {
 
     start_cheat_caller_address(system_addr, caller());
     dispatcher.request_shard_all(proxy_address, empty_entity_ids.span());
+    stop_cheat_caller_address(system_addr);
+}
+
+#[test]
+#[should_panic(expected: "caller not admin")]
+fn test_request_shard_all_rejects_non_admin_caller() {
+    let mut world = setup_world();
+    let proxy_address = deploy_mock_proxy();
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+
+    start_cheat_caller_address(system_addr, non_admin_caller());
+    dispatcher.request_shard_all(proxy_address, array![42].span());
+    stop_cheat_caller_address(system_addr);
+}
+
+#[test]
+#[should_panic(expected: "caller not admin")]
+fn test_finish_shard_rejects_non_admin_caller() {
+    let mut world = setup_world();
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+
+    start_cheat_caller_address(system_addr, non_admin_caller());
+    dispatcher.finish_shard();
+    stop_cheat_caller_address(system_addr);
+}
+
+#[test]
+#[should_panic(expected: "entity_ids exceeds limit")]
+fn test_request_shard_all_rejects_entity_ids_over_limit() {
+    let mut world = setup_world();
+    let proxy_address = deploy_mock_proxy();
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+
+    start_cheat_caller_address(system_addr, caller());
+    dispatcher.request_shard_all(proxy_address, array![42, 43].span());
     stop_cheat_caller_address(system_addr);
 }
 
