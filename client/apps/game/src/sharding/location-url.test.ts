@@ -7,11 +7,11 @@ describe("buildPlaySceneUrl", () => {
     window.history.replaceState({}, "", "/play");
   });
 
-  it("preserves shard query params while updating tile coordinates", () => {
+  it("preserves shard query params and injects canonical shard_main", () => {
     window.history.replaceState(
       {},
       "",
-      "/play?shard_rpc=http://localhost:15051&shard_torii=https://localhost:18080&shard_id=0xabc@0x1&shard_operator=http://localhost:3001",
+      "/play?shard_rpc=http://localhost:15051&shard_torii=https://localhost:18080&shard_torii_grpc=http://localhost:18090&shard_id=0xabc@0x1&shard_operator=http://localhost:3001",
     );
 
     const next = buildPlaySceneUrl("hex", 12, -7);
@@ -22,6 +22,10 @@ describe("buildPlaySceneUrl", () => {
     expect(params.get("shard_torii")).toBe("https://localhost:18080");
     expect(params.get("col")).toBe("12");
     expect(params.get("row")).toBe("-7");
+
+    const shardMain = params.get("shard_main");
+    expect(shardMain).toBeTruthy();
+    expect(shardMain).toContain("/play/");
   });
 
   it("keeps the active world slug when current path is /play/:world/...", () => {
@@ -37,7 +41,11 @@ describe("buildPlaySceneUrl", () => {
   });
 
   it("recovers to /play/* when current path already escaped to /hex", () => {
-    window.history.replaceState({}, "", "/hex?shard_rpc=http://localhost:15051");
+    window.history.replaceState(
+      {},
+      "",
+      "/hex?shard_rpc=http://localhost:15051&shard_torii=https://localhost:18080&shard_torii_grpc=http://localhost:18090&shard_id=0xabc@0x1&shard_operator=http://localhost:3001",
+    );
 
     const next = buildPlaySceneUrl("map", 0, 8);
 

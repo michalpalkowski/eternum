@@ -16,7 +16,8 @@ pub mod shard_helpers {
     use crate::models::structure::{
         Structure, Structure_fields, Wonder, StructureVillageSlots, VillageTroop, VillageRaidImmunity,
     };
-    use crate::models::resource::production::building::{Building, StructureBuildings};
+    use crate::models::position::CoordTrait;
+    use crate::models::resource::production::building::{Building, BuildingImpl, StructureBuildings};
     use crate::models::resource::production::production::ProductionBoostBonus;
     use crate::models::resource::resource::{ResourceAllowance, ResourceList};
     use crate::models::trade::{Trade, TradeCount};
@@ -173,19 +174,32 @@ pub mod shard_helpers {
         (Model::<Liquidity>::selector(ns_hash), Model::<Liquidity>::layout()).shard(keys)
     }
 
-    /// Even-row hex neighbors of building center (10,10):
-    /// E(11,10) NE(11,11) NW(10,11) W(9,10) SW(10,9) SE(11,9)
-    pub fn building_ring1(
-        ns_hash: felt252, outer_col: u32, outer_row: u32,
+    /// Register all possible building slots from ring-1 up to `max_distance`
+    /// around the local structure center (10,10).
+    pub fn building_within_distance(
+        ns_hash: felt252, outer_col: u32, outer_row: u32, max_distance: u32,
     ) -> Array<ShardModel> {
-        array![
-            building_all(ns_hash, outer_col, outer_row, 11, 10),
-            building_all(ns_hash, outer_col, outer_row, 11, 11),
-            building_all(ns_hash, outer_col, outer_row, 10, 11),
-            building_all(ns_hash, outer_col, outer_row, 9, 10),
-            building_all(ns_hash, outer_col, outer_row, 10, 9),
-            building_all(ns_hash, outer_col, outer_row, 11, 9),
-        ]
+        let mut models: Array<ShardModel> = ArrayTrait::new();
+        if max_distance == 0 {
+            return models;
+        }
+
+        let center = BuildingImpl::center();
+        let mut distance: u32 = 1;
+        loop {
+            if distance > max_distance {
+                break;
+            }
+
+            let ring = center.ring(distance);
+            for inner_coord in ring {
+                models.append(building_all(ns_hash, outer_col, outer_row, inner_coord.x, inner_coord.y));
+            };
+
+            distance += 1;
+        };
+
+        models
     }
 
     /// Models keyed by entity_id only. Models with composite keys
@@ -205,6 +219,10 @@ pub mod shard_helpers {
             structure_village_slots_all(ns_hash, entity_id),
         ]
     }
+
+    pub fn max_resource_type() -> u8 {
+        RESOURCE_TYPE_COUNT.try_into().unwrap()
+    }
 }
 
 #[dojo::contract]
@@ -214,7 +232,9 @@ pub mod sharding_systems {
     use core::num::traits::Zero;
     use crate::alias::ID;
     use crate::constants::DEFAULT_NS;
-    use crate::models::structure::{StructureBaseStoreImpl, StructureBaseTrait};
+    use crate::models::config::TickImpl;
+    use crate::models::resource::arrivals::ResourceArrivalImpl;
+    use crate::models::structure::{StructureBaseStoreImpl, StructureBaseTrait, StructureOwnerStoreImpl};
     use crate::systems::config::contracts::config_systems::assert_caller_is_admin;
 
     fn assert_valid_proxy(proxy: starknet::ContractAddress) {
@@ -242,19 +262,83 @@ pub mod sharding_systems {
             let mut world = self.world(DEFAULT_NS());
             assert_caller_is_admin(world);
             let ns_hash = dojo::utils::bytearray_hash(DEFAULT_NS());
+            let delivery_interval = TickImpl::get_delivery_tick_interval(ref world).interval();
+            let register_arrivals = delivery_interval.is_non_zero();
+            let mut arrival_day: u64 = 0;
+            if register_arrivals {
+                let (day, _) = ResourceArrivalImpl::arrival_slot(ref world, 0);
+                arrival_day = day;
+            }
 
             let mut shard_models: Array<ShardModel> = ArrayTrait::new();
+            let mut ids: Array<ID> = ArrayTrait::new();
+            let mut structure_owners: Array<starknet::ContractAddress> = ArrayTrait::new();
             for entity_id in entity_ids {
+                ids.append(*entity_id);
+
                 for shard_model in super::shard_helpers::entity_id_models(ns_hash, *entity_id) {
                     shard_models.append(shard_model);
                 };
 
+                shard_models.append(super::shard_helpers::quantity_tracker_all(ns_hash, (*entity_id).into()));
+                shard_models.append(super::shard_helpers::explorer_troops_all(ns_hash, *entity_id));
+                shard_models.append(super::shard_helpers::trade_all(ns_hash, *entity_id));
+                if register_arrivals {
+                    shard_models.append(super::shard_helpers::resource_arrival_all(ns_hash, *entity_id, arrival_day));
+                    if arrival_day.is_non_zero() {
+                        shard_models.append(
+                            super::shard_helpers::resource_arrival_all(ns_hash, *entity_id, arrival_day - 1),
+                        );
+                    }
+                    shard_models.append(
+                        super::shard_helpers::resource_arrival_all(ns_hash, *entity_id, arrival_day + 1),
+                    );
+                }
+                shard_models.append(super::shard_helpers::hyperstructure_requirements_all(ns_hash, *entity_id));
+
                 let base = StructureBaseStoreImpl::retrieve(ref world, *entity_id);
                 if base.exists() {
-                    for shard_model in super::shard_helpers::building_ring1(ns_hash, base.coord_x, base.coord_y) {
+                    let owner = StructureOwnerStoreImpl::retrieve(ref world, *entity_id);
+                    if owner.is_non_zero() {
+                        structure_owners.append(owner);
+                        shard_models.append(
+                            super::shard_helpers::player_construction_points_all(ns_hash, owner, *entity_id),
+                        );
+                    }
+
+                    let max_building_distance: u32 = base.max_level(world).into() + 1;
+                    for shard_model in super::shard_helpers::building_within_distance(
+                        ns_hash, base.coord_x, base.coord_y, max_building_distance,
+                    ) {
                         shard_models.append(shard_model);
                     };
                 }
+            };
+
+            let max_resource_type = super::shard_helpers::max_resource_type();
+            let mut resource_type: u8 = 1;
+            loop {
+                if resource_type > max_resource_type {
+                    break;
+                }
+
+                shard_models.append(super::shard_helpers::market_all(ns_hash, resource_type));
+
+                for owner in structure_owners.span() {
+                    shard_models.append(super::shard_helpers::liquidity_all(ns_hash, *owner, resource_type));
+                };
+
+                for owner_entity_id in ids.span() {
+                    for approved_entity_id in ids.span() {
+                        shard_models.append(
+                            super::shard_helpers::resource_allowance_all(
+                                ns_hash, *owner_entity_id, *approved_entity_id, resource_type,
+                            ),
+                        );
+                    };
+                };
+
+                resource_type += 1;
             };
             assert!(shard_models.len() > 0, "shard_models must not be empty");
             world.dispatcher.request_sharding(proxy, shard_models.span());

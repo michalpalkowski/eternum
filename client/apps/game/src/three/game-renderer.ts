@@ -172,6 +172,19 @@ export default class GameRenderer {
       this.controls.listenToKeyEvents(document.body);
     }
   };
+  private readonly handleWebGLContextLost = (event: Event) => {
+    event.preventDefault();
+    this.isContextLost = true;
+    this.labelsDirty = true;
+    console.warn("[GameRenderer] WebGL context lost");
+  };
+  private readonly handleWebGLContextRestored = () => {
+    this.isContextLost = false;
+    this.labelsDirty = true;
+    this.lastTime = 0;
+    this.onWindowResize();
+    console.info("[GameRenderer] WebGL context restored");
+  };
 
   constructor(dojoContext: SetupResult) {
     this.graphicsSetting = GRAPHICS_SETTING;
@@ -718,6 +731,8 @@ export default class GameRenderer {
     }
 
     document.body.appendChild(this.renderer.domElement);
+    this.renderer.domElement.addEventListener("webglcontextlost", this.handleWebGLContextLost, false);
+    this.renderer.domElement.addEventListener("webglcontextrestored", this.handleWebGLContextRestored, false);
 
     // Set up periodic cleanup of the transition database
     const dbCleanupInterval = setInterval(() => {
@@ -1244,6 +1259,13 @@ export default class GameRenderer {
       return;
     }
 
+    if (this.isContextLost) {
+      requestAnimationFrame(() => {
+        this.animate();
+      });
+      return;
+    }
+
     if (!this.labelRenderer) {
       requestAnimationFrame(() => {
         this.animate();
@@ -1319,6 +1341,7 @@ export default class GameRenderer {
     });
   }
 
+  private isContextLost = false;
   private isDestroyed = false;
 
   public destroy(): void {
@@ -1329,6 +1352,7 @@ export default class GameRenderer {
     }
 
     this.isDestroyed = true;
+    this.isContextLost = false;
 
     try {
       // Clean up memory monitor timeout
@@ -1353,18 +1377,12 @@ export default class GameRenderer {
         this.cleanupIntervals = [];
       }
 
-      // Clean up renderer resources
-      if (this.renderer?.domElement && this.renderer.domElement.parentElement) {
-        this.renderer.domElement.parentElement.removeChild(this.renderer.domElement);
-      }
-      if (this.renderer) {
-        this.renderer.dispose();
-      }
-      if (this.composer) {
-        this.composer.dispose();
+      if (this.renderer?.domElement) {
+        this.renderer.domElement.removeEventListener("webglcontextlost", this.handleWebGLContextLost, false);
+        this.renderer.domElement.removeEventListener("webglcontextrestored", this.handleWebGLContextRestored, false);
       }
 
-      // Clean up scenes
+      // Clean up scenes before renderer disposal to avoid disposing GPU resources on stale contexts.
       if (this.worldmapScene && typeof this.worldmapScene.destroy === "function") {
         this.worldmapScene.destroy();
       }
@@ -1375,7 +1393,6 @@ export default class GameRenderer {
         this.hudScene.destroy();
       }
 
-      // Clean up controls
       if (this.controls) {
         this.controls.dispose();
       }
@@ -1385,6 +1402,16 @@ export default class GameRenderer {
           this.environmentTarget.dispose();
         }
         this.environmentTarget = undefined;
+      }
+
+      if (this.composer) {
+        this.composer.dispose();
+      }
+      if (this.renderer) {
+        this.renderer.dispose();
+      }
+      if (this.renderer?.domElement && this.renderer.domElement.parentElement) {
+        this.renderer.domElement.parentElement.removeChild(this.renderer.domElement);
       }
 
       // Remove event listeners

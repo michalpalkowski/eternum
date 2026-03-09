@@ -1,14 +1,16 @@
 import { useDojo } from "@bibliothecadao/react";
 import { useCallback, useEffect } from "react";
-import { useShardSettlement } from "@/hooks/use-shard-settlement";
+
 import { useShardStore } from "@/hooks/store/use-shard-store";
+import { useShardSettlement } from "@/hooks/use-shard-settlement";
+import { resolveMainGameReturnUrl, resolveRuntimeContextFromWindow } from "@/sharding/runtime-context";
 import type { ExecutableAccount } from "@/sharding/types";
 
 export const ShardBanner = () => {
   const isShardMode = useShardStore((state) => state.isShardMode);
   const shardId = useShardStore((state) => state.shardId);
   const operatorUrl = useShardStore((state) => state.operatorUrl);
-  const mainUrl = useShardStore((state) => state.mainUrl);
+  const mainGameReturnUrl = useShardStore((state) => state.mainGameReturnUrl);
   const clearShardMode = useShardStore((state) => state.clearShardMode);
   const {
     account: { account },
@@ -24,9 +26,21 @@ export const ShardBanner = () => {
       return;
     }
 
+    const runtimeContext = useShardStore.getState().runtimeContext ?? resolveRuntimeContextFromWindow();
+    const returnUrl = mainGameReturnUrl ?? resolveMainGameReturnUrl(runtimeContext);
+
+    let destinationUrl = returnUrl;
+    try {
+      const url = new URL(returnUrl, window.location.origin);
+      url.searchParams.set("shard_return", "1");
+      destinationUrl = url.toString();
+    } catch {
+      destinationUrl = returnUrl;
+    }
+
     clearShardMode();
-    window.location.assign(mainUrl ?? "/play");
-  }, [clearShardMode, mainUrl, phase]);
+    window.location.assign(destinationUrl);
+  }, [clearShardMode, mainGameReturnUrl, phase]);
 
   const handleSettle = useCallback(async () => {
     if (phase === "error") {

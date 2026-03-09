@@ -391,3 +391,32 @@ fn test_resource_with_set_lock_rejects_empty_resource_types() {
 fn test_resource_with_set_lock_rejects_out_of_range_type() {
     let _ = shard_helpers::resource_with_set_lock(ns_hash(), 42, array![57_u32].span());
 }
+
+#[test]
+fn test_building_within_distance_registers_multiple_rings() {
+    let outer_col: u32 = 111;
+    let outer_row: u32 = 222;
+    let models = shard_helpers::building_within_distance(ns_hash(), outer_col, outer_row, 2);
+
+    // ring(1)=6, ring(2)=12 => total 18 slots
+    assert!(models.len() == 18, "expected 18 building slots for distance=2, got {}", models.len());
+
+    // Ensure a ring-2 slot exists (two East steps from center 10,10 => 12,10)
+    let mut has_ring2_east = false;
+    for model in models {
+        if *model.keys.at(0) == outer_col.into()
+            && *model.keys.at(1) == outer_row.into()
+            && *model.keys.at(2) == 12
+            && *model.keys.at(3) == 10 {
+            has_ring2_east = true;
+        }
+    }
+
+    assert!(has_ring2_east, "ring-2 slot (12,10) was not registered");
+}
+
+#[test]
+fn test_building_within_distance_rejects_zero_distance() {
+    let models = shard_helpers::building_within_distance(ns_hash(), 111, 222, 0);
+    assert!(models.len() == 0, "expected 0 building slots for distance=0, got {}", models.len());
+}

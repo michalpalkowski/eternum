@@ -1585,6 +1585,8 @@ export default class WorldmapScene extends HexagonScene {
         structure,
         hexCoords,
         components: this.dojo.components,
+        toriiClient: this.dojo.network?.toriiClient,
+        contractComponents: this.dojo.network?.contractComponents,
       });
       return;
     }

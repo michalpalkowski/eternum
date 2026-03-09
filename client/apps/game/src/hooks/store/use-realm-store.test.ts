@@ -95,6 +95,56 @@ describe("use-realm-store spectator lifecycle", () => {
     expect(next.lastControlledStructureEntityId).toBe(777);
   });
 
+  it("exits spectator mode when current selected structure becomes owned after hydration", () => {
+    const harness = createRealmStoreTestHarness();
+    harness.setState({
+      isSpectating: true,
+      structureEntityId: 777,
+      lastControlledStructureEntityId: UNDEFINED_STRUCTURE_ENTITY_ID,
+      playerStructures: [],
+    });
+
+    harness.getState().setPlayerStructures([makeStructure(777), makeStructure(888, StructureType.Village)]);
+
+    const next = harness.getState();
+    expect(next.isSpectating).toBe(false);
+    expect(next.structureEntityId).toBe(777);
+    expect(next.lastControlledStructureEntityId).toBe(777);
+  });
+
+  it("does not auto-enable spectator mode before ownership hydration is available", () => {
+    const harness = createRealmStoreTestHarness();
+    harness.setState({
+      isSpectating: false,
+      structureEntityId: UNDEFINED_STRUCTURE_ENTITY_ID,
+      playerStructures: [],
+    });
+
+    harness.getState().setStructureEntityId(321);
+
+    const next = harness.getState();
+    expect(next.isSpectating).toBe(false);
+    expect(next.structureEntityId).toBe(321);
+    expect(next.lastControlledStructureEntityId).toBe(321);
+  });
+
+  it("defaults to controlled mode when selecting structure before ownership hydration", () => {
+    const harness = createRealmStoreTestHarness();
+    harness.setState({
+      isSpectating: true,
+      structureEntityId: UNDEFINED_STRUCTURE_ENTITY_ID,
+      lastControlledStructureEntityId: UNDEFINED_STRUCTURE_ENTITY_ID,
+      playerStructures: [],
+    });
+
+    harness.getState().setStructureEntityId(555);
+
+    const next = harness.getState();
+    expect(next.isSpectating).toBe(false);
+    expect(next.structureEntityId).toBe(555);
+    expect(next.lastControlledStructureEntityId).toBe(555);
+  });
+
   it("exits spectator mode using last controlled structure fallback", () => {
     const harness = createRealmStoreTestHarness();
     harness.setState({

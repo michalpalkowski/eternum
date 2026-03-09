@@ -65,6 +65,24 @@ Object.defineProperty(navigator, "getBattery", {
   value: vi.fn(async () => ({ charging: true })),
 });
 
+Object.defineProperty(URL, "createObjectURL", {
+  configurable: true,
+  value: vi.fn(() => "blob:test"),
+});
+
+Object.defineProperty(URL, "revokeObjectURL", {
+  configurable: true,
+  value: vi.fn(),
+});
+
+if (typeof globalThis.ProgressEvent === "undefined") {
+  class MockProgressEvent extends Event {}
+  Object.defineProperty(globalThis, "ProgressEvent", {
+    configurable: true,
+    value: MockProgressEvent,
+  });
+}
+
 const { default: GameRenderer } = await import("./game-renderer");
 
 function createGameRendererSubject() {
@@ -119,6 +137,8 @@ function createGameRendererSubject() {
   subject.handleWindowResize = vi.fn();
   subject.handleDocumentFocus = vi.fn();
   subject.handleDocumentBlur = vi.fn();
+  subject.handleWebGLContextLost = vi.fn();
+  subject.handleWebGLContextRestored = vi.fn();
   subject._statsRecordingKeyHandler = keyHandler;
 
   return {
@@ -153,6 +173,7 @@ describe("GameRenderer destroy lifecycle", () => {
     const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
     const removeWindowListenerSpy = vi.spyOn(window, "removeEventListener");
     const removeDocumentListenerSpy = vi.spyOn(document, "removeEventListener");
+    const removeCanvasListenerSpy = vi.spyOn(fixture.canvas, "removeEventListener");
 
     fixture.subject.destroy();
 
@@ -171,6 +192,8 @@ describe("GameRenderer destroy lifecycle", () => {
     expect(fixture.envDispose).toHaveBeenCalledTimes(1);
     expect(fixture.canvas.isConnected).toBe(false);
 
+    expect(removeCanvasListenerSpy).toHaveBeenCalledWith("webglcontextlost", fixture.subject.handleWebGLContextLost, false);
+    expect(removeCanvasListenerSpy).toHaveBeenCalledWith("webglcontextrestored", fixture.subject.handleWebGLContextRestored, false);
     expect(removeWindowListenerSpy).toHaveBeenCalledWith("urlChanged", fixture.subject.handleURLChange);
     expect(removeWindowListenerSpy).toHaveBeenCalledWith("popstate", fixture.subject.handleURLChange);
     expect(removeWindowListenerSpy).toHaveBeenCalledWith("resize", fixture.subject.handleWindowResize);

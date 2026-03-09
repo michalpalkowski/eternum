@@ -105,7 +105,9 @@ export const createRealmStoreSlice = (set: any) => ({
       }
 
       const ownsStructure = state.playerStructures.some((structure) => idsMatch(structure.entityId, normalizedId));
-      const shouldSpectate = options?.spectator ?? !ownsStructure;
+      const ownershipHydrated = state.playerStructures.length > 0;
+      const inferredSpectator = ownershipHydrated ? !ownsStructure : false;
+      const shouldSpectate = options?.spectator ?? inferredSpectator;
       const currentStructureIsOwned = state.playerStructures.some((structure) =>
         idsMatch(structure.entityId, state.structureEntityId),
       );
@@ -179,10 +181,22 @@ export const createRealmStoreSlice = (set: any) => ({
         !currentStructureIsOwned &&
         playerStructures.length > 0;
 
+      const shouldRecoverFromOwnedSelection =
+        state.isSpectating &&
+        state.lastControlledStructureEntityId === UNDEFINED_STRUCTURE_ENTITY_ID &&
+        currentStructureIsOwned &&
+        state.structureEntityId !== UNDEFINED_STRUCTURE_ENTITY_ID;
+
       if (shouldRecoverFromStartupSpectator) {
         const nextControlled = resolvePreferredControlledStructureId(playerStructures);
         updates.lastControlledStructureEntityId = nextControlled;
         updates.structureEntityId = nextControlled;
+        updates.isSpectating = false;
+        return updates;
+      }
+
+      if (shouldRecoverFromOwnedSelection) {
+        updates.lastControlledStructureEntityId = state.structureEntityId;
         updates.isSpectating = false;
         return updates;
       }

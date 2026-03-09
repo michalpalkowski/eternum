@@ -107,6 +107,8 @@ export const useUnifiedOnboarding = (_backgroundImage: string): UnifiedOnboardin
   // Check URL for spectate mode
   const urlSpectateMode =
     typeof window !== "undefined" && new URLSearchParams(window.location.search).get("spectate") === "true";
+  const urlShardReturnPending =
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("shard_return") === "1";
 
   // Local state - initialize isSpectating from URL param
   const [isSpectating, setIsSpectating] = useState(urlSpectateMode);
@@ -188,6 +190,13 @@ export const useUnifiedOnboarding = (_backgroundImage: string): UnifiedOnboardin
     }
     connectWallet();
   }, [isShardMode, isSpectating, isConnected, isConnecting, connectWallet]);
+
+  useEffect(() => {
+    if (!urlShardReturnPending || isSpectating || isConnected === true || isConnecting === true) {
+      return;
+    }
+    connectWallet();
+  }, [urlShardReturnPending, isSpectating, isConnected, isConnecting, connectWallet]);
 
   const spectate = useCallback(() => {
     console.log("[useUnifiedOnboarding] spectate() called");

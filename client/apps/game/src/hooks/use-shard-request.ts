@@ -9,6 +9,7 @@ import {
   parseShardIdParts,
   parseTransportHealthFromStatusResponse,
 } from "@/sharding/protocol";
+import { resolveMainGameReturnUrl, resolveRuntimeContextFromWindow } from "@/sharding/runtime-context";
 import type { ExecutableAccount } from "@/sharding/types";
 
 export type ShardRequestPhase = "idle" | "requesting" | "waiting" | "ready" | "error";
@@ -140,13 +141,14 @@ export const useShardRequest = (account: ExecutableAccount | null, operatorUrl: 
       return;
     }
 
+    const runtimeContext = resolveRuntimeContextFromWindow();
     const shardUrl = buildShardPlayUrl(window.location.origin, {
       rpcUrl: shardUrls.katanaUrl,
       toriiUrl: shardUrls.toriiUrl,
       toriiGrpcUrl: shardUrls.toriiGrpcUrl ?? shardUrls.toriiUrl,
       shardId: shardUrls.shardId,
       operatorUrl,
-      mainUrl: window.location.href,
+      mainUrl: resolveMainGameReturnUrl(runtimeContext),
     });
     window.location.assign(shardUrl);
   }, [operatorUrl, phase, shardUrls]);

@@ -8,22 +8,38 @@ import {
   getTilesForPositionsFromTorii,
 } from "./queries";
 
+type QueueItem = {
+  run: () => Promise<void>;
+  reject: (reason?: unknown) => void;
+};
+
 // Queue class to manage requests
 class RequestQueue {
-  private queue: Array<() => Promise<void>> = [];
+  private queue: QueueItem[] = [];
   private processing = false;
   private batchSize = 3; // Number of concurrent requests
   private batchDelayMs = 100; // Delay between batches
 
-  async add(request: () => Promise<void>, onComplete?: () => void) {
-    this.queue.push(async () => {
-      await request();
-      onComplete?.(); // Call onComplete after the request is processed
+  add(request: () => Promise<void>, onComplete?: () => void): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.queue.push({
+        reject,
+        run: async () => {
+          try {
+            await request();
+            onComplete?.(); // Call onComplete after the request is processed
+            resolve();
+          } catch (error) {
+            reject(error);
+          }
+        },
+      });
+
+      if (!this.processing) {
+        this.processing = true;
+        void this.processQueue();
+      }
     });
-    if (!this.processing) {
-      this.processing = true;
-      this.processQueue();
-    }
   }
 
   private async processQueue() {
@@ -31,7 +47,7 @@ class RequestQueue {
       const batch = this.queue.splice(0, this.batchSize);
 
       try {
-        await Promise.all(batch.map((request) => request()));
+        await Promise.all(batch.map((item) => item.run()));
       } catch (error) {
         console.error("Error processing request batch:", error);
       }
@@ -45,7 +61,8 @@ class RequestQueue {
   }
 
   clear() {
-    this.queue = [];
+    const pending = this.queue.splice(0, this.queue.length);
+    pending.forEach((item) => item.reject(new Error("Request queue cleared before execution")));
   }
 }
 

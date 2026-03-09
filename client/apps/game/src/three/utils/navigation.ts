@@ -3,6 +3,18 @@ import { Structure } from "@bibliothecadao/types";
 
 import { buildPlaySceneUrl } from "@/sharding/location-url";
 
+const dispatchPopState = () => {
+  const popStateEvent =
+    typeof PopStateEvent === "function" ? new PopStateEvent("popstate") : new Event("popstate");
+  window.dispatchEvent(popStateEvent);
+};
+
+const applyNavigationUrl = (url: string) => {
+  window.history.pushState({}, "", url);
+  dispatchPopState();
+  window.dispatchEvent(new Event("urlChanged"));
+};
+
 /**
  * Navigate to a structure by updating the URL and dispatching a URL change event
  * This can be used from any scene (Hexception, WorldMap, etc.) to navigate to a structure
@@ -41,11 +53,7 @@ function navigateToPosition(col: number, row: number, scene?: "hex" | "map") {
     }
   }
 
-  // Update browser URL
-  window.history.pushState({}, "", navigationUrl);
-
-  // Dispatch URL changed event to trigger scene updates
-  window.dispatchEvent(new Event("urlChanged"));
+  applyNavigationUrl(navigationUrl);
 }
 
 /**
@@ -113,11 +121,7 @@ export function toggleMapHexView() {
   // Construct new URL with same coordinates and existing shard context
   const newUrl = buildPlaySceneUrl(nextScene, parsedCol, parsedRow);
 
-  // Update browser URL
-  window.history.pushState({}, "", newUrl);
-
-  // Dispatch URL changed event to trigger scene updates
-  window.dispatchEvent(new Event("urlChanged"));
+  applyNavigationUrl(newUrl);
 
   console.log(`Toggled view from ${currentPath} to ${nextScene}`);
 }

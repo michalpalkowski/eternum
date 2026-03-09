@@ -15,7 +15,7 @@ describe("resolveGameRouteView", () => {
   });
 
 
-  it("keeps loading when shard context is present, even in onboarding phases", () => {
+  it("keeps loading when shard or shard-return context is present, even in onboarding phases", () => {
     expect(
       resolveGameRouteView({ phase: "world-select", hasSetupResult: false, hasAccount: false, hasShardContext: true }),
     ).toBe("loading");
@@ -24,6 +24,14 @@ describe("resolveGameRouteView", () => {
     ).toBe("loading");
     expect(
       resolveGameRouteView({ phase: "avatar", hasSetupResult: false, hasAccount: true, hasShardContext: true }),
+    ).toBe("loading");
+    expect(
+      resolveGameRouteView({
+        phase: "account",
+        hasSetupResult: false,
+        hasAccount: false,
+        hasShardReturnPending: true,
+      }),
     ).toBe("loading");
   });
 

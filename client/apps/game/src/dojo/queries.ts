@@ -142,7 +142,7 @@ export const getStructuresDataFromTorii = async (
 // For own structures, usePlayerStructureSync keeps data fresh so we only fetch if missing.
 // For non-owned structures, always re-fetch since no subscription covers them and data may be stale.
 export const ensureStructureSynced = async (
-  components: { Structure?: Component<any, any, any> },
+  components: { Structure?: Component<any, any, any>; Resource?: Component<any, any, any>; StructureBuildings?: Component<any, any, any> },
   toriiClient: ToriiClient,
   contractComponents: Component<Schema, Metadata, undefined>[],
   structureEntityId: ID,
@@ -161,9 +161,18 @@ export const ensureStructureSynced = async (
   }
 
   const existing = getComponentValue(components.Structure, entityKey);
+  const existingResource = components.Resource ? getComponentValue(components.Resource, entityKey) : undefined;
+  const existingStructureBuildings = components.StructureBuildings
+    ? getComponentValue(components.StructureBuildings, entityKey)
+    : undefined;
+
   if (existing && accountAddress) {
     try {
-      if (BigInt(existing.owner) === BigInt(accountAddress)) {
+      if (
+        BigInt(existing.owner) === BigInt(accountAddress) &&
+        existingResource !== undefined &&
+        existingStructureBuildings !== undefined
+      ) {
         return;
       }
     } catch {
@@ -392,12 +401,6 @@ export const getEntitiesFromTorii = async <S extends Schema>(
   entityIDs: ID[],
   entityModels: string[],
 ) => {
-  // Debug: Track what's calling this function repeatedly
-  if (import.meta.env.DEV) {
-    console.log(`[getEntitiesFromTorii] Called with ${entityIDs.length} entities, models:`, entityModels);
-    console.trace("[getEntitiesFromTorii] Call stack:");
-  }
-
   const validEntityIDs = entityIDs.filter((id) => {
     const valid = isValidId(id);
 

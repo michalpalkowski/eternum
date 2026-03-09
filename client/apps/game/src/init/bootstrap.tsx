@@ -21,6 +21,7 @@ import {
   parseShardUrlParams,
   parseTransportHealthFromStatusResponse,
 } from "@/sharding/protocol";
+import { resolveMainGameReturnUrl, resolveRuntimeContext } from "@/sharding/runtime-context";
 import { Chain, getGameManifest } from "@contracts";
 import { dojoConfig } from "../../dojo-config";
 import { env, hasPublicNodeUrl } from "../../env";
@@ -89,6 +90,8 @@ const handleNoAccount = (modalContent: ReactNode) => {
 
 const SHARD_TRANSPORT_HEALTH_TIMEOUT_MS = 30_000;
 const SHARD_TRANSPORT_HEALTH_POLL_INTERVAL_MS = 1_500;
+const SHARD_TRANSPORT_NOT_FOUND_STATUS = 404;
+const STALE_SHARD_SESSION_ERROR = "STALE_SHARD_SESSION";
 
 const waitForDelay = (delayMs: number): Promise<void> =>
   new Promise((resolve) => {
@@ -105,7 +108,10 @@ const ensureShardTransportHealthy = async (params: { operatorUrl: string; shardI
     try {
       const response = await fetch(transportUrl);
       if (!response.ok) {
-        lastReason = `HTTP ${response.status}`;
+        if (response.status === SHARD_TRANSPORT_NOT_FOUND_STATUS) {
+          throw new Error(STALE_SHARD_SESSION_ERROR + ": shard " + params.shardId + " is no longer active");
+        }
+        lastReason = "HTTP " + response.status;
       } else {
         const payload: unknown = await response.json();
         const transport = parseTransportHealthFromStatusResponse(payload);
@@ -115,6 +121,9 @@ const ensureShardTransportHealthy = async (params: { operatorUrl: string; shardI
         lastReason = transport.errorCode ?? transport.errorMessage ?? `status=${transport.status}`;
       }
     } catch (error) {
+      if (error instanceof Error && error.message.startsWith(STALE_SHARD_SESSION_ERROR)) {
+        throw error;
+      }
       lastReason = error instanceof Error ? error.message : "transport-health fetch failed";
     }
     await waitForDelay(SHARD_TRANSPORT_HEALTH_POLL_INTERVAL_MS);
@@ -201,12 +210,33 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
   // Read shard context from URL only.
   // This prevents stale sessionStorage in the main tab from forcing shard mode.
   const shardSession = parseShardUrlParams(window.location.search);
-  if (shardSession !== null) {
-    await ensureShardTransportHealthy({
-      operatorUrl: shardSession.operatorUrl,
-      shardId: shardSession.shardId,
-    });
-    shardStore.enterShardMode(shardSession);
+  const runtimeContext = resolveRuntimeContext(window.location.href, shardSession);
+  shardStore.setRuntimeContext(runtimeContext);
+
+  const shardSessionParams =
+    runtimeContext.kind === "shard"
+      ? {
+          ...runtimeContext.shard,
+          mainUrl: resolveMainGameReturnUrl(runtimeContext),
+        }
+      : null;
+
+  if (shardSessionParams !== null) {
+    try {
+      await ensureShardTransportHealthy({
+        operatorUrl: shardSessionParams.operatorUrl,
+        shardId: shardSessionParams.shardId,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith(STALE_SHARD_SESSION_ERROR)) {
+        const mainGameReturnUrl = resolveMainGameReturnUrl(runtimeContext);
+        shardStore.clearShardMode();
+        window.location.assign(mainGameReturnUrl);
+        throw new Error("[bootstrap] stale shard session detected; redirecting to main game view: " + mainGameReturnUrl);
+      }
+      throw error;
+    }
+    shardStore.enterShardMode(shardSessionParams, runtimeContext);
   } else {
     shardStore.clearShardMode();
   }
@@ -224,13 +254,13 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
   (dojoConfig as any).manifest = patchedManifest;
 
   // 2b) Shard mode override, validated by sharding protocol parser.
-  if (shardSession !== null) {
-    (dojoConfig as any).rpcUrl = shardSession.rpcUrl;
-    (dojoConfig as any).toriiUrl = shardSession.toriiGrpcUrl;
+  if (shardSessionParams !== null) {
+    (dojoConfig as any).rpcUrl = shardSessionParams.rpcUrl;
+    (dojoConfig as any).toriiUrl = shardSessionParams.toriiGrpcUrl;
   }
 
   // 3) Point SQL API to the active world's Torii
-  const toriiUrl = shardSession !== null ? shardSession.toriiUrl : chain === "local" ? env.VITE_PUBLIC_TORII : profile.toriiBaseUrl;
+  const toriiUrl = shardSessionParams !== null ? shardSessionParams.toriiUrl : chain === "local" ? env.VITE_PUBLIC_TORII : profile.toriiBaseUrl;
   setSqlApiBaseUrl(`${toriiUrl}/sql`);
 
   const setupResult = await setup(
@@ -257,7 +287,7 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
   console.log("[DOJO SETUP COMPLETED]");
 
   const initialSyncResult = await initialSync(setupResult, uiStore, syncingStore.setInitialSyncProgress, {
-    enforceProtocolChecks: shardSession !== null,
+    enforceProtocolChecks: shardSessionParams !== null,
   });
 
   console.log("[INITIAL SYNC COMPLETED]");
