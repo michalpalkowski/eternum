@@ -24,6 +24,19 @@ const HEXCEPTION_READY_TIMEOUT_MS = 6_000;
 // entities and the WorldUpdateListener needs to process them into visuals.
 const POST_MAP_LOAD_DELAY_MS = 3_000;
 
+const overlayDiag = (event: string, details?: Record<string, unknown>) => {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  if (details) {
+    console.log("[GameLoadingOverlay]", event, details);
+    return;
+  }
+
+  console.log("[GameLoadingOverlay]", event);
+};
+
 /**
  * Loading overlay shown while game data syncs after <World> mounts.
  *
@@ -53,15 +66,23 @@ export const GameLoadingOverlay = () => {
   const navigate = useNavigate();
 
   const dismiss = useCallback(
-    (delayMs: number) => {
+    (delayMs: number, reason: string) => {
       if (hasDismissed.current) return;
       hasDismissed.current = true;
+      overlayDiag("dismiss:scheduled", {
+        reason,
+        delayMs,
+        isSpectating,
+        mapLoading,
+        playerStructuresCount: playerStructures.length,
+      });
       setTimeout(() => {
+        overlayDiag("dismiss:executed", { reason });
         setShowBlankOverlay(false);
         setIsLoadingScreenEnabled(false);
       }, delayMs);
     },
-    [setShowBlankOverlay, setIsLoadingScreenEnabled],
+    [setShowBlankOverlay, setIsLoadingScreenEnabled, isSpectating, mapLoading, playerStructures.length],
   );
 
   useEffect(() => {
@@ -83,6 +104,11 @@ export const GameLoadingOverlay = () => {
 
     const first = playerStructures[0];
     const normalized = new Position({ x: first.position.x, y: first.position.y }).getNormalized();
+    overlayDiag("player-flow:start", {
+      firstStructureId: first.entityId,
+      firstStructurePosition: first.position,
+      normalizedPosition: normalized,
+    });
 
     const setStructureEntityId = useUIStore.getState().setStructureEntityId;
     setStructureEntityId(first.entityId, {
@@ -99,7 +125,7 @@ export const GameLoadingOverlay = () => {
 
     void ready.then(() => {
       setIsReady(true);
-      dismiss(POST_HEX_READY_DELAY_MS);
+      dismiss(POST_HEX_READY_DELAY_MS, "player-hex-ready");
     });
   }, [playerStructures, isSpectating, navigate, dismiss]);
 
@@ -110,7 +136,8 @@ export const GameLoadingOverlay = () => {
       hasStartedSpectatorFlow.current = true;
     }
 
-    if (mapLoading) {
+    if (mapLoading && !hasSeenMapLoading.current) {
+      overlayDiag("spectator-flow:map-loading-seen");
       hasSeenMapLoading.current = true;
     }
 
@@ -119,13 +146,16 @@ export const GameLoadingOverlay = () => {
     // Structure entities and for the map to render them.
     if (hasSeenMapLoading.current && !mapLoading && !hasQueuedSpectatorReady.current) {
       hasQueuedSpectatorReady.current = true;
+      overlayDiag("spectator-flow:map-loading-finished", {
+        playerStructuresCount: playerStructures.length,
+      });
       spectatorReadyTimeoutId.current = window.setTimeout(() => {
         spectatorReadyTimeoutId.current = null;
         setIsReady(true);
       }, 0);
-      dismiss(POST_MAP_LOAD_DELAY_MS);
+      dismiss(POST_MAP_LOAD_DELAY_MS, "spectator-map-load-complete");
     }
-  }, [mapLoading, isSpectating, dismiss]);
+  }, [mapLoading, isSpectating, dismiss, playerStructures.length]);
 
   useEffect(() => {
     return () => {
@@ -139,13 +169,18 @@ export const GameLoadingOverlay = () => {
   useEffect(() => {
     const timeout = setTimeout(() => {
       if (!hasDismissed.current) {
+        console.warn("[GameLoadingOverlay] safety timeout reached", {
+          isSpectating,
+          mapLoading,
+          playerStructuresCount: playerStructures.length,
+        });
         hasDismissed.current = true;
         setShowBlankOverlay(false);
         setIsLoadingScreenEnabled(false);
       }
     }, SAFETY_TIMEOUT_MS);
     return () => clearTimeout(timeout);
-  }, [setShowBlankOverlay, setIsLoadingScreenEnabled]);
+  }, [setShowBlankOverlay, setIsLoadingScreenEnabled, isSpectating, mapLoading, playerStructures.length]);
 
   const isSlow = !isReady && elapsedMs >= SLOW_THRESHOLD_MS;
   const hasNavigatedToTarget = isSpectating ? elapsedMs >= TICK_INTERVAL_MS : playerStructures.length > 0;

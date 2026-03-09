@@ -17,6 +17,14 @@ interface InitialStructureSelectionResult {
   spectator: boolean;
 }
 
+const logInitialSelection = (event: string, details: Record<string, unknown>) => {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  console.log("[sync][initial-selection]", event, details);
+};
+
 const toSelection = (
   structure: SyncedStructureRecord | null,
 ): Pick<SyncedStructureRecord, "entity_id" | "coord_x" | "coord_y"> | null => {
@@ -40,11 +48,21 @@ export const resolveInitialStructureSelection = (
     null;
 
   if (preferredOwnedStructure) {
+    logInitialSelection("owned-structure-selected", {
+      ownedStructureCount: input.ownedStructures.length,
+      selectedStructureId: preferredOwnedStructure.entity_id,
+      selectedCategory: preferredOwnedStructure.category ?? null,
+    });
     return {
       selectedStructure: toSelection(preferredOwnedStructure),
       spectator: false,
     };
   }
+
+  logInitialSelection("fallback-global-structure", {
+    ownedStructureCount: input.ownedStructures.length,
+    fallbackStructureId: input.firstGlobalStructure?.entity_id ?? null,
+  });
 
   return {
     selectedStructure: toSelection(input.firstGlobalStructure),

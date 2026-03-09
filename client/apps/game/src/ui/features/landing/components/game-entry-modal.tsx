@@ -41,6 +41,19 @@ const debugLog = (_worldName: string | null, ..._args: unknown[]) => {
   }
 };
 
+const setupDiag = (event: string, details?: Record<string, unknown>) => {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  if (details) {
+    console.log("[GameEntryModal:setup]", event, details);
+    return;
+  }
+
+  console.log("[GameEntryModal:setup]", event);
+};
+
 // Types
 type BootstrapStatus = "idle" | "pending-world" | "loading" | "ready" | "error";
 type SettleStage = "idle" | "assigning" | "settling" | "done" | "error";
@@ -692,6 +705,10 @@ export const GameEntryModal = ({
 
         if (!playerAddress) {
           debugLog(worldName, "No player address, skipping settlement check");
+          setupDiag("settlement-check:no-player-address", {
+            worldName,
+            bootstrapStatus,
+          });
           setNeedsSettlement(false);
           setSettlementCheckComplete(true);
           return;
@@ -735,11 +752,26 @@ export const GameEntryModal = ({
           canPlay,
           needsSettlement: needsSettlementResult,
         });
+        setupDiag("settlement-check:summary", {
+          worldName,
+          playerAddress,
+          entityId: String(entityId),
+          isRegistered,
+          playerStructuresCount: playerStructures.size,
+          coordsCount,
+          settledCount,
+          canPlay,
+          needsSettlement: needsSettlementResult,
+        });
 
         setNeedsSettlement(needsSettlementResult);
         setSettlementCheckComplete(true);
       } catch (error) {
         debugLog(worldName, "Failed to check settlement status:", error);
+        console.error("[GameEntryModal:setup] settlement-check failed", {
+          worldName,
+          error,
+        });
         // On error, assume no settlement needed and let user enter game
         setNeedsSettlement(false);
         setSettlementCheckComplete(true);
@@ -851,6 +883,12 @@ export const GameEntryModal = ({
 
     const startBootstrap = async () => {
       try {
+        setupDiag("bootstrap:start", {
+          worldName,
+          chain,
+          isSpectateMode,
+          isForgeMode,
+        });
         setBootstrapStatus("loading");
         setBootstrapError(null);
         setTasks(BOOTSTRAP_TASKS.map((t) => ({ ...t, status: "pending" })));
@@ -872,6 +910,15 @@ export const GameEntryModal = ({
         debugLog(worldName, "Starting game bootstrap...");
         updateTask("manifest", "running");
         const result = await bootstrapGame();
+        const contractComponentCount = Object.keys(
+          ((result?.network?.contractComponents ?? {}) as Record<string, unknown>),
+        ).length;
+        setupDiag("bootstrap:complete", {
+          worldName,
+          hasSetupResult: !!result,
+          hasToriiClient: !!result?.network?.toriiClient,
+          contractComponentCount,
+        });
         debugLog(worldName, "Bootstrap complete, got setupResult:", !!result);
 
         // After bootstrap patches the manifest with the selected world's
@@ -893,6 +940,11 @@ export const GameEntryModal = ({
         debugLog(worldName, "Bootstrap status set to ready");
       } catch (error) {
         debugLog(worldName, "Bootstrap failed:", error);
+        console.error("[GameEntryModal:setup] bootstrap failed", {
+          worldName,
+          chain,
+          error,
+        });
         setBootstrapError(error instanceof Error ? error : new Error("Bootstrap failed"));
         setBootstrapStatus("error");
         setTasks((prev) => prev.map((t) => (t.status === "running" ? { ...t, status: "error" } : t)));
@@ -900,7 +952,7 @@ export const GameEntryModal = ({
     };
 
     startBootstrap();
-  }, [isOpen, isForgeMode, worldName, chain, updateTask]);
+  }, [isOpen, isForgeMode, isSpectateMode, worldName, chain, updateTask]);
 
   // Update task progress based on sync
   useEffect(() => {
@@ -948,6 +1000,13 @@ export const GameEntryModal = ({
     const currentStructureEntityId = Number(uiState.structureEntityId);
     const currentWorldMapPosition = uiState.worldMapReturnPosition ?? { col: 0, row: 0 };
     const hasKnownStructure = Number.isFinite(currentStructureEntityId) && currentStructureEntityId > 0;
+    setupDiag("enter-game:start", {
+      worldName,
+      isSpectateMode,
+      currentStructureEntityId,
+      hasKnownStructure,
+      currentWorldMapPosition,
+    });
 
     if (isSpectateMode) {
       setStructureEntityId(0, {
@@ -960,6 +1019,11 @@ export const GameEntryModal = ({
         worldMapPosition: currentWorldMapPosition,
       });
     } else {
+      console.warn("[GameEntryModal:setup] entering without known owned structure", {
+        worldName,
+        currentStructureEntityId,
+        currentWorldMapPosition,
+      });
       // Keep startup deterministic when there is still no synced owned structure.
       setStructureEntityId(0, {
         spectator: false,
@@ -970,7 +1034,7 @@ export const GameEntryModal = ({
     const url = buildPlaySceneUrl(isSpectateMode ? "map" : "hex", currentWorldMapPosition.col, currentWorldMapPosition.row, { spectate: isSpectateMode });
     navigate(url);
     window.dispatchEvent(new Event("urlChanged"));
-  }, [navigate, isSpectateMode]);
+  }, [navigate, isSpectateMode, worldName]);
 
   // Settlement handler - calls actual Dojo system calls
   const handleSettle = useCallback(async () => {
@@ -1199,8 +1263,16 @@ export const GameEntryModal = ({
     debugLog(worldName, "Auto-enter check - phase:", phase, "isSpectateMode:", isSpectateMode);
     if (phase === "ready") {
       debugLog(worldName, "Auto-entering game...");
+      setupDiag("auto-enter:scheduled", {
+        worldName,
+        isSpectateMode,
+      });
       // Give users time to see the "Ready" screen and click manually if they want
       const timer = setTimeout(() => {
+        setupDiag("auto-enter:run", {
+          worldName,
+          isSpectateMode,
+        });
         handleEnterGame();
       }, 1000);
       return () => clearTimeout(timer);

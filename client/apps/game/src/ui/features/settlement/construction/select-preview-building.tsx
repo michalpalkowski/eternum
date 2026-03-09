@@ -111,13 +111,6 @@ type ResourceProductionStatus = {
   calculatedAt: number;
 };
 
-const isConstructionDiagnosticsEnabled = import.meta.env.DEV;
-
-const logConstructionViewDiagnostics = (event: string, details: Record<string, unknown>) => {
-  if (!isConstructionDiagnosticsEnabled) return;
-  console.log("[ConstructionView]", event, details);
-};
-
 export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?: string; entityId: number }) => {
   const dojo = useDojo();
 
@@ -270,23 +263,12 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
   const handleAutoBuild = useCallback(
     async (target: { type: BuildingType; resource?: ResourcesIds }) => {
       if (!realm?.position) {
-        logConstructionViewDiagnostics("auto-build-blocked-no-realm-position", {
-          entityId,
-          buildingType: target.type,
-          resourceId: target.resource ?? null,
-        });
         toast.error("Select a realm before building.");
         return;
       }
       const buildingKey = target.type.toString();
       const outerCol = Number(realm.position.x);
       const outerRow = Number(realm.position.y);
-      logConstructionViewDiagnostics("auto-build-start", {
-        entityId,
-        buildingType: target.type,
-        resourceId: target.resource ?? null,
-        useSimpleCost,
-      });
       const tileManager = new TileManager(dojo.setup.components, dojo.setup.systemCalls, {
         col: outerCol,
         row: outerRow,
@@ -312,12 +294,6 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
         });
 
         if (!availableSpot) {
-          logConstructionViewDiagnostics("auto-build-blocked-no-empty-spot", {
-            entityId,
-            buildingType: target.type,
-            resourceId: target.resource ?? null,
-            buildRadius,
-          });
           toast.error("No empty building tiles available.");
           return;
         }
@@ -334,13 +310,6 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
           useSimpleCost,
         );
         didBuild = true;
-        logConstructionViewDiagnostics("auto-build-success", {
-          entityId,
-          buildingType: target.type,
-          resourceId: target.resource ?? null,
-          col: availableSpot.col,
-          row: availableSpot.row,
-        });
 
         setPreviewBuilding(null);
         setSelectedBuildingHex({
@@ -350,12 +319,6 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
           innerRow: availableSpot.row,
         });
       } catch (error) {
-        logConstructionViewDiagnostics("auto-build-failed", {
-          entityId,
-          buildingType: target.type,
-          resourceId: target.resource ?? null,
-          error,
-        });
         console.error("Failed to auto-build", error);
         toast.error("Building failed. Please try again.");
       } finally {
@@ -693,123 +656,6 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
   const [selectedArmyType, setSelectedArmyType] = useState<ArmyTypeLabel | null>(null);
   const [visitedTabs, setVisitedTabs] = useState<Set<string>>(new Set());
   const previousEntityIdRef = useRef(entityId);
-  const realmResourceIds = realm?.resources ?? [];
-  const realmResourceIdsKey = realmResourceIds.join(",");
-  const realmPositionX = realm?.position ? Number(realm.position.x) : null;
-  const realmPositionY = realm?.position ? Number(realm.position.y) : null;
-  const realmHasCapacity = realm?.hasCapacity ?? null;
-  const realmReady = Boolean(realm);
-  const hasStructureBuildings = Boolean(structureBuildings);
-  const hasResourceData = Boolean(resourceData);
-  const selectedTabKey = useMemo(() => {
-    if (selectedTab === 0) return "resources";
-    if (selectedTab === 1) return "economic";
-    if (selectedTab === 2) return "military";
-    return `unknown:${selectedTab}`;
-  }, [selectedTab]);
-
-  useEffect(() => {
-    logConstructionViewDiagnostics("view-state", {
-      entityId,
-      selectedStructureEntityKey: selectedStructureEntity ?? null,
-      knownStructureEntityCount: knownStructureEntities.length,
-      selectedTab,
-      selectedTabKey,
-      realmReady,
-      realmPosition: realmPositionX !== null && realmPositionY !== null ? { x: realmPositionX, y: realmPositionY } : null,
-      realmResourceIds,
-      realmHasCapacity,
-      isRealmFull,
-      useSimpleCost,
-      hasStructureBuildings,
-      hasResourceData,
-    });
-  }, [
-    entityId,
-    hasResourceData,
-    hasStructureBuildings,
-    isRealmFull,
-    realmHasCapacity,
-    realmPositionX,
-    realmPositionY,
-    realmResourceIdsKey,
-    realmReady,
-    selectedStructureEntity,
-    selectedTab,
-    selectedTabKey,
-    useSimpleCost,
-    knownStructureEntities.length,
-  ]);
-
-  useEffect(() => {
-    if (!realmReady) {
-      console.warn("[ConstructionView] Realm info missing for selected entity", { entityId });
-      return;
-    }
-
-    if (realmResourceIds.length === 0) {
-      console.warn("[ConstructionView] Realm has no resources configured for construction tab", {
-        entityId,
-        realmPosition: realmPositionX !== null && realmPositionY !== null ? { x: realmPositionX, y: realmPositionY } : null,
-        realmHasCapacity,
-      });
-    }
-  }, [entityId, realmHasCapacity, realmPositionX, realmPositionY, realmReady, realmResourceIds.length]);
-
-  useEffect(() => {
-    if (selectedTabKey !== "resources") return;
-    if (!realmReady || !realm) return;
-
-    const resourceIds = realm.resources ?? [];
-    const resourceDiagnostics = resourceIds.map((resourceId) => {
-      const building = getBuildingFromResource(resourceId);
-      const buildingCosts = getBuildingCosts(entityId, dojo.setup.components, building, useSimpleCost);
-      const hasBalance = Boolean(buildingCosts && checkBalance(buildingCosts));
-      const hasEnoughPopulation = hasEnoughPopulationForBuilding(realm, building);
-      const isLaborLockedResource =
-        useSimpleCost &&
-        (resourceId === ResourcesIds.Dragonhide ||
-          resourceId === ResourcesIds.Mithral ||
-          resourceId === ResourcesIds.Adamantine);
-      const canBuild = !isLaborLockedResource && hasBalance && Boolean(realm?.hasCapacity) && hasEnoughPopulation;
-
-      return {
-        resourceId,
-        buildingType: building,
-        hasCosts: Boolean(buildingCosts),
-        hasBalance,
-        hasCapacity: Boolean(realm?.hasCapacity),
-        hasEnoughPopulation,
-        isLaborLockedResource,
-        isRealmFull,
-        canBuild,
-        existingBuildingCount: getBuildingCountFor(building),
-      };
-    });
-
-    logConstructionViewDiagnostics("resources-tab-snapshot", {
-      entityId,
-      resourcesCount: resourceIds.length,
-      diagnostics: resourceDiagnostics,
-    });
-
-    if (resourceDiagnostics.length > 0 && resourceDiagnostics.every((item) => !item.canBuild)) {
-      console.warn("[ConstructionView] No resource buildings currently buildable", {
-        entityId,
-        diagnostics: resourceDiagnostics,
-      });
-    }
-  }, [
-    checkBalance,
-    dojo.setup.components,
-    entityId,
-    getBuildingCountFor,
-    isRealmFull,
-    realmReady,
-    realmResourceIdsKey,
-    selectedTabKey,
-    useSimpleCost,
-  ]);
 
   useEffect(() => {
     const hasRealmChanged = previousEntityIdRef.current !== entityId;
@@ -885,32 +731,11 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
                   resourceId={resourceId}
                   onClick={() => {
                     if (!canBuild || isRealmFull) {
-                      logConstructionViewDiagnostics("resource-card-select-blocked", {
-                        entityId,
-                        resourceId,
-                        buildingType: building,
-                        hasBalance,
-                        realmHasCapacity: realm?.hasCapacity ?? null,
-                        hasEnoughPopulation,
-                        isLaborLockedResource,
-                        isRealmFull,
-                        useSimpleCost,
-                      });
                       return;
                     }
                     if (previewBuilding?.type === building && previewBuilding?.resource === resourceId) {
-                      logConstructionViewDiagnostics("resource-card-deselected", {
-                        entityId,
-                        resourceId,
-                        buildingType: building,
-                      });
                       setPreviewBuilding(null);
                     } else {
-                      logConstructionViewDiagnostics("resource-card-selected", {
-                        entityId,
-                        resourceId,
-                        buildingType: building,
-                      });
                       setPreviewBuilding({ type: building, resource: resourceId });
                       playResourceSound(resourceId);
                     }

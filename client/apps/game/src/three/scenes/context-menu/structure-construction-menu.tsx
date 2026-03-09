@@ -73,6 +73,14 @@ const militaryTierConfig: Array<{
 
 const toSlug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
+const logConstructionMenuDiagnostics = (event: string, details: Record<string, unknown>) => {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  console.log("[ConstructionMenu]", event, details);
+};
+
 const createResourceIconComponent = (
   resource: string | ResourcesIds | null | undefined,
   isDisabled: boolean = false,
@@ -135,6 +143,19 @@ export const createConstructionMenu = ({
       return undefined;
     }
   })();
+  logConstructionMenuDiagnostics("open", {
+    structureEntityId,
+    simpleCostEnabled,
+    hasRealmInfo: !!realmInfo,
+    realmResourceIds: realmInfo?.resources ?? [],
+    realmHasCapacity: realmInfo?.hasCapacity ?? null,
+  });
+  if (!realmInfo) {
+    console.warn("[ConstructionMenu] Realm info missing for selected structure", {
+      structureEntityId,
+      structureId: idString,
+    });
+  }
 
   const checkBalance = (cost: Record<string, { resource: ResourcesIds; amount: number }> | Array<any>) =>
     Object.values(cost).every((entry: any) => {
@@ -232,6 +253,20 @@ export const createConstructionMenu = ({
       }
     }
 
+    if (!canBuild && import.meta.env.DEV) {
+      logConstructionMenuDiagnostics("action-unavailable", {
+        structureEntityId,
+        label,
+        building,
+        resource: resource ?? null,
+        hasBalance,
+        realmHasCapacity,
+        hasEnoughPopulation,
+        simpleModeAllowed,
+        hint: hint ?? null,
+      });
+    }
+
     const iconDescriptor = iconResource ?? resource ?? label;
 
     return makeBuildingAction({
@@ -275,6 +310,19 @@ export const createConstructionMenu = ({
       });
     })
     .filter((action): action is ContextMenuAction => action !== null);
+
+  if ((realmInfo?.resources?.length ?? 0) === 0) {
+    console.warn("[ConstructionMenu] Realm has no configured resources", {
+      structureEntityId,
+      structureId: idString,
+    });
+  } else if (realmResourceActions.length === 0) {
+    console.warn("[ConstructionMenu] Realm resources found but no matching construction actions", {
+      structureEntityId,
+      structureId: idString,
+      realmResourceIds: realmInfo?.resources ?? [],
+    });
+  }
 
   const economicActions: ContextMenuAction[] = [
     {
