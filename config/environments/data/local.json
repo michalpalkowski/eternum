@@ -1566,7 +1566,7 @@
     "startSettlingAfterSeconds": 5,
     "startSettlingAt": 0,
     "startMainAfterSeconds": 15,
-    "startMainAt": 0,
+    "startMainAt": 1773072554,
     "durationSeconds": 2592000,
     "bridgeCloseAfterEndSeconds": 604800,
     "pointRegistrationCloseAfterEndSeconds": 600
