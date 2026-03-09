@@ -5,6 +5,7 @@ import {
   extractGameContractFromShardId,
   parseShardIdParts,
   parseActiveShardFromStatusResponse,
+  parseShardStatusEntriesFromStatusResponse,
   parseOperatorConfigResponse,
   parseTransportHealthFromStatusResponse,
   parseSettlementStreamEvent,
@@ -51,6 +52,11 @@ describe("sharding protocol", () => {
     expect(() => parseShardUrlParams("?shard_rpc=http://localhost:5050")).toThrowError(ShardProtocolError);
   });
 
+  it("includes field names in URL validation errors", () => {
+    expect(() => parseShardUrlParams("?shard_rpc=   &shard_torii=http://localhost:8080&shard_id=0xabc@1&shard_operator=http://localhost:3001"))
+      .toThrowError(/shard_rpc must not be empty/);
+  });
+
   it("resolves shard session from query before session storage", () => {
     const resolved = resolveShardSession(
       "?shard_rpc=http://localhost:5050&shard_torii=http://localhost:8080&shard_id=0xabc@1&shard_operator=http://localhost:3001",
@@ -95,7 +101,11 @@ describe("sharding protocol", () => {
   it("extracts active shard from status payload", () => {
     const activeShard = parseActiveShardFromStatusResponse({
       shards: [
-        { phase: "initializing" },
+        {
+          phase: "initializing",
+          game_contract_address: "0x1234abcd",
+          shard_id: "0x1234abcd@41",
+        },
         {
           phase: "gameplay_active",
           katana_url: "http://localhost:5050",
@@ -114,6 +124,32 @@ describe("sharding protocol", () => {
       gameContractAddress: "0x1234abcd",
       shardId: "0x1234abcd@42",
     });
+  });
+
+  it("parses shard status list with optional urls", () => {
+    const entries = parseShardStatusEntriesFromStatusResponse({
+      shards: [
+        {
+          phase: "initializing",
+          game_contract_address: "0x1234abcd",
+          shard_id: "0x1234abcd@41",
+          katana_url: null,
+          torii_url: null,
+          torii_grpc_url: null,
+        },
+      ],
+    });
+
+    expect(entries).toEqual([
+      {
+        phase: "initializing",
+        gameContractAddress: "0x1234abcd",
+        shardId: "0x1234abcd@41",
+        katanaUrl: null,
+        toriiUrl: null,
+        toriiGrpcUrl: null,
+      },
+    ]);
   });
 
   it("parses transport health payload", () => {
@@ -155,13 +191,16 @@ describe("sharding protocol", () => {
   });
 
   it("parses settlement stream events", () => {
-    const settling = parseSettlementStreamEvent("settling", JSON.stringify({ step_label: "Applying state" }));
-    const completed = parseSettlementStreamEvent("completed", "{}");
-    const failed = parseSettlementStreamEvent("failed", JSON.stringify({ reason: "boom" }));
+    const settling = parseSettlementStreamEvent(
+      "settling",
+      JSON.stringify({ shard_id: "0xabc123@7", step_label: "Applying state" }),
+    );
+    const completed = parseSettlementStreamEvent("completed", JSON.stringify({ shard_id: "0xabc123@7" }));
+    const failed = parseSettlementStreamEvent("failed", JSON.stringify({ shard_id: "0xabc123@7", reason: "boom" }));
 
-    expect(settling).toEqual({ type: "settling", stepLabel: "Applying state" });
-    expect(completed).toEqual({ type: "completed" });
-    expect(failed).toEqual({ type: "failed", reason: "boom" });
+    expect(settling).toEqual({ type: "settling", shardId: "0xabc123@7", stepLabel: "Applying state" });
+    expect(completed).toEqual({ type: "completed", shardId: "0xabc123@7" });
+    expect(failed).toEqual({ type: "failed", shardId: "0xabc123@7", reason: "boom" });
   });
 
   it("extracts game contract from shard id", () => {

@@ -42,6 +42,22 @@ export interface ActiveShard {
   readonly shardId: string;
 }
 
+export interface ShardStatusEntry {
+  readonly phase: string;
+  readonly shardId: string;
+  readonly gameContractAddress: string;
+  readonly katanaUrl: string | null;
+  readonly toriiUrl: string | null;
+  readonly toriiGrpcUrl: string | null;
+}
+
+export interface RequestedShardContext {
+  readonly txHash: string;
+  readonly gameContractAddress: string;
+  readonly onchainShardId: string;
+  readonly shardId: string;
+}
+
 export type TransportHealthStatus = "healthy" | "degraded" | "unavailable";
 
 export interface ShardTransportHealth {
@@ -55,9 +71,9 @@ export interface ShardTransportHealth {
 }
 
 export type SettlementStreamEvent =
-  | { readonly type: "settling"; readonly stepLabel: string | null }
-  | { readonly type: "completed" }
-  | { readonly type: "failed"; readonly reason: string };
+  | { readonly type: "settling"; readonly shardId: string; readonly stepLabel: string | null }
+  | { readonly type: "completed"; readonly shardId: string }
+  | { readonly type: "failed"; readonly shardId: string; readonly reason: string };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
@@ -65,18 +81,18 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const parseHttpUrl = (rawUrl: string, fieldName: string, errorCode: ShardProtocolErrorCode): string => {
   const value = rawUrl.trim();
   if (value.length === 0) {
-    throw new ShardProtocolError(errorCode, ` must not be empty`);
+    throw new ShardProtocolError(errorCode, `${fieldName} must not be empty`);
   }
 
   let parsed: URL;
   try {
     parsed = new URL(value);
   } catch {
-    throw new ShardProtocolError(errorCode, ` must be a valid URL`);
+    throw new ShardProtocolError(errorCode, `${fieldName} must be a valid URL`);
   }
 
   if (!HTTP_PROTOCOLS.has(parsed.protocol)) {
-    throw new ShardProtocolError(errorCode, ` must use http or https`);
+    throw new ShardProtocolError(errorCode, `${fieldName} must use http or https`);
   }
 
   const normalized = parsed.toString();
@@ -118,6 +134,15 @@ const parseOptionalString = (
     return null;
   }
   return parseNonEmptyString(value, fieldName, errorCode);
+};
+
+const parseOptionalHttpUrl = (
+  value: unknown,
+  fieldName: string,
+  errorCode: ShardProtocolErrorCode,
+): string | null => {
+  const parsed = parseOptionalString(value, fieldName, errorCode);
+  return parsed === null ? null : parseHttpUrl(parsed, fieldName, errorCode);
 };
 
 const preferBrowserSafeToriiGrpcUrl = (toriiUrl: string, toriiGrpcUrl: string): string => {
@@ -281,7 +306,7 @@ export const parseOperatorConfigResponse = (payload: unknown): OperatorConfig =>
   };
 };
 
-export const parseActiveShardFromStatusResponse = (payload: unknown): ActiveShard | null => {
+export const parseShardStatusEntriesFromStatusResponse = (payload: unknown): ShardStatusEntry[] => {
   if (!isRecord(payload)) {
     throw new ShardProtocolError("INVALID_OPERATOR_STATUS", "Operator status response must be an object");
   }
@@ -291,41 +316,47 @@ export const parseActiveShardFromStatusResponse = (payload: unknown): ActiveShar
     throw new ShardProtocolError("INVALID_OPERATOR_STATUS", "Operator status response must contain shards array");
   }
 
-  for (const shard of rawShards) {
-    if (!isRecord(shard)) {
-      throw new ShardProtocolError("INVALID_OPERATOR_STATUS", "Each shard entry must be an object");
+  return rawShards.map((rawShard, index) => {
+    if (!isRecord(rawShard)) {
+      throw new ShardProtocolError("INVALID_OPERATOR_STATUS", `Shard entry at index ${index} must be an object`);
     }
 
-    const phase = parseNonEmptyString(shard.phase, "phase", "INVALID_OPERATOR_STATUS");
+    return {
+      phase: parseNonEmptyString(rawShard.phase, "phase", "INVALID_OPERATOR_STATUS"),
+      shardId: parseNonEmptyString(rawShard.shard_id, "shard_id", "INVALID_OPERATOR_STATUS"),
+      gameContractAddress: parseHexAddress(
+        rawShard.game_contract_address,
+        "game_contract_address",
+        "INVALID_OPERATOR_STATUS",
+      ),
+      katanaUrl: parseOptionalHttpUrl(rawShard.katana_url, "katana_url", "INVALID_OPERATOR_STATUS"),
+      toriiUrl: parseOptionalHttpUrl(rawShard.torii_url, "torii_url", "INVALID_OPERATOR_STATUS"),
+      toriiGrpcUrl: parseOptionalHttpUrl(rawShard.torii_grpc_url, "torii_grpc_url", "INVALID_OPERATOR_STATUS"),
+    };
+  });
+};
+
+export const parseActiveShardFromStatusResponse = (payload: unknown): ActiveShard | null => {
+  const entries = parseShardStatusEntriesFromStatusResponse(payload);
+  for (const entry of entries) {
+    const phase = parseNonEmptyString(entry.phase, "phase", "INVALID_OPERATOR_STATUS");
     if (phase !== "gameplay_active") {
       continue;
     }
 
+    if (entry.katanaUrl === null || entry.toriiUrl === null) {
+      throw new ShardProtocolError(
+        "INVALID_OPERATOR_STATUS",
+        "gameplay_active shard entry must include katana_url and torii_url",
+      );
+    }
+
     return {
-      katanaUrl: parseHttpUrl(
-        parseNonEmptyString(shard.katana_url, "katana_url", "INVALID_OPERATOR_STATUS"),
-        "katana_url",
-        "INVALID_OPERATOR_STATUS",
-      ),
-      toriiUrl: parseHttpUrl(
-        parseNonEmptyString(shard.torii_url, "torii_url", "INVALID_OPERATOR_STATUS"),
-        "torii_url",
-        "INVALID_OPERATOR_STATUS",
-      ),
-      toriiGrpcUrl:
-        shard.torii_grpc_url === undefined || shard.torii_grpc_url === null
-          ? null
-          : parseHttpUrl(
-              parseNonEmptyString(shard.torii_grpc_url, "torii_grpc_url", "INVALID_OPERATOR_STATUS"),
-              "torii_grpc_url",
-              "INVALID_OPERATOR_STATUS",
-            ),
-      gameContractAddress: parseHexAddress(
-        shard.game_contract_address,
-        "game_contract_address",
-        "INVALID_OPERATOR_STATUS",
-      ),
-      shardId: parseNonEmptyString(shard.shard_id, "shard_id", "INVALID_OPERATOR_STATUS"),
+      katanaUrl: entry.katanaUrl,
+      toriiUrl: entry.toriiUrl,
+      toriiGrpcUrl: entry.toriiGrpcUrl,
+      gameContractAddress: entry.gameContractAddress,
+      shardId: entry.shardId,
     };
   }
 
@@ -404,10 +435,6 @@ export const parseShardIdParts = (shardId: string): ShardIdParts => {
 };
 
 export const parseSettlementStreamEvent = (eventType: string, rawData: string): SettlementStreamEvent => {
-  if (eventType === "completed") {
-    return { type: "completed" };
-  }
-
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawData);
@@ -419,12 +446,18 @@ export const parseSettlementStreamEvent = (eventType: string, rawData: string): 
     throw new ShardProtocolError("INVALID_SETTLEMENT_EVENT", `${eventType} event payload must be an object`);
   }
 
+  const shardId = parseNonEmptyString(parsed.shard_id, "shard_id", "INVALID_SETTLEMENT_EVENT");
+
   if (eventType === "settling") {
     const stepLabel =
       parsed.step_label === undefined || parsed.step_label === null
         ? null
         : parseNonEmptyString(parsed.step_label, "step_label", "INVALID_SETTLEMENT_EVENT");
-    return { type: "settling", stepLabel };
+    return { type: "settling", shardId, stepLabel };
+  }
+
+  if (eventType === "completed") {
+    return { type: "completed", shardId };
   }
 
   if (eventType === "failed") {
@@ -432,7 +465,7 @@ export const parseSettlementStreamEvent = (eventType: string, rawData: string): 
       parsed.reason === undefined || parsed.reason === null
         ? "Settlement failed"
         : parseNonEmptyString(parsed.reason, "reason", "INVALID_SETTLEMENT_EVENT");
-    return { type: "failed", reason };
+    return { type: "failed", shardId, reason };
   }
 
   throw new ShardProtocolError("INVALID_SETTLEMENT_EVENT", `Unsupported settlement event type: ${eventType}`);

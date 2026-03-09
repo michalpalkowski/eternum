@@ -46,12 +46,9 @@ class MockEventSource {
   public close(): void {}
 
   public emit(type: string, payload: unknown = {}): void {
-    const event =
-      type === "completed"
-        ? new Event(type)
-        : new MessageEvent(type, {
-            data: typeof payload === "string" ? payload : JSON.stringify(payload),
-          });
+    const event = new MessageEvent(type, {
+      data: typeof payload === "string" ? payload : JSON.stringify(payload),
+    });
     for (const listener of this.listeners.get(type) ?? []) {
       listener(event);
     }
@@ -122,13 +119,13 @@ describe("useShardSettlement", () => {
     expect(MockEventSource.instances).toHaveLength(1);
 
     await act(async () => {
-      MockEventSource.instances[0].emit("settling", { step_label: "Applying shard updates" });
+      MockEventSource.instances[0].emit("settling", { shard_id: "0xabc123@9", step_label: "Applying shard updates" });
     });
     expect(getHookState().phase).toBe("waiting");
     expect(getHookState().stepLabel).toBe("Applying shard updates");
 
     await act(async () => {
-      MockEventSource.instances[0].emit("completed");
+      MockEventSource.instances[0].emit("completed", { shard_id: "0xabc123@9" });
     });
     expect(getHookState().phase).toBe("complete");
     expect(getHookState().error).toBeNull();
@@ -149,9 +146,39 @@ describe("useShardSettlement", () => {
     expect(getHookState().phase).toBe("waiting");
 
     await act(async () => {
-      MockEventSource.instances[0].emit("failed", { reason: "Settlement failed upstream" });
+      MockEventSource.instances[0].emit("failed", { shard_id: "0xabc123@9", reason: "Settlement failed upstream" });
     });
     expect(getHookState().phase).toBe("error");
     expect(getHookState().error).toBe("Settlement failed upstream");
+  });
+
+  it("ignores settlement events from other shard ids", async () => {
+    const account: ExecutableAccount = {
+      execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue(undefined),
+    };
+
+    await act(async () => {
+      root.render(<HookHarness account={account} shardId="0xabc123@9" operatorUrl="http://localhost:3001" />);
+    });
+
+    await act(async () => {
+      await getHookState().startSettlement();
+    });
+    expect(getHookState().phase).toBe("waiting");
+
+    await act(async () => {
+      MockEventSource.instances[0].emit("settling", { shard_id: "0xabc123@10", step_label: "Wrong shard" });
+    });
+    expect(getHookState().stepLabel).toBeNull();
+
+    await act(async () => {
+      MockEventSource.instances[0].emit("completed", { shard_id: "0xabc123@10" });
+    });
+    expect(getHookState().phase).toBe("waiting");
+
+    await act(async () => {
+      MockEventSource.instances[0].emit("completed", { shard_id: "0xabc123@9" });
+    });
+    expect(getHookState().phase).toBe("complete");
   });
 });

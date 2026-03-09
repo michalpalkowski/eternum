@@ -2,6 +2,7 @@
 import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { hash } from "starknet";
 import type { ExecutableAccount } from "@/sharding/types";
 import { useShardRequest } from "./use-shard-request";
 
@@ -29,6 +30,18 @@ const getHookState = (state: HookState | null): HookState => {
   }
   return state;
 };
+
+const SHARDING_REQUESTED_SELECTOR = hash.getSelectorFromName("ShardingRequested").toLowerCase();
+
+const buildReceipt = (params: { gameAddress: string; shardContractAddress: string; onchainShardId: string }) => ({
+  events: [
+    {
+      from_address: params.shardContractAddress,
+      keys: [SHARDING_REQUESTED_SELECTOR, params.gameAddress],
+      data: [params.onchainShardId],
+    },
+  ],
+});
 
 describe("useShardRequest", () => {
   let container: HTMLDivElement;
@@ -73,7 +86,7 @@ describe("useShardRequest", () => {
 
   it("fails fast when operator config payload is invalid", async () => {
     const account: ExecutableAccount = {
-      execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue(undefined),
+      execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x1" }),
     };
 
     fetchMock.mockResolvedValueOnce(
@@ -92,12 +105,45 @@ describe("useShardRequest", () => {
 
     const current = getHookState(latestState);
     expect(current.phase).toBe("error");
+    expect(current.errorCode).toBe("OPERATOR_CONFIG_FAILED");
     expect(current.error).toContain("shard_contract_address");
+  });
+
+  it("fails fast when account cannot resolve tx receipt", async () => {
+    const account: ExecutableAccount = {
+      execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x1" }),
+    };
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ shard_contract_address: "0x1234abcd" }), {
+        status: 200,
+      }),
+    );
+
+    await act(async () => {
+      root.render(<HookHarness account={account} operatorUrl="http://localhost:3001" />);
+    });
+
+    await act(async () => {
+      await getHookState(latestState).requestShard([42]);
+    });
+
+    const current = getHookState(latestState);
+    expect(current.phase).toBe("error");
+    expect(current.errorCode).toBe("RECEIPT_UNSUPPORTED");
+    expect(current.error).toContain("receipt lookup");
   });
 
   it("fails fast when shard status response is invalid while polling", async () => {
     const account: ExecutableAccount = {
-      execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue(undefined),
+      execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" }),
+      waitForTransaction: vi
+        .fn<NonNullable<ExecutableAccount["waitForTransaction"]>>()
+        .mockResolvedValue(buildReceipt({
+          gameAddress: "0xabc123",
+          shardContractAddress: "0x1234abcd",
+          onchainShardId: "0x9",
+        })),
     };
 
     fetchMock
@@ -119,20 +165,24 @@ describe("useShardRequest", () => {
     await act(async () => {
       await getHookState(latestState).requestShard([42]);
     });
-    expect(getHookState(latestState).phase).toBe("waiting");
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2_000);
-    });
+    await act(async () => Promise.resolve());
 
     const current = getHookState(latestState);
     expect(current.phase).toBe("error");
+    expect(current.errorCode).toBe("POLL_FAILED");
     expect(current.error).toContain("shards array");
   });
 
-  it("waits until transport health becomes healthy before ready", async () => {
+  it("waits for healthy transport of the requested shard id", async () => {
     const account: ExecutableAccount = {
-      execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue(undefined),
+      execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" }),
+      waitForTransaction: vi
+        .fn<NonNullable<ExecutableAccount["waitForTransaction"]>>()
+        .mockResolvedValue(buildReceipt({
+          gameAddress: "0xabc123",
+          shardContractAddress: "0x1234abcd",
+          onchainShardId: "0x9",
+        })),
     };
 
     fetchMock
@@ -147,11 +197,19 @@ describe("useShardRequest", () => {
             shards: [
               {
                 phase: "gameplay_active",
+                katana_url: "http://localhost:5051",
+                torii_url: "http://localhost:8081",
+                torii_grpc_url: "http://localhost:18091",
+                game_contract_address: "0xabc123",
+                shard_id: "0xabc123@0x99",
+              },
+              {
+                phase: "gameplay_active",
                 katana_url: "http://localhost:5050",
                 torii_url: "http://localhost:8080",
                 torii_grpc_url: "http://localhost:18090",
                 game_contract_address: "0xabc123",
-                shard_id: "0xabc123@9",
+                shard_id: "0xabc123@0x9",
               },
             ],
           }),
@@ -184,7 +242,7 @@ describe("useShardRequest", () => {
                 torii_url: "http://localhost:8080",
                 torii_grpc_url: "http://localhost:18090",
                 game_contract_address: "0xabc123",
-                shard_id: "0xabc123@9",
+                shard_id: "0xabc123@0x9",
               },
             ],
           }),
@@ -216,15 +274,12 @@ describe("useShardRequest", () => {
       await getHookState(latestState).requestShard([42]);
     });
     expect(getHookState(latestState).phase).toBe("waiting");
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2_000);
-    });
-    expect(getHookState(latestState).phase).toBe("waiting");
+    expect(getHookState(latestState).targetShardId).toBe("0xabc123@0x9");
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2_000);
     });
     expect(getHookState(latestState).phase).toBe("ready");
+    expect(getHookState(latestState).shardUrls?.shardId).toBe("0xabc123@0x9");
   });
 });

@@ -1,18 +1,32 @@
 import { getContractByName } from "@dojoengine/core";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Call } from "starknet";
+import { hash, type Call } from "starknet";
 import { dojoConfig } from "../../dojo-config";
 import {
   buildShardPlayUrl,
-  parseActiveShardFromStatusResponse,
-  parseOperatorConfigResponse,
   parseShardIdParts,
+  type RequestedShardContext,
+  parseOperatorConfigResponse,
+  parseShardStatusEntriesFromStatusResponse,
   parseTransportHealthFromStatusResponse,
 } from "@/sharding/protocol";
 import { resolveMainGameReturnUrl, resolveRuntimeContextFromWindow } from "@/sharding/runtime-context";
 import type { ExecutableAccount } from "@/sharding/types";
 
 export type ShardRequestPhase = "idle" | "requesting" | "waiting" | "ready" | "error";
+export type ShardRequestErrorCode =
+  | "MISSING_ACCOUNT"
+  | "INVALID_ENTITY_IDS"
+  | "MISSING_OPERATOR_URL"
+  | "OPERATOR_CONFIG_FAILED"
+  | "EXECUTE_FAILED"
+  | "TX_HASH_MISSING"
+  | "RECEIPT_UNSUPPORTED"
+  | "RECEIPT_FAILED"
+  | "SHARD_ID_RESOLUTION_FAILED"
+  | "REQUEST_TIMEOUT"
+  | "OPERATOR_REJECTED"
+  | "POLL_FAILED";
 
 interface ShardUrls {
   katanaUrl: string;
@@ -22,22 +36,205 @@ interface ShardUrls {
   shardId: string;
 }
 
-export const useShardRequest = (account: ExecutableAccount | null, operatorUrl: string) => {
+interface UseShardRequestOptions {
+  shardingContractAddress?: string | null;
+  worldAddress?: string | null;
+}
+
+const SHARDING_REQUESTED_SELECTOR = hash.getSelectorFromName("ShardingRequested").toLowerCase();
+const SHARD_REQUEST_POLL_INTERVAL_MS = 2000;
+const SHARD_REQUEST_TIMEOUT_MS = 120_000;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const normalizeFeltToHex = (value: unknown, fieldName: string): string => {
+  if (typeof value === "bigint") {
+    return `0x${value.toString(16)}`.toLowerCase();
+  }
+
+  if (typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value >= 0) {
+    return `0x${BigInt(value).toString(16)}`.toLowerCase();
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) {
+      throw new Error(`${fieldName} must not be empty`);
+    }
+    try {
+      return `0x${BigInt(trimmed).toString(16)}`.toLowerCase();
+    } catch {
+      throw new Error(`${fieldName} must be a valid felt value`);
+    }
+  }
+
+  throw new Error(`${fieldName} must be a felt-compatible value`);
+};
+
+const normalizeOnchainShardId = (value: string): string => {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    throw new Error("onchain shard id must not be empty");
+  }
+  try {
+    return `0x${BigInt(trimmed).toString(16)}`.toLowerCase();
+  } catch {
+    return trimmed.toLowerCase();
+  }
+};
+
+const parseTxHashFromExecuteResult = (executeResult: unknown): string => {
+  if (typeof executeResult === "string" || typeof executeResult === "bigint" || typeof executeResult === "number") {
+    return normalizeFeltToHex(executeResult, "transaction_hash");
+  }
+
+  if (!isRecord(executeResult)) {
+    throw new Error("execute() result must include transaction_hash");
+  }
+
+  const rawHash = executeResult.transaction_hash ?? executeResult.transactionHash;
+  if (rawHash === undefined || rawHash === null) {
+    throw new Error("execute() result is missing transaction_hash");
+  }
+
+  return normalizeFeltToHex(rawHash, "transaction_hash");
+};
+
+const extractReceiptEvents = (receipt: unknown): Array<Record<string, unknown>> => {
+  if (!isRecord(receipt)) {
+    return [];
+  }
+
+  const fromRoot = receipt.events;
+  if (Array.isArray(fromRoot)) {
+    return fromRoot.filter((event): event is Record<string, unknown> => isRecord(event));
+  }
+
+  const nestedReceipt = receipt.receipt;
+  if (!isRecord(nestedReceipt)) {
+    return [];
+  }
+
+  const fromNested = nestedReceipt.events;
+  if (!Array.isArray(fromNested)) {
+    return [];
+  }
+
+  return fromNested.filter((event): event is Record<string, unknown> => isRecord(event));
+};
+
+const resolveReceiptFromAccount = async (account: ExecutableAccount, txHash: string): Promise<unknown> => {
+  if (typeof account.waitForTransaction === "function") {
+    return account.waitForTransaction(txHash);
+  }
+  if (typeof account.provider?.waitForTransaction === "function") {
+    return account.provider.waitForTransaction(txHash);
+  }
+  if (typeof account.getTransactionReceipt === "function") {
+    return account.getTransactionReceipt(txHash);
+  }
+  if (typeof account.provider?.getTransactionReceipt === "function") {
+    return account.provider.getTransactionReceipt(txHash);
+  }
+  throw new Error("Account does not support transaction receipt lookup");
+};
+
+const resolveRequestedShardContextFromReceipt = (params: {
+  txHash: string;
+  receipt: unknown;
+  expectedGameContractAddress: string;
+  expectedShardContractAddress: string;
+}): RequestedShardContext => {
+  const events = extractReceiptEvents(params.receipt);
+  for (const event of events) {
+    const rawFromAddress = event.from_address ?? event.fromAddress;
+    const rawKeys = event.keys;
+    const rawData = event.data;
+    if (!Array.isArray(rawKeys) || !Array.isArray(rawData)) {
+      continue;
+    }
+    if (rawKeys.length === 0 || rawData.length === 0) {
+      continue;
+    }
+
+    let fromAddress: string;
+    let selector: string;
+    let gameAddressFromEvent: string | null = null;
+    let onchainShardId: string;
+    try {
+      fromAddress = normalizeFeltToHex(rawFromAddress, "event.from_address");
+      selector = normalizeFeltToHex(rawKeys[0], "event.keys[0]");
+      if (rawKeys.length > 1) {
+        gameAddressFromEvent = normalizeFeltToHex(rawKeys[1], "event.keys[1]");
+      }
+      onchainShardId = normalizeFeltToHex(rawData[0], "event.data[0]");
+    } catch {
+      continue;
+    }
+
+    if (fromAddress !== params.expectedShardContractAddress) {
+      continue;
+    }
+    if (selector !== SHARDING_REQUESTED_SELECTOR) {
+      continue;
+    }
+    if (gameAddressFromEvent !== null && gameAddressFromEvent !== params.expectedGameContractAddress) {
+      continue;
+    }
+
+    return {
+      txHash: params.txHash,
+      gameContractAddress: params.expectedGameContractAddress,
+      onchainShardId,
+      shardId: `${params.expectedGameContractAddress}@${onchainShardId}`,
+    };
+  }
+
+  throw new Error("ShardingRequested event not found in transaction receipt");
+};
+
+const parseOperatorRejection = (payload: unknown): string | null => {
+  if (!isRecord(payload)) {
+    return null;
+  }
+  const reason = typeof payload.error === "string" ? payload.error : null;
+  const code = typeof payload.error_code === "string" ? payload.error_code : null;
+  if (reason === null) {
+    return null;
+  }
+  return code === null ? reason : `${reason} (${code})`;
+};
+
+export const useShardRequest = (
+  account: ExecutableAccount | null,
+  operatorUrl: string,
+  options?: UseShardRequestOptions,
+) => {
   const [phase, setPhase] = useState<ShardRequestPhase>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<ShardRequestErrorCode | null>(null);
   const [shardUrls, setShardUrls] = useState<ShardUrls | null>(null);
+  const [targetShardId, setTargetShardId] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollLockRef = useRef(false);
+  const pollStartedAtRef = useRef<number | null>(null);
+  const pollTargetRef = useRef<RequestedShardContext | null>(null);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current !== null) {
       clearInterval(pollRef.current);
       pollRef.current = null;
     }
+    pollStartedAtRef.current = null;
+    pollTargetRef.current = null;
+    pollLockRef.current = false;
   }, []);
 
   const failRequest = useCallback(
-    (message: string) => {
+    (code: ShardRequestErrorCode, message: string) => {
       stopPolling();
+      setErrorCode(code);
       setError(message);
       setPhase("error");
     },
@@ -46,23 +243,118 @@ export const useShardRequest = (account: ExecutableAccount | null, operatorUrl: 
 
   useEffect(() => stopPolling, [stopPolling]);
 
+  const pollShardStatus = useCallback(async () => {
+    if (pollLockRef.current) {
+      return;
+    }
+
+    const target = pollTargetRef.current;
+    if (target === null) {
+      return;
+    }
+
+    const startedAt = pollStartedAtRef.current;
+    if (startedAt !== null && Date.now() - startedAt >= SHARD_REQUEST_TIMEOUT_MS) {
+      failRequest(
+        "REQUEST_TIMEOUT",
+        `Shard request timed out after ${Math.round(SHARD_REQUEST_TIMEOUT_MS / 1000)}s`,
+      );
+      return;
+    }
+
+    pollLockRef.current = true;
+    try {
+      const statusResponse = await fetch(`${operatorUrl}/shard/${target.gameContractAddress}`);
+
+      if (statusResponse.status === 404) {
+        return;
+      }
+      if (statusResponse.status === 409) {
+        const payload: unknown = await statusResponse.json().catch(() => null);
+        const rejection = parseOperatorRejection(payload);
+        failRequest(
+          "OPERATOR_REJECTED",
+          rejection ?? `Operator rejected shard request: HTTP ${statusResponse.status}`,
+        );
+        return;
+      }
+      if (!statusResponse.ok) {
+        throw new Error(`Failed to fetch shard status: HTTP ${statusResponse.status}`);
+      }
+
+      const statusPayload: unknown = await statusResponse.json();
+      const shardEntries = parseShardStatusEntriesFromStatusResponse(statusPayload);
+      const normalizedTargetOnchainId = normalizeOnchainShardId(target.onchainShardId);
+      const shardEntry = shardEntries.find((entry) => {
+        if (entry.gameContractAddress !== target.gameContractAddress) {
+          return false;
+        }
+        const entryShardIdParts = parseShardIdParts(entry.shardId);
+        return normalizeOnchainShardId(entryShardIdParts.onchainShardId) === normalizedTargetOnchainId;
+      });
+      if (shardEntry === undefined) {
+        return;
+      }
+
+      const entryShardIdParts = parseShardIdParts(shardEntry.shardId);
+
+      const transportResponse = await fetch(
+        `${operatorUrl}/shard/${target.gameContractAddress}/${entryShardIdParts.onchainShardId}/transport-health`,
+      );
+      if (!transportResponse.ok) {
+        throw new Error(`Failed to fetch shard transport health: HTTP ${transportResponse.status}`);
+      }
+      const transportPayload: unknown = await transportResponse.json();
+      const transport = parseTransportHealthFromStatusResponse(transportPayload);
+      if (transport.status !== "healthy") {
+        return;
+      }
+      if (shardEntry.katanaUrl === null || shardEntry.toriiUrl === null) {
+        return;
+      }
+
+      stopPolling();
+      setShardUrls({
+        katanaUrl: shardEntry.katanaUrl,
+        toriiUrl: shardEntry.toriiUrl,
+        toriiGrpcUrl: shardEntry.toriiGrpcUrl,
+        gameContractAddress: shardEntry.gameContractAddress,
+        shardId: shardEntry.shardId,
+      });
+      setErrorCode(null);
+      setError(null);
+      setPhase("ready");
+    } catch (pollError) {
+      const message = pollError instanceof Error ? pollError.message : "Failed to poll shard status";
+      failRequest("POLL_FAILED", message);
+    } finally {
+      pollLockRef.current = false;
+    }
+  }, [failRequest, operatorUrl, stopPolling]);
+
   const requestShard = useCallback(
     async (entityIds: number[]) => {
       if (phase !== "idle") {
         return;
       }
       if (account === null) {
-        failRequest("Wallet account is required to request a shard");
+        failRequest("MISSING_ACCOUNT", "Wallet account is required to request a shard");
         return;
       }
       if (entityIds.length === 0) {
-        failRequest("entityIds must not be empty");
+        failRequest("INVALID_ENTITY_IDS", "entityIds must not be empty");
+        return;
+      }
+      if (operatorUrl.trim().length === 0) {
+        failRequest("MISSING_OPERATOR_URL", "Missing shard operator URL");
         return;
       }
 
       setPhase("requesting");
+      setErrorCode(null);
       setError(null);
       setShardUrls(null);
+      setTargetShardId(null);
 
       try {
         const configResponse = await fetch(`${operatorUrl}/config`);
@@ -73,8 +365,16 @@ export const useShardRequest = (account: ExecutableAccount | null, operatorUrl: 
         const operatorConfig = parseOperatorConfigResponse(configPayload);
 
         const shardingContract = getContractByName(dojoConfig.manifest, "s1_eternum", "sharding_systems");
+        const shardingContractAddress = options?.shardingContractAddress?.trim() || shardingContract.address;
+        const worldAddress = options?.worldAddress?.trim() || dojoConfig.manifest.world.address;
+        const normalizedWorldAddress = normalizeFeltToHex(worldAddress, "world_address");
+        const normalizedShardContractAddress = normalizeFeltToHex(
+          operatorConfig.shardContractAddress,
+          "shard_contract_address",
+        );
+
         const requestShardCall: Call = {
-          contractAddress: shardingContract.address,
+          contractAddress: shardingContractAddress,
           entrypoint: "request_shard_all",
           calldata: [
             operatorConfig.shardContractAddress,
@@ -82,58 +382,65 @@ export const useShardRequest = (account: ExecutableAccount | null, operatorUrl: 
             ...entityIds.map((entityId) => entityId.toString()),
           ],
         };
-        await account.execute([requestShardCall]);
+        let executeResult: unknown;
+        try {
+          executeResult = await account.execute([requestShardCall]);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "request_shard_all transaction failed";
+          failRequest("EXECUTE_FAILED", message);
+          return;
+        }
 
+        let txHash: string;
+        try {
+          txHash = parseTxHashFromExecuteResult(executeResult);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "execute() returned invalid transaction hash";
+          failRequest("TX_HASH_MISSING", message);
+          return;
+        }
+
+        let receipt: unknown;
+        try {
+          receipt = await resolveReceiptFromAccount(account, txHash);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Failed to resolve transaction receipt";
+          if (message.includes("does not support transaction receipt lookup")) {
+            failRequest("RECEIPT_UNSUPPORTED", message);
+            return;
+          }
+          failRequest("RECEIPT_FAILED", message);
+          return;
+        }
+
+        let requestedContext: RequestedShardContext;
+        try {
+          requestedContext = resolveRequestedShardContextFromReceipt({
+            txHash,
+            receipt,
+            expectedGameContractAddress: normalizedWorldAddress,
+            expectedShardContractAddress: normalizedShardContractAddress,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Failed to resolve shard ID from receipt";
+          failRequest("SHARD_ID_RESOLUTION_FAILED", message);
+          return;
+        }
+
+        setTargetShardId(requestedContext.shardId);
         setPhase("waiting");
-        const worldAddress = dojoConfig.manifest.world.address;
+        pollTargetRef.current = requestedContext;
+        pollStartedAtRef.current = Date.now();
         pollRef.current = setInterval(() => {
-          void (async () => {
-            try {
-              const statusResponse = await fetch(`${operatorUrl}/shard/${worldAddress}`);
-              if (!statusResponse.ok) {
-                throw new Error(`Failed to fetch shard status: HTTP ${statusResponse.status}`);
-              }
-              const statusPayload: unknown = await statusResponse.json();
-              const activeShard = parseActiveShardFromStatusResponse(statusPayload);
-              if (activeShard === null) {
-                return;
-              }
-
-              const { gameContractAddress, onchainShardId } = parseShardIdParts(activeShard.shardId);
-
-              const transportResponse = await fetch(
-                `${operatorUrl}/shard/${gameContractAddress}/${onchainShardId}/transport-health`,
-              );
-              if (!transportResponse.ok) {
-                throw new Error(`Failed to fetch shard transport health: HTTP ${transportResponse.status}`);
-              }
-              const transportPayload: unknown = await transportResponse.json();
-              const transport = parseTransportHealthFromStatusResponse(transportPayload);
-              if (transport.status !== "healthy") {
-                return;
-              }
-
-              stopPolling();
-              setShardUrls({
-                katanaUrl: activeShard.katanaUrl,
-                toriiUrl: activeShard.toriiUrl,
-                toriiGrpcUrl: activeShard.toriiGrpcUrl,
-                gameContractAddress: activeShard.gameContractAddress,
-                shardId: activeShard.shardId,
-              });
-              setPhase("ready");
-            } catch (pollError) {
-              const message = pollError instanceof Error ? pollError.message : "Failed to poll shard status";
-              failRequest(message);
-            }
-          })();
-        }, 2000);
+          void pollShardStatus();
+        }, SHARD_REQUEST_POLL_INTERVAL_MS);
+        void pollShardStatus();
       } catch (requestError) {
         const message = requestError instanceof Error ? requestError.message : "Shard request failed";
-        failRequest(message);
+        failRequest("OPERATOR_CONFIG_FAILED", message);
       }
     },
-    [account, failRequest, operatorUrl, phase, stopPolling],
+    [account, failRequest, operatorUrl, options?.shardingContractAddress, options?.worldAddress, phase, pollShardStatus],
   );
 
   const openShardTab = useCallback(() => {
@@ -156,14 +463,18 @@ export const useShardRequest = (account: ExecutableAccount | null, operatorUrl: 
   const reset = useCallback(() => {
     stopPolling();
     setPhase("idle");
+    setErrorCode(null);
     setError(null);
     setShardUrls(null);
+    setTargetShardId(null);
   }, [stopPolling]);
 
   return {
     phase,
+    errorCode,
     error,
     shardUrls,
+    targetShardId,
     requestShard,
     openShardTab,
     reset,
