@@ -49,6 +49,7 @@ import { useNavigate } from "react-router-dom";
 import { shortString } from "starknet";
 import { env } from "../../../../../env";
 import { AdminHeader } from "../components/admin-header";
+import { ShardAdminPanel } from "../../sharding/shard-admin-panel";
 import {
   CARTRIDGE_API_BASE,
   DEFAULT_NAMESPACE,
@@ -1009,6 +1010,15 @@ export const FactoryPage = ({ embedded = false }: FactoryPageProps = {}) => {
                       Network: {currentChain}
                     </span>
                   </div>
+                </div>
+
+                {/* Sharding Admin Panel */}
+                <div className="space-y-3 p-6 bg-black/35 rounded-2xl border border-gold/20">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-bold uppercase tracking-wide text-gold/90">Sharding Admin</h4>
+                    <span className="text-xs text-gold/60">Manual fallback (admin only)</span>
+                  </div>
+                  <ShardAdminPanel />
                 </div>
 
                 {/* Deploy Section - Always Visible */}

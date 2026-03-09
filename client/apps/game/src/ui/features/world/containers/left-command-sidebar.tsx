@@ -635,7 +635,7 @@ const StructureListItem = memo(
           )}
         </div>
         {isSelected && structure.category === StructureType.Realm && (
-          <div className="mt-2 pt-2 border-t border-gold/10">
+          <div className="mt-2 border-t border-gold/10 pt-2">
             <ShardRequestButton entityId={structure.entityId} />
           </div>
         )}

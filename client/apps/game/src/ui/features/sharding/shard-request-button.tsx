@@ -1,16 +1,58 @@
 import { useDojo } from "@bibliothecadao/react";
-import { useCallback } from "react";
+import { WORLD_CONFIG_ID } from "@bibliothecadao/types";
+import { useComponentValue } from "@dojoengine/react";
+import { getEntityIdFromKeys } from "@dojoengine/utils";
+import { useCallback, useEffect } from "react";
 import { env } from "../../../../env";
 import { useShardSettlement } from "@/hooks/use-shard-settlement";
 import { useShardRequest } from "@/hooks/use-shard-request";
 import { useShardStore } from "@/hooks/store/use-shard-store";
+import { resolveMainGameReturnUrl, resolveRuntimeContextFromWindow } from "@/sharding/runtime-context";
 import type { ExecutableAccount } from "@/sharding/types";
+
+const normalizeAddress = (value: unknown): string | null => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) return null;
+    try {
+      return `0x${BigInt(trimmed).toString(16)}`.toLowerCase();
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value === "bigint") {
+    return `0x${value.toString(16)}`.toLowerCase();
+  }
+  if (typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value >= 0) {
+    return `0x${BigInt(value).toString(16)}`.toLowerCase();
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (record.value !== undefined) {
+      return normalizeAddress(record.value);
+    }
+    if (record.address !== undefined) {
+      return normalizeAddress(record.address);
+    }
+  }
+  return null;
+};
 
 export const ShardRequestButton = ({ entityId }: { entityId: number }) => {
   const isShardMode = useShardStore((state) => state.isShardMode);
   const {
     account: { account },
+    setup: { components },
   } = useDojo();
+  const worldConfig = useComponentValue(components.WorldConfig, getEntityIdFromKeys([WORLD_CONFIG_ID]));
+  const adminAddress = normalizeAddress(worldConfig?.admin_address);
+  const accountAddress = normalizeAddress(account?.address);
+  const canManageShards = adminAddress !== null && accountAddress !== null && adminAddress === accountAddress;
+  const shouldCheckAdmin = env.VITE_PUBLIC_SHARD_ADMIN_CHECK;
+
+  if (shouldCheckAdmin && !canManageShards) {
+    return null;
+  }
 
   if (isShardMode) {
     return <SettleButton account={account} />;
@@ -21,7 +63,7 @@ export const ShardRequestButton = ({ entityId }: { entityId: number }) => {
 
 const ShardButton = ({ entityId, account }: { entityId: number; account: ExecutableAccount | null }) => {
   const operatorUrl = env.VITE_PUBLIC_SHARD_OPERATOR_URL;
-  const { phase, error, requestShard, openShardTab, reset } = useShardRequest(account, operatorUrl ?? "");
+  const { phase, error, errorCode, requestShard, openShardTab, reset } = useShardRequest(account, operatorUrl ?? "");
 
   const handleClick = () => {
     if (operatorUrl === undefined) {
@@ -60,12 +102,17 @@ const ShardButton = ({ entityId, account }: { entityId: number; account: Executa
       <button
         onClick={handleClick}
         disabled={operatorUrl === undefined || phase === "requesting" || phase === "waiting"}
-        className="bg-purple-600 hover:bg-purple-500 disabled:bg-purple-800 text-white text-xs font-semibold px-3 py-1 rounded transition-colors"
+        className="bg-gold/20 hover:bg-gold/30 disabled:bg-gold/10 text-gold text-xs font-semibold px-3 py-1 rounded transition-colors"
       >
         {label}
       </button>
       {operatorUrl === undefined && <span className="text-red-400 text-xs">Missing VITE_PUBLIC_SHARD_OPERATOR_URL</span>}
-      {error !== null && <span className="text-red-400 text-xs">{error}</span>}
+      {error !== null && (
+        <span className="text-red-400 text-xs">
+          {errorCode !== null ? `[${errorCode}] ` : ""}
+          {error}
+        </span>
+      )}
       {phase === "waiting" && <span className="text-amber-300 text-xs animate-pulse">Waiting for operator...</span>}
     </div>
   );
@@ -74,7 +121,9 @@ const ShardButton = ({ entityId, account }: { entityId: number; account: Executa
 const SettleButton = ({ account }: { account: ExecutableAccount | null }) => {
   const shardId = useShardStore((state) => state.shardId);
   const operatorUrl = useShardStore((state) => state.operatorUrl);
-  const { phase, stepLabel, error, startSettlement, reset } = useShardSettlement({
+  const mainGameReturnUrl = useShardStore((state) => state.mainGameReturnUrl);
+  const clearShardMode = useShardStore((state) => state.clearShardMode);
+  const { phase, stepLabel, error, errorCode, startSettlement, reset } = useShardSettlement({
     account,
     shardId,
     operatorUrl,
@@ -96,6 +145,27 @@ const SettleButton = ({ account }: { account: ExecutableAccount | null }) => {
 
     await startSettlement();
   }, [phase, reset, startSettlement]);
+
+  useEffect(() => {
+    if (phase !== "complete") {
+      return;
+    }
+
+    const runtimeContext = useShardStore.getState().runtimeContext ?? resolveRuntimeContextFromWindow();
+    const returnUrl = mainGameReturnUrl ?? resolveMainGameReturnUrl(runtimeContext);
+
+    let destinationUrl = returnUrl;
+    try {
+      const url = new URL(returnUrl, window.location.origin);
+      url.searchParams.set("shard_return", "1");
+      destinationUrl = url.toString();
+    } catch {
+      destinationUrl = returnUrl;
+    }
+
+    clearShardMode();
+    window.location.assign(destinationUrl);
+  }, [clearShardMode, mainGameReturnUrl, phase]);
 
   if (phase === "complete") {
     return (
@@ -130,7 +200,12 @@ const SettleButton = ({ account }: { account: ExecutableAccount | null }) => {
         >
           {label}
         </button>
-        {error !== null && <span className="text-red-400 text-xs">{error}</span>}
+        {error !== null && (
+          <span className="text-red-400 text-xs">
+            {errorCode !== null ? `[${errorCode}] ` : ""}
+            {error}
+          </span>
+        )}
       </div>
       {phase === "waiting" && stepLabel !== null && <span className="text-amber-300 text-xs animate-pulse">{stepLabel}</span>}
     </div>

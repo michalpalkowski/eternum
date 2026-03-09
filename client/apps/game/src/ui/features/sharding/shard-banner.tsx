@@ -1,10 +1,41 @@
 import { useDojo } from "@bibliothecadao/react";
 import { useCallback, useEffect } from "react";
+import { WORLD_CONFIG_ID } from "@bibliothecadao/types";
+import { useComponentValue } from "@dojoengine/react";
+import { getEntityIdFromKeys } from "@dojoengine/utils";
 
 import { useShardStore } from "@/hooks/store/use-shard-store";
 import { useShardSettlement } from "@/hooks/use-shard-settlement";
 import { resolveMainGameReturnUrl, resolveRuntimeContextFromWindow } from "@/sharding/runtime-context";
 import type { ExecutableAccount } from "@/sharding/types";
+
+const normalizeAddress = (value: unknown): string | null => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) return null;
+    try {
+      return `0x${BigInt(trimmed).toString(16)}`.toLowerCase();
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value === "bigint") {
+    return `0x${value.toString(16)}`.toLowerCase();
+  }
+  if (typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value >= 0) {
+    return `0x${BigInt(value).toString(16)}`.toLowerCase();
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (record.value !== undefined) {
+      return normalizeAddress(record.value);
+    }
+    if (record.address !== undefined) {
+      return normalizeAddress(record.address);
+    }
+  }
+  return null;
+};
 
 export const ShardBanner = () => {
   const isShardMode = useShardStore((state) => state.isShardMode);
@@ -14,7 +45,13 @@ export const ShardBanner = () => {
   const clearShardMode = useShardStore((state) => state.clearShardMode);
   const {
     account: { account },
+    setup: { components },
   } = useDojo();
+  const worldConfig = useComponentValue(components.WorldConfig, getEntityIdFromKeys([WORLD_CONFIG_ID]));
+  const adminAddress = normalizeAddress(worldConfig?.admin_address);
+  const accountAddress = normalizeAddress(account?.address);
+  const canSettleShard = adminAddress !== null && accountAddress !== null && adminAddress === accountAddress;
+
   const { phase, stepLabel, error, startSettlement, reset } = useShardSettlement({
     account: account as ExecutableAccount | null,
     shardId,
@@ -77,21 +114,25 @@ export const ShardBanner = () => {
       <span className="font-bold text-sm tracking-wider">SHARD MODE</span>
       <span className="text-xs opacity-60">Shard {shardId?.slice(0, 10)}</span>
       {error !== null && <span className="text-red-300 text-xs">{error}</span>}
-      <button
-        onClick={() => {
-          void handleSettle();
-        }}
-        disabled={phase !== "idle" && phase !== "error"}
-        className="bg-amber-600 hover:bg-amber-500 disabled:bg-amber-800 text-white text-sm font-semibold px-4 py-1 rounded transition-colors"
-      >
-        {phase === "calling"
-          ? "Sending..."
-          : phase === "waiting"
-            ? stepLabel ?? "Settling..."
-            : phase === "error"
-              ? "Retry"
-              : "Settle"}
-      </button>
+      {canSettleShard ? (
+        <button
+          onClick={() => {
+            void handleSettle();
+          }}
+          disabled={phase !== "idle" && phase !== "error"}
+          className="bg-amber-600 hover:bg-amber-500 disabled:bg-amber-800 text-white text-sm font-semibold px-4 py-1 rounded transition-colors"
+        >
+          {phase === "calling"
+            ? "Sending..."
+            : phase === "waiting"
+              ? stepLabel ?? "Settling..."
+              : phase === "error"
+                ? "Retry"
+                : "Settle"}
+        </button>
+      ) : (
+        <span className="text-xs opacity-80">Settlement available for admin only</span>
+      )}
     </Banner>
   );
 };
