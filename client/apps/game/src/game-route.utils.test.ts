@@ -31,8 +31,21 @@ describe("resolveGameRouteView", () => {
         hasSetupResult: false,
         hasAccount: false,
         hasShardReturnPending: true,
+        allowShardReturnLoading: true,
       }),
     ).toBe("loading");
+  });
+
+  it("fails fast from shard-return loading grace window to redirect", () => {
+    expect(
+      resolveGameRouteView({
+        phase: "account",
+        hasSetupResult: false,
+        hasAccount: false,
+        hasShardReturnPending: true,
+        allowShardReturnLoading: false,
+      }),
+    ).toBe("redirect");
   });
 
   it("returns loading while bootstrap/account are still converging", () => {

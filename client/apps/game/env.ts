@@ -79,6 +79,11 @@ const envSchema = z.object({
   // Sharding
   VITE_PUBLIC_SHARD_OPERATOR_URL: z.string().url().optional(),
   VITE_PUBLIC_SHARD_PROXY_ADDRESS: z.string().startsWith("0x").optional(),
+  VITE_PUBLIC_SHARD_ADMIN_CHECK: z
+    .string()
+    .transform((v) => v === "true")
+    .optional()
+    .default("true"),
 
   VITE_PUBLIC_SLOT: z.string(),
 
