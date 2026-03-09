@@ -26163,8 +26163,8 @@
               ]
             }
           ],
-          "address": "0x7511cda23335a132923bf09c443990d02fa9b71f2eb5cb8a9b8d5b14e0f8599",
-          "class_hash": "0x1a06a1ad2dcb6821921170f6e8bcbf26f4be745cf086db0d966995de14b2eeb",
+          "address": "0x587e8a1f1e59574cce3eec63ed3f4f49c25c4ee6cadd4da22d8a1bab93cffea",
+          "class_hash": "0x3ada620cb8f2f3447882e18d875b23a781c92951c6c1576ae06f914bf780649",
           "init_calldata": [],
           "selector": "0x9afc8a5def42a92120c6b38ad4c2027903ee56147bf6f2d5dfd10335c97298",
           "systems": [
