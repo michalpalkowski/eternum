@@ -12,6 +12,7 @@ import { env } from "../../../env";
 import { parseShardUrlParams } from "@/sharding/protocol";
 import { bootstrapGame } from "../../init/bootstrap";
 import { useAccountStore } from "../store/use-account-store";
+import { useShardStore } from "../store/use-shard-store";
 import { useControllerAccount } from "./use-controller-account";
 
 const slot: string = env.VITE_PUBLIC_SLOT;
@@ -69,48 +70,20 @@ const deriveChainFromRpcUrl = (value: string): DerivedChain | null => {
   }
 };
 
-const shardSessionRpcUrl = (() => {
-  if (typeof window === "undefined") return null;
-  try {
-    // URL is the source of truth for shard runtime context.
-    // Avoid inheriting stale shard session from a different tab.
-    const shardSession = parseShardUrlParams(window.location.search);
-    return shardSession?.rpcUrl ?? null;
-  } catch (error) {
-    console.warn("[starknet-provider] Invalid shard session context", error);
-    return null;
-  }
-})();
-
-const baseRpcUrl = shardSessionRpcUrl ?? (isLocal ? KATANA_RPC_URL : dojoConfig.rpcUrl || env.VITE_PUBLIC_NODE_URL);
-const rpcUrl = normalizeRpcUrl(baseRpcUrl);
-
-console.log("baseRpcUrl", baseRpcUrl);
-
-const derivedChain = isLocal ? null : deriveChainFromRpcUrl(rpcUrl);
-const fallbackChain: DerivedChain = isSlot
-  ? { kind: "slot", chainId: SLOT_CHAIN_ID }
-  : isSlottest
-    ? { kind: "slot", chainId: SLOT_CHAIN_ID_TEST }
-    : env.VITE_PUBLIC_CHAIN === "mainnet"
-      ? { kind: "mainnet", chainId: constants.StarknetChainId.SN_MAIN }
-      : { kind: "sepolia", chainId: constants.StarknetChainId.SN_SEPOLIA };
-const resolvedChain = derivedChain ?? fallbackChain;
-const resolvedChainId = isLocal ? KATANA_CHAIN_ID : resolvedChain.chainId;
 const cartridgeApiBase = env.VITE_PUBLIC_CARTRIDGE_API_BASE || "https://api.cartridge.gg";
-const controllerSupportedRpcUrls = Array.from(
-  new Set(
-    [
-      rpcUrl,
-      `${cartridgeApiBase}/x/eternum-blitz-slot-3/katana/rpc/v0_9`,
-      `${cartridgeApiBase}/x/starknet/sepolia/rpc/v0_9`,
-      `${cartridgeApiBase}/x/starknet/mainnet/rpc/v0_9`,
-    ].map((value) => normalizeRpcUrl(value)),
-  ),
-);
+const createControllerConnector = (rpcUrl: string, resolvedChainId: string) => {
+  const controllerSupportedRpcUrls = Array.from(
+    new Set(
+      [
+        rpcUrl,
+        `${cartridgeApiBase}/x/eternum-blitz-slot-3/katana/rpc/v0_9`,
+        `${cartridgeApiBase}/x/starknet/sepolia/rpc/v0_9`,
+        `${cartridgeApiBase}/x/starknet/mainnet/rpc/v0_9`,
+      ].map((value) => normalizeRpcUrl(value)),
+    ),
+  );
 
-const createControllerConnector = () =>
-  new ControllerConnector({
+  return new ControllerConnector({
     errorDisplayMode: "notification",
     propagateSessionErrors: true,
     chains: controllerSupportedRpcUrls.map((chainRpcUrl) => ({
@@ -125,6 +98,7 @@ const createControllerConnector = () =>
     slot,
     namespace,
   });
+};
 
 const katanaLocalChain = {
   id: BigInt(KATANA_CHAIN_ID),
@@ -169,9 +143,39 @@ const queryClient = new QueryClient({
 });
 
 export function StarknetProvider({ children }: { children: React.ReactNode }) {
+  const isShardMode = useShardStore((state) => state.isShardMode);
+  const storeShardRpcUrl = useShardStore((state) => state.shardRpcUrl);
+
+  const urlShardRpcUrl = (() => {
+    if (typeof window === "undefined") return null;
+    try {
+      // URL remains the source of truth for shard runtime context.
+      const shardSession = parseShardUrlParams(window.location.search);
+      return shardSession?.rpcUrl ?? null;
+    } catch (error) {
+      console.warn("[starknet-provider] Invalid shard session context", error);
+      return null;
+    }
+  })();
+
+  const activeShardRpcUrl = isShardMode ? (storeShardRpcUrl ?? urlShardRpcUrl) : urlShardRpcUrl;
+  const baseRpcUrl = activeShardRpcUrl ?? (isLocal ? KATANA_RPC_URL : dojoConfig.rpcUrl || env.VITE_PUBLIC_NODE_URL);
+  const rpcUrl = normalizeRpcUrl(baseRpcUrl);
+
+  const derivedChain = isLocal ? null : deriveChainFromRpcUrl(rpcUrl);
+  const fallbackChain: DerivedChain = isSlot
+    ? { kind: "slot", chainId: SLOT_CHAIN_ID }
+    : isSlottest
+      ? { kind: "slot", chainId: SLOT_CHAIN_ID_TEST }
+      : env.VITE_PUBLIC_CHAIN === "mainnet"
+        ? { kind: "mainnet", chainId: constants.StarknetChainId.SN_MAIN }
+        : { kind: "sepolia", chainId: constants.StarknetChainId.SN_SEPOLIA };
+  const resolvedChain = derivedChain ?? fallbackChain;
+  const resolvedChainId = isLocal ? KATANA_CHAIN_ID : resolvedChain.chainId;
+
   const rpc = useCallback(() => {
     return { nodeUrl: rpcUrl };
-  }, []);
+  }, [rpcUrl]);
 
   const { connectors: predeployedConnectors } = usePredeployedAccounts({
     rpc: rpcUrl,
@@ -181,12 +185,12 @@ export function StarknetProvider({ children }: { children: React.ReactNode }) {
 
   const paymasterRpc = useCallback(() => {
     return { nodeUrl: rpcUrl };
-  }, []);
+  }, [rpcUrl]);
 
-  const controllerConnector = useMemo(
-    () => (isLocal ? null : (createControllerConnector() as unknown as Connector)),
-    [],
-  );
+  const controllerConnector = useMemo(() => {
+    if (isLocal) return null;
+    return createControllerConnector(rpcUrl, resolvedChainId) as unknown as Connector;
+  }, [rpcUrl, resolvedChainId]);
 
   useEffect(() => {
     if (!isLocal || typeof window === "undefined") {

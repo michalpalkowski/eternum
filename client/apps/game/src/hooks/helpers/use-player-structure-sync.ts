@@ -6,10 +6,9 @@ import { sqlApi } from "@/services/api";
 import { padHexAddressTo66 } from "@/ui/utils/utils";
 import { useDojo, usePlayerStructures } from "@bibliothecadao/react";
 import { MemberClause } from "@dojoengine/sdk";
-import { getComponentValue } from "@dojoengine/recs";
+import { getComponentValue, Has, runQuery } from "@dojoengine/recs";
 import type { PatternMatching } from "@dojoengine/torii-client";
 import type { Clause } from "@dojoengine/torii-wasm/types";
-import { getEntityIdFromKeys } from "@dojoengine/utils";
 import { useAccountStore } from "../store/use-account-store";
 import { selectUnsyncedOwnedStructureTargets } from "./player-structure-sync-utils";
 
@@ -138,22 +137,19 @@ export const usePlayerStructureSync = () => {
         };
       }
 
-      const hydratedIds: number[] = [];
-      const missingIds: number[] = [];
-
-      structureIds.forEach((entityId) => {
-        try {
-          const entityKey = getEntityIdFromKeys([BigInt(entityId)]);
-          const structure = getComponentValue(structureComponent, entityKey);
-          if (structure) {
-            hydratedIds.push(entityId);
-          } else {
-            missingIds.push(entityId);
-          }
-        } catch {
-          missingIds.push(entityId);
+      const hydratedByEntityId = new Set<number>();
+      const structureEntities = runQuery([Has(structureComponent)]);
+      structureEntities.forEach((entity) => {
+        const structure = getComponentValue(structureComponent, entity);
+        if (!structure) return;
+        const numericEntityId = Number((structure as { entity_id?: unknown }).entity_id);
+        if (Number.isFinite(numericEntityId)) {
+          hydratedByEntityId.add(numericEntityId);
         }
       });
+
+      const hydratedIds = structureIds.filter((entityId) => hydratedByEntityId.has(entityId));
+      const missingIds = structureIds.filter((entityId) => !hydratedByEntityId.has(entityId));
 
       return { hydratedIds, missingIds };
     },

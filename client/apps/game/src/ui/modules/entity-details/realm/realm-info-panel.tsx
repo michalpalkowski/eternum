@@ -24,9 +24,8 @@ import {
   RelicRecipientType,
   StructureType,
 } from "@bibliothecadao/types";
-import { useComponentValue } from "@dojoengine/react";
-import { ComponentValue } from "@dojoengine/recs";
-import { getEntityIdFromKeys } from "@dojoengine/utils";
+import { useComponentValue, useEntityQuery } from "@dojoengine/react";
+import { ComponentValue, Entity, getComponentValue, Has } from "@dojoengine/recs";
 import ArrowLeftRight from "lucide-react/dist/esm/icons/arrow-left-right";
 import Shield from "lucide-react/dist/esm/icons/shield";
 import Sword from "lucide-react/dist/esm/icons/sword";
@@ -106,6 +105,10 @@ NextAutomationRunLabel.displayName = "NextAutomationRunLabel";
 
 export const RealmInfoPanel = memo(({ className }: { className?: string }) => {
   const structureEntityId = useUIStore((state) => state.structureEntityId);
+  const playerStructures = useUIStore((state) => state.playerStructures) as Array<{
+    entityId: number | string;
+    recsEntityKey?: string;
+  }>;
   const toggleModal = useUIStore((state) => state.toggleModal);
   const openArmyCreationPopup = useUIStore((state) => state.openArmyCreationPopup);
   const openPopup = useUIStore((state) => state.openPopup);
@@ -116,15 +119,40 @@ export const RealmInfoPanel = memo(({ className }: { className?: string }) => {
   const components = setup.components as ClientComponents;
   const { isMapView } = useQuery();
   const goToStructure = useGoToStructure(setup);
+  const knownStructureEntities = useEntityQuery([Has(components.Structure)]);
+  const selectedStructureEntityKey = useMemo(() => {
+    const selected = playerStructures.find((structure) => Number(structure.entityId) === Number(structureEntityId));
+    if (selected?.recsEntityKey) {
+      return selected.recsEntityKey;
+    }
+
+    const numericStructureEntityId = Number(structureEntityId);
+    if (!Number.isFinite(numericStructureEntityId)) {
+      return undefined;
+    }
+
+    for (const candidate of knownStructureEntities) {
+      const structure = getComponentValue(components.Structure, candidate);
+      if (!structure) continue;
+
+      const candidateEntityId = Number((structure as { entity_id?: unknown }).entity_id);
+      if (Number.isFinite(candidateEntityId) && candidateEntityId === numericStructureEntityId) {
+        return candidate;
+      }
+    }
+
+    return undefined;
+  }, [playerStructures, structureEntityId, knownStructureEntities, components.Structure]);
+  const selectedStructureEntity = selectedStructureEntityKey as Entity | undefined;
 
   const structure = useComponentValue(
     components.Structure,
-    structureEntityId ? getEntityIdFromKeys([BigInt(structureEntityId)]) : undefined,
+    selectedStructureEntity,
   ) as ComponentValue<ClientComponents["Structure"]["schema"]> | null;
 
   const resources = useComponentValue(
     components.Resource,
-    structureEntityId ? getEntityIdFromKeys([BigInt(structureEntityId)]) : undefined,
+    selectedStructureEntity,
   ) as ComponentValue<ClientComponents["Resource"]["schema"]> | null;
 
   const isRealm = structure?.base?.category === StructureType.Realm;
@@ -171,7 +199,7 @@ export const RealmInfoPanel = memo(({ className }: { className?: string }) => {
 
   const productionBoostBonus = useComponentValue(
     components.ProductionBoostBonus,
-    structureEntityId ? getEntityIdFromKeys([BigInt(structureEntityId)]) : undefined,
+    selectedStructureEntity,
   );
 
   const { currentArmiesTick } = useBlockTimestamp();

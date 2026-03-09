@@ -5,6 +5,8 @@ import { HasValue } from "@dojoengine/recs";
 import { useMemo } from "react";
 import { useDojo } from "../context";
 
+export type StructureWithEntityKey = Structure & { recsEntityKey: string };
+
 export const usePlayerStructures = (playerAddress?: ContractAddress) => {
   const {
     account: { account },
@@ -17,7 +19,11 @@ export const usePlayerStructures = (playerAddress?: ContractAddress) => {
 
   const playerStructures = useMemo(() => {
     return entities
-      .map((id) => getStructure(id, ContractAddress(account.address), components))
+      .map((id) => {
+        const structure = getStructure(id, ContractAddress(account.address), components);
+        if (!structure) return null;
+        return { ...structure, recsEntityKey: id } as StructureWithEntityKey;
+      })
       .filter((value) => Boolean(value))
       .toSorted((a, b) => {
         // First sort by category
@@ -29,7 +35,7 @@ export const usePlayerStructures = (playerAddress?: ContractAddress) => {
       });
   }, [entities]);
 
-  return playerStructures as Structure[];
+  return playerStructures as StructureWithEntityKey[];
 };
 
 export const usePlayerStructureAtPosition = ({ position }: { position: Position }) => {
