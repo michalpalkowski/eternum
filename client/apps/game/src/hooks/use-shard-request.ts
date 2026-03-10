@@ -352,6 +352,15 @@ const fetchOperatorConfig = async (operatorUrl: string) => {
   return parseOperatorConfigResponse(configPayload);
 };
 
+const fetchShardStatusEntries = async (operatorUrl: string, gameContractAddress: string) => {
+  const statusResponse = await fetch(`${operatorUrl}/shard/${gameContractAddress}`);
+  if (!statusResponse.ok) {
+    throw new Error(`Failed to fetch shard status: HTTP ${statusResponse.status}`);
+  }
+  const statusPayload: unknown = await statusResponse.json();
+  return parseShardStatusEntriesFromStatusResponse(statusPayload);
+};
+
 const isShardAlreadyLockedError = (message: string): boolean =>
   /slot locked by shard/i.test(message) || /locked by shard/i.test(message);
 
@@ -365,6 +374,71 @@ const buildRequestedShardContextFromShardId = (shardId: string): RequestedShardC
     onchainShardId: normalizedOnchainShardId,
     shardId: `${parts.gameContractAddress}@${normalizedOnchainShardId}`,
   };
+};
+
+const isRecoverableShardPhase = (phase: string): boolean => {
+  const normalizedPhase = phase.trim().toLowerCase();
+  return (
+    normalizedPhase.length > 0 &&
+    !normalizedPhase.startsWith("failed") &&
+    !normalizedPhase.startsWith("completed") &&
+    !normalizedPhase.startsWith("settled")
+  );
+};
+
+const getShardPhasePriority = (phase: string): number => {
+  const normalizedPhase = phase.trim().toLowerCase();
+  if (normalizedPhase === "gameplay_active") return 4;
+  if (normalizedPhase === "torii_ready") return 3;
+  if (normalizedPhase === "shard_initializing") return 2;
+  if (normalizedPhase === "initializing") return 1;
+  return 0;
+};
+
+const compareShardEntriesForRecovery = (
+  left: { phase: string; shardId: string },
+  right: { phase: string; shardId: string },
+): number => {
+  const phaseDelta = getShardPhasePriority(right.phase) - getShardPhasePriority(left.phase);
+  if (phaseDelta !== 0) {
+    return phaseDelta;
+  }
+
+  try {
+    const leftShardId = normalizeOnchainShardId(parseShardIdParts(left.shardId).onchainShardId);
+    const rightShardId = normalizeOnchainShardId(parseShardIdParts(right.shardId).onchainShardId);
+    const leftNumeric = BigInt(leftShardId);
+    const rightNumeric = BigInt(rightShardId);
+    if (rightNumeric > leftNumeric) {
+      return 1;
+    }
+    if (rightNumeric < leftNumeric) {
+      return -1;
+    }
+  } catch {
+    // Ignore parse failures and keep original order.
+  }
+
+  return 0;
+};
+
+const resolveRequestedShardContextFromOperatorStatus = async (params: {
+  operatorUrl: string;
+  expectedGameContractAddress: string;
+}): Promise<RequestedShardContext> => {
+  const shardEntries = await fetchShardStatusEntries(params.operatorUrl, params.expectedGameContractAddress);
+  const candidate = shardEntries
+    .filter(
+      (entry) =>
+        entry.gameContractAddress === params.expectedGameContractAddress && isRecoverableShardPhase(entry.phase),
+    )
+    .sort(compareShardEntriesForRecovery)[0];
+
+  if (candidate === undefined) {
+    throw new Error("Operator does not report a recoverable shard for this world");
+  }
+
+  return buildRequestedShardContextFromShardId(candidate.shardId);
 };
 
 export const useShardRequest = (
@@ -550,20 +624,42 @@ export const useShardRequest = (
     }
 
     try {
-      const operatorConfig = await fetchOperatorConfig(operatorUrl);
       const worldAddress = options?.worldAddress?.trim() || dojoConfig.manifest.world.address;
       const normalizedWorldAddress = normalizeFeltToHex(worldAddress, "world_address");
-      const normalizedShardContractAddress = normalizeFeltToHex(
-        operatorConfig.shardContractAddress,
-        "shard_contract_address",
-      );
-      const requestedContext = await resolveRequestedShardContextFromChain({
-        txHash: "0x0",
-        account,
-        expectedGameContractAddress: normalizedWorldAddress,
-        expectedShardContractAddress: normalizedShardContractAddress,
-      });
-      beginTrackingRequestedShard(requestedContext);
+      try {
+        const requestedContext = await resolveRequestedShardContextFromOperatorStatus({
+          operatorUrl,
+          expectedGameContractAddress: normalizedWorldAddress,
+        });
+        beginTrackingRequestedShard(requestedContext);
+        return;
+      } catch (operatorRecoveryError) {
+        const operatorRecoveryMessage =
+          operatorRecoveryError instanceof Error ? operatorRecoveryError.message : "Operator recovery failed";
+        const operatorConfig = await fetchOperatorConfig(operatorUrl);
+        const normalizedShardContractAddress = normalizeFeltToHex(
+          operatorConfig.shardContractAddress,
+          "shard_contract_address",
+        );
+        try {
+          const requestedContext = await resolveRequestedShardContextFromChain({
+            txHash: "0x0",
+            account,
+            expectedGameContractAddress: normalizedWorldAddress,
+            expectedShardContractAddress: normalizedShardContractAddress,
+          });
+          beginTrackingRequestedShard(requestedContext);
+          return;
+        } catch (chainRecoveryError) {
+          const chainRecoveryMessage =
+            chainRecoveryError instanceof Error ? chainRecoveryError.message : "On-chain recovery failed";
+          failRequest(
+            "SHARD_ID_RESOLUTION_FAILED",
+            `${operatorRecoveryMessage}; get_shard_id fallback failed: ${chainRecoveryMessage}`,
+          );
+          return;
+        }
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to recover existing shard";
       if (message.startsWith("Failed to fetch operator config: HTTP")) {
@@ -636,21 +732,34 @@ export const useShardRequest = (
         } catch (error) {
           const message = error instanceof Error ? error.message : "request_shard_all transaction failed";
           if (isShardAlreadyLockedError(message)) {
+            let requestedContext: RequestedShardContext;
             try {
-              const requestedContext = await resolveRequestedShardContextFromChain({
-                txHash: "0x0",
-                account,
+              requestedContext = await resolveRequestedShardContextFromOperatorStatus({
+                operatorUrl,
                 expectedGameContractAddress: normalizedWorldAddress,
-                expectedShardContractAddress: normalizedShardContractAddress,
               });
-              beginTrackingRequestedShard(requestedContext);
-              return;
-            } catch (recoveryError) {
-              const recoveryMessage =
-                recoveryError instanceof Error ? recoveryError.message : "Failed to recover existing shard";
-              failRequest("EXECUTE_FAILED", `${message}; recovery via get_shard_id failed: ${recoveryMessage}`);
-              return;
+            } catch (operatorRecoveryError) {
+              const operatorRecoveryMessage =
+                operatorRecoveryError instanceof Error ? operatorRecoveryError.message : "Operator recovery failed";
+              try {
+                requestedContext = await resolveRequestedShardContextFromChain({
+                  txHash: "0x0",
+                  account,
+                  expectedGameContractAddress: normalizedWorldAddress,
+                  expectedShardContractAddress: normalizedShardContractAddress,
+                });
+              } catch (chainRecoveryError) {
+                const chainRecoveryMessage =
+                  chainRecoveryError instanceof Error ? chainRecoveryError.message : "Failed to recover existing shard";
+                failRequest(
+                  "EXECUTE_FAILED",
+                  `${message}; operator recovery failed: ${operatorRecoveryMessage}; get_shard_id fallback failed: ${chainRecoveryMessage}`,
+                );
+                return;
+              }
             }
+            beginTrackingRequestedShard(requestedContext);
+            return;
           }
           failRequest("EXECUTE_FAILED", message);
           return;
