@@ -1,5 +1,6 @@
 import { ReactComponent as Trash } from "@/assets/icons/common/trashcan.svg";
 import { useBlockTimestamp } from "@/hooks/helpers/use-block-timestamp";
+import { useWorldConfigValue } from "@/hooks/helpers/use-world-config";
 import { useUIStore } from "@/hooks/store/use-ui-store";
 import Button from "@/ui/design-system/atoms/button";
 import { NumberInput } from "@/ui/design-system/atoms/number-input";
@@ -9,9 +10,8 @@ import { SortPanel } from "@/ui/design-system/molecules/sort-panel";
 import { displayAddress } from "@/ui/utils/utils";
 import { getAddressName, getStructure } from "@bibliothecadao/eternum";
 import { useDojo, usePlayers } from "@bibliothecadao/react";
-import { ContractAddress, ID, WORLD_CONFIG_ID } from "@bibliothecadao/types";
+import { ContractAddress, ID } from "@bibliothecadao/types";
 import { useComponentValue } from "@dojoengine/react";
-import { getComponentValue } from "@dojoengine/recs";
 import { getEntityIdFromKeys } from "@dojoengine/utils";
 import Plus from "lucide-react/dist/esm/icons/plus";
 import { useMemo, useState } from "react";
@@ -54,15 +54,13 @@ const CoOwnersRows = ({
     account: { account },
     setup: { components },
   } = useDojo();
-  const { Hyperstructure, WorldConfig } = components;
+  const { Hyperstructure } = components;
 
   const setTooltip = useUIStore((state) => state.setTooltip);
 
   const { currentBlockTimestamp } = useBlockTimestamp();
-
-  const hyperstructureConfig = useMemo(() => {
-    return getComponentValue(WorldConfig, getEntityIdFromKeys([WORLD_CONFIG_ID]));
-  }, [hyperstructureEntityId])?.hyperstructure_config;
+  const worldConfig = useWorldConfigValue();
+  const hyperstructureConfig = worldConfig?.hyperstructure_config;
 
   const hyperstructure = useComponentValue(Hyperstructure, getEntityIdFromKeys([BigInt(hyperstructureEntityId)]));
 

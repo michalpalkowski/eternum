@@ -1,5 +1,6 @@
 import { POLLING_INTERVALS } from "@/config/polling";
 import { usePlayerStructureSync } from "@/hooks/helpers/use-player-structure-sync";
+import { useWorldConfigValue } from "@/hooks/helpers/use-world-config";
 import { useChainTimeStore } from "@/hooks/store/use-chain-time-store";
 import { usePlayerStore } from "@/hooks/store/use-player-store";
 import { useUIStore } from "@/hooks/store/use-ui-store";
@@ -18,8 +19,8 @@ import {
 } from "@bibliothecadao/eternum";
 import { useDojo, usePlayerStructures } from "@bibliothecadao/react";
 import { SeasonEnded } from "@bibliothecadao/torii";
-import { ContractAddress, ResourceArrivalInfo, WORLD_CONFIG_ID } from "@bibliothecadao/types";
-import { useComponentValue, useEntityQuery } from "@dojoengine/react";
+import { ContractAddress, ResourceArrivalInfo } from "@bibliothecadao/types";
+import { useEntityQuery } from "@dojoengine/react";
 import { getComponentValue, Has } from "@dojoengine/recs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { env } from "../../env";
@@ -547,7 +548,7 @@ const SeasonTimerStoreManager = () => {
   } = useDojo();
   const setGameEndAt = useUIStore((state) => state.setGameEndAt);
   const setSeasonStartMainAt = useUIStore((state) => state.setGameStartMainAt);
-  const worldConfig = useComponentValue(components.WorldConfig, getEntityIdFromKeys([WORLD_CONFIG_ID]));
+  const worldConfig = useWorldConfigValue();
 
   useEffect(() => {
     const endAt = Number(worldConfig?.season_config?.end_at);

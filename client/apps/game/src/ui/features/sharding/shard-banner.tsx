@@ -1,11 +1,9 @@
 import { useDojo } from "@bibliothecadao/react";
 import { useCallback, useEffect } from "react";
-import { WORLD_CONFIG_ID } from "@bibliothecadao/types";
-import { useComponentValue } from "@dojoengine/react";
-import { getEntityIdFromKeys } from "@dojoengine/utils";
 
 import { useShardStore } from "@/hooks/store/use-shard-store";
 import { useShardSettlement } from "@/hooks/use-shard-settlement";
+import { useWorldConfigValue } from "@/hooks/helpers/use-world-config";
 import { resolveMainGameReturnUrl, resolveRuntimeContextFromWindow } from "@/sharding/runtime-context";
 import type { ExecutableAccount } from "@/sharding/types";
 
@@ -45,9 +43,8 @@ export const ShardBanner = () => {
   const clearShardMode = useShardStore((state) => state.clearShardMode);
   const {
     account: { account },
-    setup: { components },
   } = useDojo();
-  const worldConfig = useComponentValue(components.WorldConfig, getEntityIdFromKeys([WORLD_CONFIG_ID]));
+  const worldConfig = useWorldConfigValue();
   const adminAddress = normalizeAddress(worldConfig?.admin_address);
   const accountAddress = normalizeAddress(account?.address);
   const canSettleShard = adminAddress !== null && accountAddress !== null && adminAddress === accountAddress;

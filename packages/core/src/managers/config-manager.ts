@@ -87,8 +87,26 @@ export class ClientConfigManager {
     }
   }
 
+  private getWorldConfig() {
+    if (!this.components) {
+      return undefined;
+    }
+
+    const directWorldConfig = getComponentValue(this.components.WorldConfig, getEntityIdFromKeys([WORLD_CONFIG_ID]));
+    if (directWorldConfig) {
+      return directWorldConfig;
+    }
+
+    const worldConfigEntity = Array.from(runQuery([Has(this.components.WorldConfig)]))[0];
+    if (worldConfigEntity === undefined) {
+      return undefined;
+    }
+
+    return getComponentValue(this.components.WorldConfig, worldConfigEntity);
+  }
+
   private initializeMapCenter() {
-    const worldConfig = getComponentValue(this.components.WorldConfig, getEntityIdFromKeys([WORLD_CONFIG_ID]));
+    const worldConfig = this.getWorldConfig();
     if (worldConfig) {
       this.mapCenter = MAP_CENTER - Number(worldConfig.map_center_offset ?? 0);
     }
@@ -191,7 +209,7 @@ export class ClientConfigManager {
   }
 
   private initializeRealmUpgradeCosts() {
-    const worldConfig = getComponentValue(this.components.WorldConfig, getEntityIdFromKeys([WORLD_CONFIG_ID]));
+    const worldConfig = this.getWorldConfig();
     const maxLevel = Number(worldConfig?.structure_max_level_config?.realm_max) || 0;
 
     for (let level = 1; level <= maxLevel; level++) {
@@ -282,15 +300,12 @@ export class ClientConfigManager {
   }
 
   public getRefillPerTick() {
-    const staminaRefillConfig = getComponentValue(
-      this.components.WorldConfig,
-      getEntityIdFromKeys([WORLD_CONFIG_ID]),
-    )?.troop_stamina_config;
+    const staminaRefillConfig = this.getWorldConfig()?.troop_stamina_config;
     return staminaRefillConfig?.stamina_gain_per_tick || 0;
   }
 
   public getMaxLevel(category: StructureType) {
-    const worldConfig = getComponentValue(this.components.WorldConfig, getEntityIdFromKeys([WORLD_CONFIG_ID]));
+    const worldConfig = this.getWorldConfig();
     if (category === StructureType.Realm) {
       return Number(worldConfig?.structure_max_level_config?.realm_max ?? 0);
     } else if (category === StructureType.Village) {
@@ -304,7 +319,7 @@ export class ClientConfigManager {
   }
 
   public getHyperstructureConstructionCosts() {
-    const worldConfig = getComponentValue(this.components.WorldConfig, getEntityIdFromKeys([WORLD_CONFIG_ID]));
+    const worldConfig = this.getWorldConfig();
 
     return {
       amount: this.divideByPrecision(Number(worldConfig?.hyperstructure_config?.initialize_shards_amount) ?? 0),
@@ -318,7 +333,7 @@ export class ClientConfigManager {
   }
   getTravelStaminaCost(biome: BiomeType, troopType: TroopType) {
     return this.getValueOrDefault(() => {
-      const worldConfig = getComponentValue(this.components.WorldConfig, getEntityIdFromKeys([WORLD_CONFIG_ID]));
+      const worldConfig = this.getWorldConfig();
       const baseStaminaCost = worldConfig?.troop_stamina_config?.stamina_travel_stamina_cost || 0;
       const biomeBonus = worldConfig?.troop_stamina_config?.stamina_bonus_value || 0;
 
@@ -363,7 +378,7 @@ export class ClientConfigManager {
   }
 
   public getBiomeCombatBonus(troopType: TroopType, biome: BiomeType): number {
-    const worldConfig = getComponentValue(this.components.WorldConfig, getEntityIdFromKeys([WORLD_CONFIG_ID]));
+    const worldConfig = this.getWorldConfig();
     const biomeBonusNum = worldConfig?.troop_damage_config?.damage_biome_bonus_num || 0;
     const biomeBonus = biomeBonusNum / 10_000;
 
@@ -457,17 +472,14 @@ export class ClientConfigManager {
 
   getExploreStaminaCost() {
     return this.getValueOrDefault(() => {
-      const staminaConfig = getComponentValue(
-        this.components.WorldConfig,
-        getEntityIdFromKeys([WORLD_CONFIG_ID]),
-      )?.troop_stamina_config;
+      const staminaConfig = this.getWorldConfig()?.troop_stamina_config;
       return staminaConfig?.stamina_explore_stamina_cost ?? 0;
     }, 1);
   }
 
   getSeasonMainGameStartAt() {
     return this.getValueOrDefault(() => {
-      const startMainAt = getComponentValue(this.components.WorldConfig, getEntityIdFromKeys([WORLD_CONFIG_ID]))
+      const startMainAt = this.getWorldConfig()
         ?.season_config.start_main_at;
 
       return startMainAt;
@@ -477,15 +489,9 @@ export class ClientConfigManager {
   getExploreReward() {
     return this.getValueOrDefault(
       () => {
-        const exploreConfig = getComponentValue(
-          this.components.WorldConfig,
-          getEntityIdFromKeys([WORLD_CONFIG_ID]),
-        )?.map_config;
+        const exploreConfig = this.getWorldConfig()?.map_config;
 
-        const blitzModeOn = getComponentValue(
-          this.components.WorldConfig,
-          getEntityIdFromKeys([WORLD_CONFIG_ID]),
-        )?.blitz_mode_on;
+        const blitzModeOn = this.getWorldConfig()?.blitz_mode_on;
 
         let reward_resource = ResourcesIds.AncientFragment;
         if (blitzModeOn) {
@@ -553,7 +559,7 @@ export class ClientConfigManager {
 
     return this.getValueOrDefault(() => {
       // todo: need to fix this
-      const worldConfig = getComponentValue(this.components.WorldConfig, getEntityIdFromKeys([WORLD_CONFIG_ID]));
+      const worldConfig = this.getWorldConfig();
 
       if (!worldConfig) return defaultTroopConfig;
 
@@ -597,15 +603,9 @@ export class ClientConfigManager {
   getCombatConfig() {
     return this.getValueOrDefault(
       () => {
-        const combatConfig = getComponentValue(
-          this.components.WorldConfig,
-          getEntityIdFromKeys([WORLD_CONFIG_ID]),
-        )?.troop_damage_config;
+        const combatConfig = this.getWorldConfig()?.troop_damage_config;
 
-        const troopStaminaConfig = getComponentValue(
-          this.components.WorldConfig,
-          getEntityIdFromKeys([WORLD_CONFIG_ID]),
-        )?.troop_stamina_config;
+        const troopStaminaConfig = this.getWorldConfig()?.troop_stamina_config;
 
         return {
           stamina_bonus_value: troopStaminaConfig?.stamina_bonus_value ?? 0,
@@ -645,20 +645,14 @@ export class ClientConfigManager {
 
   getBattleGraceTickCount() {
     return this.getValueOrDefault(() => {
-      const battleConfig = getComponentValue(
-        this.components.WorldConfig,
-        getEntityIdFromKeys([WORLD_CONFIG_ID]),
-      )?.battle_config;
+      const battleConfig = this.getWorldConfig()?.battle_config;
       return Number(battleConfig?.regular_immunity_ticks ?? 0);
     }, 0);
   }
 
   getMinTravelStaminaCost() {
     return this.getValueOrDefault(() => {
-      const staminaConfig = getComponentValue(
-        this.components.WorldConfig,
-        getEntityIdFromKeys([WORLD_CONFIG_ID]),
-      )?.troop_stamina_config;
+      const staminaConfig = this.getWorldConfig()?.troop_stamina_config;
       const baseTravelCost = staminaConfig?.stamina_travel_stamina_cost ?? 0;
       const biomeBonus = staminaConfig?.stamina_bonus_value ?? 0;
       return Math.max(baseTravelCost - biomeBonus, 10);
@@ -676,10 +670,7 @@ export class ClientConfigManager {
   getResourceBridgeFeeSplitConfig() {
     return this.getValueOrDefault(
       () => {
-        const resourceBridgeFeeSplitConfig = getComponentValue(
-          this.components.WorldConfig,
-          getEntityIdFromKeys([WORLD_CONFIG_ID]),
-        )?.res_bridge_fee_split_config;
+        const resourceBridgeFeeSplitConfig = this.getWorldConfig()?.res_bridge_fee_split_config;
         return {
           velords_fee_on_dpt_percent: Number(resourceBridgeFeeSplitConfig?.velords_fee_on_dpt_percent ?? 0),
           velords_fee_on_wtdr_percent: Number(resourceBridgeFeeSplitConfig?.velords_fee_on_wtdr_percent ?? 0),
@@ -710,10 +701,7 @@ export class ClientConfigManager {
 
   getTick(tickId: TickIds) {
     return this.getValueOrDefault(() => {
-      const tickConfig = getComponentValue(
-        this.components.WorldConfig,
-        getEntityIdFromKeys([WORLD_CONFIG_ID]),
-      )?.tick_config;
+      const tickConfig = this.getWorldConfig()?.tick_config;
 
       if (tickId === TickIds.Armies) {
         return Number(tickConfig?.armies_tick_in_seconds ?? 0);
@@ -730,10 +718,7 @@ export class ClientConfigManager {
   getBankConfig() {
     return this.getValueOrDefault(
       () => {
-        const bankConfig = getComponentValue(
-          this.components.WorldConfig,
-          getEntityIdFromKeys([WORLD_CONFIG_ID]),
-        )?.bank_config;
+        const bankConfig = this.getWorldConfig()?.bank_config;
 
         return {
           lpFeesNumerator: Number(bankConfig?.lp_fee_num ?? 0),
@@ -748,10 +733,7 @@ export class ClientConfigManager {
   }
 
   getAdminBankOwnerFee() {
-    const bankConfig = getComponentValue(
-      this.components.WorldConfig,
-      getEntityIdFromKeys([WORLD_CONFIG_ID]),
-    )?.bank_config;
+    const bankConfig = this.getWorldConfig()?.bank_config;
     const numerator = Number(bankConfig?.owner_fee_num) ?? 0;
     const denominator = Number(bankConfig?.owner_fee_denom) ?? 0;
     return numerator / denominator;
@@ -765,15 +747,9 @@ export class ClientConfigManager {
 
   getCapacityConfigKg(category: CapacityConfig) {
     return this.getValueOrDefault(() => {
-      const nonStructureCapacityConfig = getComponentValue(
-        this.components.WorldConfig,
-        getEntityIdFromKeys([WORLD_CONFIG_ID]),
-      )?.capacity_config;
+      const nonStructureCapacityConfig = this.getWorldConfig()?.capacity_config;
 
-      const structureCapacityConfig = getComponentValue(
-        this.components.WorldConfig,
-        getEntityIdFromKeys([WORLD_CONFIG_ID]),
-      )?.structure_capacity_config;
+      const structureCapacityConfig = this.getWorldConfig()?.structure_capacity_config;
 
       let capacityInGrams = 0;
       switch (category) {
@@ -814,10 +790,7 @@ export class ClientConfigManager {
 
   getSpeedConfig(entityType: EntityType): number {
     return this.getValueOrDefault(() => {
-      const speedConfig = getComponentValue(
-        this.components.WorldConfig,
-        getEntityIdFromKeys([WORLD_CONFIG_ID]),
-      )?.speed_config;
+      const speedConfig = this.getWorldConfig()?.speed_config;
 
       if (entityType === EntityType.DONKEY) {
         return Number(speedConfig?.donkey_sec_per_km ?? 0);
@@ -829,7 +802,7 @@ export class ClientConfigManager {
 
   getBuildingConfig() {
     return this.getValueOrDefault(
-      () => getComponentValue(this.components.WorldConfig, getEntityIdFromKeys([WORLD_CONFIG_ID]))?.building_config,
+      () => this.getWorldConfig()?.building_config,
       {
         base_population: 0,
         base_cost_percent_increase: 0,
@@ -840,7 +813,7 @@ export class ClientConfigManager {
   getBlitzConfig() {
     return this.getValueOrDefault(
       () => {
-        const config = getComponentValue(this.components.WorldConfig, getEntityIdFromKeys([WORLD_CONFIG_ID]));
+        const config = this.getWorldConfig();
         if (!config) return;
 
         const blitzSettlementConfig = config.blitz_settlement_config;
@@ -922,7 +895,7 @@ export class ClientConfigManager {
   getDevModeConfig() {
     return this.getValueOrDefault(
       () => {
-        const config = getComponentValue(this.components.WorldConfig, getEntityIdFromKeys([WORLD_CONFIG_ID]));
+        const config = this.getWorldConfig();
         if (!config) return;
 
         return {
@@ -938,15 +911,9 @@ export class ClientConfigManager {
   getHyperstructureConfig() {
     return this.getValueOrDefault(
       () => {
-        const victoryPointsGrantConfig = getComponentValue(
-          this.components.WorldConfig,
-          getEntityIdFromKeys([WORLD_CONFIG_ID]),
-        )?.victory_points_grant_config;
+        const victoryPointsGrantConfig = this.getWorldConfig()?.victory_points_grant_config;
 
-        const victoryPointsWinConfig = getComponentValue(
-          this.components.WorldConfig,
-          getEntityIdFromKeys([WORLD_CONFIG_ID]),
-        )?.victory_points_win_config;
+        const victoryPointsWinConfig = this.getWorldConfig()?.victory_points_win_config;
 
         return {
           // todo: need to fix this
@@ -966,7 +933,7 @@ export class ClientConfigManager {
   getBasePopulationCapacity(): number {
     return this.getValueOrDefault(() => {
       return (
-        getComponentValue(this.components.WorldConfig, getEntityIdFromKeys([WORLD_CONFIG_ID]))?.building_config
+        this.getWorldConfig()?.building_config
           ?.base_population ?? 0
       );
     }, 0);
@@ -1005,10 +972,7 @@ export class ClientConfigManager {
   getTravelFoodCostConfig(troopType: number) {
     return this.getValueOrDefault(
       () => {
-        const travelFoodCostConfig = getComponentValue(
-          this.components.WorldConfig,
-          getEntityIdFromKeys([WORLD_CONFIG_ID]),
-        )?.troop_stamina_config;
+        const travelFoodCostConfig = this.getWorldConfig()?.troop_stamina_config;
 
         return {
           exploreWheatBurnAmount:
@@ -1048,10 +1012,7 @@ export class ClientConfigManager {
   getTroopStaminaConfig(troopType: TroopType, troopTier: TroopTier) {
     return this.getValueOrDefault(
       () => {
-        const staminaConfig = getComponentValue(
-          this.components.WorldConfig,
-          getEntityIdFromKeys([WORLD_CONFIG_ID]),
-        )?.troop_stamina_config;
+        const staminaConfig = this.getWorldConfig()?.troop_stamina_config;
 
         let tierBonus = 0;
         if (troopTier === TroopTier.T2) {
@@ -1110,10 +1071,7 @@ export class ClientConfigManager {
 
   getBuildingBaseCostPercentIncrease() {
     return this.getValueOrDefault(() => {
-      const buildingGeneralConfig = getComponentValue(
-        this.components.WorldConfig,
-        getEntityIdFromKeys([WORLD_CONFIG_ID]),
-      )?.building_config;
+      const buildingGeneralConfig = this.getWorldConfig()?.building_config;
       return buildingGeneralConfig?.base_cost_percent_increase ?? 0;
     }, 0);
   }
@@ -1121,10 +1079,7 @@ export class ClientConfigManager {
   getSeasonConfig() {
     return this.getValueOrDefault(
       () => {
-        const seasonConfig = getComponentValue(
-          this.components.WorldConfig,
-          getEntityIdFromKeys([WORLD_CONFIG_ID]),
-        )?.season_config;
+        const seasonConfig = this.getWorldConfig()?.season_config;
         return {
           startSettlingAt: seasonConfig?.start_settling_at ?? 0,
           startMainAt: seasonConfig?.start_main_at ?? 0,
