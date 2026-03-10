@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { getStructuresDataFromTorii } from "@/dojo/queries";
 import { syncEntitiesDebounced } from "@/dojo/sync";
-import { sqlApi } from "@/services/api";
+import { getSqlApiBaseUrl, sqlApi } from "@/services/api";
 import { padHexAddressTo66 } from "@/ui/utils/utils";
 import { useDojo, usePlayerStructures } from "@bibliothecadao/react";
 import { MemberClause } from "@dojoengine/sdk";
@@ -126,32 +126,66 @@ export const usePlayerStructureSync = () => {
   const accountAddress = useAccountStore().account?.address;
   const toriiComponents = contractComponents as unknown as Parameters<typeof getStructuresDataFromTorii>[1];
   const structureEntityIdsRef = useRef<ReadonlySet<number>>(new Set());
+  const structureSyncTargetsRef = useRef<typeof structureSyncTargets>([]);
+  const missingModelRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isBackfillRunning = useRef(false);
-  const resolveHydratedStructureIds = useCallback(
+  const resolveHydratedPlayerStructureModelIds = useCallback(
     (structureIds: number[]) => {
       const structureComponent = (setup.components as any).Structure;
-      if (!structureComponent) {
-        return {
-          hydratedIds: [] as number[],
-          missingIds: [...structureIds],
-        };
+      const resourceComponent = (setup.components as any).Resource;
+      const structureBuildingsComponent = (setup.components as any).StructureBuildings;
+
+      const collectHydratedEntityIds = (component: unknown): Set<number> => {
+        if (!component) {
+          return new Set<number>();
+        }
+
+        const hydratedByEntityId = new Set<number>();
+        const entities = runQuery([Has(component as any)]);
+        entities.forEach((entity) => {
+          const componentValue = getComponentValue(component as any, entity);
+          if (!componentValue) return;
+          const numericEntityId = Number((componentValue as { entity_id?: unknown }).entity_id);
+          if (Number.isFinite(numericEntityId)) {
+            hydratedByEntityId.add(numericEntityId);
+          }
+        });
+        return hydratedByEntityId;
+      };
+
+      const hydratedStructureIdsByModel = collectHydratedEntityIds(structureComponent);
+      const hydratedResourceIdsByModel = collectHydratedEntityIds(resourceComponent);
+      const hydratedStructureBuildingsIdsByModel = collectHydratedEntityIds(structureBuildingsComponent);
+
+      const hydratedIds: number[] = [];
+      const missingIds: number[] = [];
+      const missingStructureIds: number[] = [];
+      const missingResourceIds: number[] = [];
+      const missingStructureBuildingsIds: number[] = [];
+
+      for (const structureId of structureIds) {
+        const hasStructure = hydratedStructureIdsByModel.has(structureId);
+        const hasResource = hydratedResourceIdsByModel.has(structureId);
+        const hasStructureBuildings = hydratedStructureBuildingsIdsByModel.has(structureId);
+
+        if (hasStructure && hasResource && hasStructureBuildings) {
+          hydratedIds.push(structureId);
+          continue;
+        }
+
+        missingIds.push(structureId);
+        if (!hasStructure) missingStructureIds.push(structureId);
+        if (!hasResource) missingResourceIds.push(structureId);
+        if (!hasStructureBuildings) missingStructureBuildingsIds.push(structureId);
       }
 
-      const hydratedByEntityId = new Set<number>();
-      const structureEntities = runQuery([Has(structureComponent)]);
-      structureEntities.forEach((entity) => {
-        const structure = getComponentValue(structureComponent, entity);
-        if (!structure) return;
-        const numericEntityId = Number((structure as { entity_id?: unknown }).entity_id);
-        if (Number.isFinite(numericEntityId)) {
-          hydratedByEntityId.add(numericEntityId);
-        }
-      });
-
-      const hydratedIds = structureIds.filter((entityId) => hydratedByEntityId.has(entityId));
-      const missingIds = structureIds.filter((entityId) => !hydratedByEntityId.has(entityId));
-
-      return { hydratedIds, missingIds };
+      return {
+        hydratedIds,
+        missingIds,
+        missingStructureIds,
+        missingResourceIds,
+        missingStructureBuildingsIds,
+      };
     },
     [setup.components],
   );
@@ -197,10 +231,33 @@ export const usePlayerStructureSync = () => {
     }
     return false;
   }, []);
+  const scheduleMissingModelRetry = useCallback(
+    (source: "backfill" | "newly-seen", missingIds: number[]) => {
+      if (missingIds.length === 0) {
+        return;
+      }
+
+      if (missingModelRetryTimerRef.current !== null) {
+        return;
+      }
+
+      missingModelRetryTimerRef.current = setTimeout(() => {
+        missingModelRetryTimerRef.current = null;
+        syncDiag("missing-model-retry-trigger", {
+          accountAddress: accountAddress ?? null,
+          source,
+          missingIdsCsv: missingIds.join(","),
+        });
+        void backfillOwnedStructuresRef.current?.();
+      }, MISSING_STRUCTURE_RETRY_COOLDOWN_MS + 250);
+    },
+    [accountAddress],
+  );
 
   useEffect(() => {
     structureEntityIdsRef.current = new Set(structureEntityIds);
-  }, [structureEntityIds]);
+    structureSyncTargetsRef.current = structureSyncTargets;
+  }, [structureEntityIds, structureSyncTargets]);
 
   useEffect(() => {
     accountSyncEpochRef.current += 1;
@@ -212,11 +269,24 @@ export const usePlayerStructureSync = () => {
     lastNewlySeenStartLogKeyRef.current = "";
     lastNewlySeenCompleteLogKeyRef.current = "";
     isBackfillRunning.current = false;
+    if (missingModelRetryTimerRef.current !== null) {
+      clearTimeout(missingModelRetryTimerRef.current);
+      missingModelRetryTimerRef.current = null;
+    }
     syncDiag("account-epoch-reset", {
       accountAddress: accountAddress ?? null,
       epoch: accountSyncEpochRef.current,
     });
   }, [accountAddress]);
+
+  useEffect(() => {
+    return () => {
+      if (missingModelRetryTimerRef.current !== null) {
+        clearTimeout(missingModelRetryTimerRef.current);
+        missingModelRetryTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // Keep owned structures backfilled into RECS so ownership UI updates even if stream updates are missed.
   useEffect(() => {
@@ -232,30 +302,75 @@ export const usePlayerStructureSync = () => {
 
       let claimedStructureIds: number[] = [];
       try {
-        const ownedStructures = await sqlApi.fetchStructuresByOwner(accountAddress);
+        const currentStructureTargets = structureSyncTargetsRef.current;
+        let ownedStructures = await sqlApi.fetchStructuresByOwner(accountAddress);
         const ownedStructureIds = ownedStructures.map((structure) => structure.entity_id);
         syncDiag("backfill-owned-structures-fetched", {
           accountAddress,
+          sqlBaseUrl: getSqlApiBaseUrl(),
           ownedStructureCount: ownedStructures.length,
           ownedStructureIdsCsv: ownedStructureIds.join(","),
         });
         if (cancelled) return;
+
+        let usingPlayerStructuresFallback = false;
+        if (ownedStructures.length === 0) {
+          if (currentStructureTargets.length > 0) {
+            usingPlayerStructuresFallback = true;
+            ownedStructures = currentStructureTargets.map((target) => ({
+              entity_id: target.entityId,
+              coord_x: target.position.col,
+              coord_y: target.position.row,
+              owner: accountAddress,
+            }));
+            syncDiag("backfill-owned-structures-mismatch", {
+              accountAddress,
+              sqlBaseUrl: getSqlApiBaseUrl(),
+              recsOwnedCount: structureEntityIdsRef.current.size,
+              recsOwnedIdsCsv: Array.from(structureEntityIdsRef.current).join(","),
+            });
+            syncDiag("backfill-fallback-player-structures", {
+              accountAddress,
+              fallbackStructureCount: ownedStructures.length,
+              fallbackStructureIdsCsv: ownedStructures.map((structure) => structure.entity_id).join(","),
+            });
+          } else if (structureEntityIdsRef.current.size > 0) {
+            syncDiag("backfill-owned-structures-mismatch", {
+              accountAddress,
+              sqlBaseUrl: getSqlApiBaseUrl(),
+              recsOwnedCount: structureEntityIdsRef.current.size,
+              recsOwnedIdsCsv: Array.from(structureEntityIdsRef.current).join(","),
+            });
+          }
+        }
+
         if (ownedStructures.length === 0) {
           syncDiag("backfill-no-owned-structures", { accountAddress });
           return;
         }
 
-        const structuresToSync = selectUnsyncedOwnedStructureTargets({
-          ownedStructures,
-          currentPlayerStructureIds: structureEntityIdsRef.current,
-          inFlightStructureIds: inFlightStructureIds.current,
-        }).filter(({ entityId }) => shouldRetryStructureSync(entityId, Date.now()));
+        const structuresToSync = usingPlayerStructuresFallback
+          ? currentStructureTargets
+              .filter(
+                ({ entityId }) =>
+                  !inFlightStructureIds.current.has(entityId) && shouldRetryStructureSync(entityId, Date.now()),
+              )
+              .map((target) => ({
+                entityId: target.entityId,
+                position: { col: target.position.col, row: target.position.row },
+              }))
+          : selectUnsyncedOwnedStructureTargets({
+              ownedStructures,
+              currentPlayerStructureIds: structureEntityIdsRef.current,
+              inFlightStructureIds: inFlightStructureIds.current,
+            }).filter(({ entityId }) => shouldRetryStructureSync(entityId, Date.now()));
 
         if (structuresToSync.length === 0) {
           syncDiag("backfill-nothing-to-sync", {
             accountAddress,
             currentPlayerStructureCount: structureEntityIdsRef.current.size,
             inFlightCount: inFlightStructureIds.current.size,
+            usedPlayerStructuresFallback: usingPlayerStructuresFallback,
           });
           return;
         }
@@ -271,7 +386,13 @@ export const usePlayerStructureSync = () => {
         await getStructuresDataFromTorii(toriiClient, toriiComponents, structuresToSync);
 
         if (!cancelled) {
-          const { hydratedIds, missingIds } = resolveHydratedStructureIds(claimedStructureIds);
+          const {
+            hydratedIds,
+            missingIds,
+            missingStructureIds,
+            missingResourceIds,
+            missingStructureBuildingsIds,
+          } = resolveHydratedPlayerStructureModelIds(claimedStructureIds);
           clearMissingStructureCooldown(hydratedIds);
           applyMissingStructureCooldown(missingIds);
           hydratedIds.forEach((entityId) => syncedStructureIds.current.add(entityId));
@@ -281,8 +402,12 @@ export const usePlayerStructureSync = () => {
             syncedStructureIdsCsv: hydratedIds.join(","),
             missingStructureIds: missingIds,
             missingStructureIdsCsv: missingIds.join(","),
+            missingStructureModelIdsCsv: missingStructureIds.join(","),
+            missingResourceModelIdsCsv: missingResourceIds.join(","),
+            missingStructureBuildingsModelIdsCsv: missingStructureBuildingsIds.join(","),
           });
           logMissingMaterialization("backfill", missingIds);
+          scheduleMissingModelRetry("backfill", missingIds);
         }
       } catch (error) {
         console.error("[usePlayerStructureSync] Failed to backfill owned structures", error);
@@ -306,8 +431,10 @@ export const usePlayerStructureSync = () => {
     applyMissingStructureCooldown,
     clearMissingStructureCooldown,
     logMissingMaterialization,
-    resolveHydratedStructureIds,
+    resolveHydratedPlayerStructureModelIds,
+    scheduleMissingModelRetry,
     shouldRetryStructureSync,
+    structureSyncTargetsKey,
     toriiClient,
     toriiComponents,
   ]);
@@ -396,7 +523,13 @@ export const usePlayerStructureSync = () => {
         await getStructuresDataFromTorii(toriiClient, toriiComponents, structuresToSync);
 
         if (syncEpochAtRequestStart === accountSyncEpochRef.current) {
-          const { hydratedIds, missingIds } = resolveHydratedStructureIds(structuresToSyncIds);
+          const {
+            hydratedIds,
+            missingIds,
+            missingStructureIds,
+            missingResourceIds,
+            missingStructureBuildingsIds,
+          } = resolveHydratedPlayerStructureModelIds(structuresToSyncIds);
           clearMissingStructureCooldown(hydratedIds);
           applyMissingStructureCooldown(missingIds);
           hydratedIds.forEach((entityId) => syncedStructureIds.current.add(entityId));
@@ -406,12 +539,16 @@ export const usePlayerStructureSync = () => {
             syncDiag("newly-seen-sync-complete", {
               accountAddress: accountAddress ?? null,
               structureIds: hydratedIds,
-              structureIdsCsv: hydratedIds.join(","),
-              missingStructureIds: missingIds,
-              missingStructureIdsCsv: missingIds.join(","),
-            });
+                structureIdsCsv: hydratedIds.join(","),
+                missingStructureIds: missingIds,
+                missingStructureIdsCsv: missingIds.join(","),
+                missingStructureModelIdsCsv: missingStructureIds.join(","),
+                missingResourceModelIdsCsv: missingResourceIds.join(","),
+                missingStructureBuildingsModelIdsCsv: missingStructureBuildingsIds.join(","),
+              });
           }
           logMissingMaterialization("newly-seen", missingIds);
+          scheduleMissingModelRetry("newly-seen", missingIds);
         }
       } catch (error) {
         console.error("[usePlayerStructureSync] Failed to sync newly seen structures", error);
@@ -424,7 +561,8 @@ export const usePlayerStructureSync = () => {
     applyMissingStructureCooldown,
     clearMissingStructureCooldown,
     logMissingMaterialization,
-    resolveHydratedStructureIds,
+    resolveHydratedPlayerStructureModelIds,
+    scheduleMissingModelRetry,
     shouldRetryStructureSync,
     structureSyncTargetsKey,
     toriiClient,
