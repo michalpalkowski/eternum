@@ -63,6 +63,8 @@ describe("useShardRequest", () => {
     vi.useFakeTimers();
     latestState = null;
     useShardStore.getState().clearMainShardRequestState();
+    sessionStorage.clear();
+    delete (window as Window & { __ETERNUM_LAST_SHARD_REQUEST_RECEIPT__?: unknown }).__ETERNUM_LAST_SHARD_REQUEST_RECEIPT__;
 
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -177,6 +179,7 @@ describe("useShardRequest", () => {
 
   it("falls back to get_shard_id when receipt does not expose ShardingRequested event", async () => {
     const callContract = vi.fn().mockResolvedValue(["0x9"]);
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const account: ExecutableAccount = {
       execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" }),
       waitForTransaction: vi
@@ -241,9 +244,100 @@ describe("useShardRequest", () => {
       entrypoint: "get_shard_id",
       calldata: ["0xabc123"],
     });
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      "[ShardRequest] Failed to resolve ShardingRequested event from receipt",
+      expect.objectContaining({
+        txHash: "0x111",
+        reason: "ShardingRequested event not found in transaction receipt",
+        extractedEventCount: 0,
+      }),
+    );
+    expect(sessionStorage.getItem("__eternum_last_shard_request_receipt__")).toContain("\"txHash\":\"0x111\"");
+    expect((window as Window & { __ETERNUM_LAST_SHARD_REQUEST_RECEIPT__?: unknown }).__ETERNUM_LAST_SHARD_REQUEST_RECEIPT__).toEqual(
+      expect.objectContaining({
+        txHash: "0x111",
+      }),
+    );
     expect(getHookState(latestState).phase).toBe("ready");
     expect(getHookState(latestState).targetShardId).toBe("0xabc123@0x9");
     expect(getHookState(latestState).shardUrls?.shardId).toBe("0xabc123@0x9");
+    consoleWarnSpy.mockRestore();
+  });
+
+  it("extracts ShardingRequested from wrapped transaction_receipt event shape", async () => {
+    const callContract = vi.fn();
+    const account: ExecutableAccount = {
+      execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" }),
+      waitForTransaction: vi.fn<NonNullable<ExecutableAccount["waitForTransaction"]>>().mockResolvedValue({
+        transaction_receipt: {
+          events: [
+            {
+              event: {
+                fromAddress: "0x1234abcd",
+                keys: [SHARDING_REQUESTED_SELECTOR, "0xabc123"],
+                data: ["0x9"],
+              },
+            },
+          ],
+        },
+      }),
+      provider: {
+        callContract,
+      },
+    };
+
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ shard_contract_address: "0x1234abcd" }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            shards: [
+              {
+                phase: "gameplay_active",
+                katana_url: "http://localhost:5050",
+                torii_url: "http://localhost:8080",
+                torii_grpc_url: "http://localhost:18090",
+                game_contract_address: "0xabc123",
+                shard_id: "0xabc123@0x9",
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            transport: {
+              status: "healthy",
+              torii_http_reachable: true,
+              torii_sql_reachable: true,
+              torii_grpc_reachable: true,
+              bootstrap_snapshot_present: true,
+              error_code: null,
+              error_message: null,
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+
+    await act(async () => {
+      root.render(<HookHarness account={account} operatorUrl="http://localhost:3001" />);
+    });
+
+    await act(async () => {
+      await getHookState(latestState).requestShard([42]);
+    });
+    await act(async () => Promise.resolve());
+
+    expect(callContract).not.toHaveBeenCalled();
+    expect(getHookState(latestState).phase).toBe("ready");
+    expect(getHookState(latestState).targetShardId).toBe("0xabc123@0x9");
   });
 
   it("recovers an existing shard when request_shard_all fails with slot locked by shard", async () => {

@@ -45,6 +45,7 @@ interface UseShardRequestOptions {
 const SHARDING_REQUESTED_SELECTOR = hash.getSelectorFromName("ShardingRequested").toLowerCase();
 const SHARD_REQUEST_POLL_INTERVAL_MS = 2000;
 const SHARD_REQUEST_TIMEOUT_MS = 120_000;
+const SHARD_REQUEST_RECEIPT_CAPTURE_KEY = "__eternum_last_shard_request_receipt__";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
@@ -102,27 +103,130 @@ const parseTxHashFromExecuteResult = (executeResult: unknown): string => {
   return normalizeFeltToHex(rawHash, "transaction_hash");
 };
 
+const serializeDebugValue = (value: unknown, seen = new WeakSet<object>()): unknown => {
+  if (typeof value === "bigint") {
+    return `0x${value.toString(16)}`;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => serializeDebugValue(item, seen));
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
+  if (seen.has(value)) {
+    return "[Circular]";
+  }
+
+  seen.add(value);
+  const serialized: Record<string, unknown> = {};
+  for (const [key, nestedValue] of Object.entries(value)) {
+    serialized[key] = serializeDebugValue(nestedValue, seen);
+  }
+  seen.delete(value);
+  return serialized;
+};
+
+const isEventLikeRecord = (value: Record<string, unknown>): boolean => {
+  const hasAddress =
+    value.from_address !== undefined ||
+    value.fromAddress !== undefined ||
+    value.contract_address !== undefined ||
+    value.contractAddress !== undefined ||
+    value.address !== undefined;
+  const hasKeys = Array.isArray(value.keys);
+  const hasData = Array.isArray(value.data);
+  return hasAddress && hasKeys && hasData;
+};
+
+const unwrapEventRecord = (value: unknown): Record<string, unknown> | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+  if (isEventLikeRecord(value)) {
+    return value;
+  }
+
+  const wrappedEvent = value.event;
+  if (isRecord(wrappedEvent) && isEventLikeRecord(wrappedEvent)) {
+    return wrappedEvent;
+  }
+
+  const wrappedValue = value.value;
+  if (isRecord(wrappedValue) && isEventLikeRecord(wrappedValue)) {
+    return wrappedValue;
+  }
+
+  return null;
+};
+
 const extractReceiptEvents = (receipt: unknown): Array<Record<string, unknown>> => {
-  if (!isRecord(receipt)) {
-    return [];
+  const events: Array<Record<string, unknown>> = [];
+  const seenObjects = new WeakSet<object>();
+
+  const visit = (value: unknown, depth: number) => {
+    if (depth > 6) {
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item) => visit(item, depth + 1));
+      return;
+    }
+    if (!isRecord(value)) {
+      return;
+    }
+    if (seenObjects.has(value)) {
+      return;
+    }
+    seenObjects.add(value);
+
+    const unwrappedEvent = unwrapEventRecord(value);
+    if (unwrappedEvent !== null) {
+      events.push(unwrappedEvent);
+    }
+
+    const nestedKeys = ["events", "event", "receipt", "transaction_receipt", "transactionReceipt", "result", "value"];
+    for (const key of nestedKeys) {
+      if (key in value) {
+        visit(value[key], depth + 1);
+      }
+    }
+  };
+
+  visit(receipt, 0);
+  return events;
+};
+
+const captureUnresolvedReceipt = (params: {
+  txHash: string;
+  receipt: unknown;
+  reason: string;
+  expectedGameContractAddress: string;
+  expectedShardContractAddress: string;
+}) => {
+  const payload = {
+    capturedAt: new Date().toISOString(),
+    txHash: params.txHash,
+    reason: params.reason,
+    expectedGameContractAddress: params.expectedGameContractAddress,
+    expectedShardContractAddress: params.expectedShardContractAddress,
+    extractedEventCount: extractReceiptEvents(params.receipt).length,
+    receipt: serializeDebugValue(params.receipt),
+  };
+
+  if (typeof window !== "undefined") {
+    (window as Window & { __ETERNUM_LAST_SHARD_REQUEST_RECEIPT__?: unknown }).__ETERNUM_LAST_SHARD_REQUEST_RECEIPT__ =
+      payload;
   }
 
-  const fromRoot = receipt.events;
-  if (Array.isArray(fromRoot)) {
-    return fromRoot.filter((event): event is Record<string, unknown> => isRecord(event));
+  if (typeof sessionStorage !== "undefined") {
+    try {
+      sessionStorage.setItem(SHARD_REQUEST_RECEIPT_CAPTURE_KEY, JSON.stringify(payload));
+    } catch {
+      // Best-effort debug capture only.
+    }
   }
 
-  const nestedReceipt = receipt.receipt;
-  if (!isRecord(nestedReceipt)) {
-    return [];
-  }
-
-  const fromNested = nestedReceipt.events;
-  if (!Array.isArray(fromNested)) {
-    return [];
-  }
-
-  return fromNested.filter((event): event is Record<string, unknown> => isRecord(event));
+  console.warn("[ShardRequest] Failed to resolve ShardingRequested event from receipt", payload);
 };
 
 const resolveReceiptFromAccount = async (account: ExecutableAccount, txHash: string): Promise<unknown> => {
@@ -149,7 +253,8 @@ const resolveRequestedShardContextFromReceipt = (params: {
 }): RequestedShardContext => {
   const events = extractReceiptEvents(params.receipt);
   for (const event of events) {
-    const rawFromAddress = event.from_address ?? event.fromAddress;
+    const rawFromAddress =
+      event.from_address ?? event.fromAddress ?? event.contract_address ?? event.contractAddress ?? event.address;
     const rawKeys = event.keys;
     const rawData = event.data;
     if (!Array.isArray(rawKeys) || !Array.isArray(rawData)) {
@@ -584,6 +689,13 @@ export const useShardRequest = (
         } catch (error) {
           const receiptResolutionMessage =
             error instanceof Error ? error.message : "Failed to resolve shard ID from receipt";
+          captureUnresolvedReceipt({
+            txHash,
+            receipt,
+            reason: receiptResolutionMessage,
+            expectedGameContractAddress: normalizedWorldAddress,
+            expectedShardContractAddress: normalizedShardContractAddress,
+          });
 
           try {
             requestedContext = await resolveRequestedShardContextFromChain({
