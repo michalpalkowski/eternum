@@ -195,6 +195,37 @@ const resolveRequestedShardContextFromReceipt = (params: {
   throw new Error("ShardingRequested event not found in transaction receipt");
 };
 
+const resolveRequestedShardContextFromChain = async (params: {
+  txHash: string;
+  account: ExecutableAccount;
+  expectedGameContractAddress: string;
+  expectedShardContractAddress: string;
+}): Promise<RequestedShardContext> => {
+  const callContract = params.account.provider?.callContract;
+  if (typeof callContract !== "function") {
+    throw new Error("Account provider does not support callContract fallback");
+  }
+
+  const result = await callContract({
+    contractAddress: params.expectedShardContractAddress,
+    entrypoint: "get_shard_id",
+    calldata: [params.expectedGameContractAddress],
+  });
+
+  if (!Array.isArray(result) || result.length === 0) {
+    throw new Error("get_shard_id returned empty result");
+  }
+
+  const onchainShardId = normalizeFeltToHex(result[0], "get_shard_id[0]");
+
+  return {
+    txHash: params.txHash,
+    gameContractAddress: params.expectedGameContractAddress,
+    onchainShardId,
+    shardId: `${params.expectedGameContractAddress}@${onchainShardId}`,
+  };
+};
+
 const parseOperatorRejection = (payload: unknown): string | null => {
   if (!isRecord(payload)) {
     return null;
@@ -440,9 +471,27 @@ export const useShardRequest = (
             expectedShardContractAddress: normalizedShardContractAddress,
           });
         } catch (error) {
-          const message = error instanceof Error ? error.message : "Failed to resolve shard ID from receipt";
-          failRequest("SHARD_ID_RESOLUTION_FAILED", message);
-          return;
+          const receiptResolutionMessage =
+            error instanceof Error ? error.message : "Failed to resolve shard ID from receipt";
+
+          try {
+            requestedContext = await resolveRequestedShardContextFromChain({
+              txHash,
+              account,
+              expectedGameContractAddress: normalizedWorldAddress,
+              expectedShardContractAddress: normalizedShardContractAddress,
+            });
+          } catch (fallbackError) {
+            const fallbackMessage =
+              fallbackError instanceof Error
+                ? fallbackError.message
+                : "Failed to resolve shard ID from on-chain fallback";
+            failRequest(
+              "SHARD_ID_RESOLUTION_FAILED",
+              `${receiptResolutionMessage}; fallback get_shard_id failed: ${fallbackMessage}`,
+            );
+            return;
+          }
         }
 
         setTargetShardId(requestedContext.shardId);
