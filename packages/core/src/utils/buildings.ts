@@ -26,6 +26,51 @@ export const getConsumedBy = (resourceProduced: ResourcesIds) => {
     .filter(Boolean);
 };
 
+const resolveBuildingCostsFromComponents = (
+  components: ClientComponents,
+  buildingCategory: BuildingType,
+  useSimpleCost: boolean,
+): ResourceCost[] | undefined => {
+  const categoryConfig = getComponentValue(
+    components.BuildingCategoryConfig,
+    getEntityIdFromKeys([BigInt(buildingCategory)]),
+  );
+
+  if (!categoryConfig) {
+    return undefined;
+  }
+
+  const costListIdRaw = useSimpleCost ? categoryConfig.simple_erection_cost_id : categoryConfig.complex_erection_cost_id;
+  const costListId = BigInt(costListIdRaw ?? 0);
+  const costListCount = useSimpleCost
+    ? Number(categoryConfig.simple_erection_cost_count ?? 0)
+    : Number(categoryConfig.complex_erection_cost_count ?? 0);
+
+  if (!Number.isFinite(costListCount) || costListCount <= 0) {
+    // Zero-cost buildings are valid and should stay buildable.
+    return [];
+  }
+
+  const costs: ResourceCost[] = [];
+  for (let index = 0; index < costListCount; index++) {
+    const resource = getComponentValue(
+      components.ResourceList,
+      getEntityIdFromKeys([costListId, BigInt(index)]),
+    );
+
+    if (!resource) {
+      continue;
+    }
+
+    costs.push({
+      resource: resource.resource_type as ResourcesIds,
+      amount: configManager.divideByPrecision(Number(resource.amount)),
+    });
+  }
+
+  return costs;
+};
+
 export const getBuildingCosts = (
   realmEntityId: ID,
   components: ClientComponents,
@@ -42,7 +87,21 @@ export const getBuildingCosts = (
     ? configManager.simpleBuildingCosts[Number(buildingCategory)]
     : configManager.complexBuildingCosts[Number(buildingCategory)];
 
-  if (!costs) return undefined;
+  if (!costs) {
+    const hydratedCosts = resolveBuildingCostsFromComponents(components, buildingCategory, useSimpleCost);
+    if (hydratedCosts === undefined) {
+      return undefined;
+    }
+
+    // Keep the cache warm for subsequent calls once data has been hydrated.
+    if (useSimpleCost) {
+      configManager.simpleBuildingCosts[Number(buildingCategory)] = hydratedCosts;
+    } else {
+      configManager.complexBuildingCosts[Number(buildingCategory)] = hydratedCosts;
+    }
+
+    costs = hydratedCosts;
+  }
 
   costs.forEach((cost) => {
     const baseCost = cost.amount;

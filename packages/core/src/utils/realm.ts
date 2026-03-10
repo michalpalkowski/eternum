@@ -9,6 +9,54 @@ interface Attribute {
   value: any;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const toBigIntSafe = (value: unknown): bigint | null => {
+  if (value === undefined || value === null) return null;
+
+  if (typeof value === "bigint") return value;
+
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return null;
+    try {
+      return BigInt(Math.trunc(value));
+    } catch {
+      return null;
+    }
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) return null;
+    try {
+      return BigInt(trimmed);
+    } catch {
+      return null;
+    }
+  }
+
+  if (!isRecord(value)) return null;
+
+  if ("value" in value) {
+    const nested = toBigIntSafe(value.value);
+    if (nested !== null) return nested;
+  }
+
+  if ("Some" in value) {
+    const nested = toBigIntSafe(value.Some);
+    if (nested !== null) return nested;
+  }
+
+  if ("low" in value || "high" in value) {
+    const low = toBigIntSafe(value.low ?? 0) ?? 0n;
+    const high = toBigIntSafe(value.high ?? 0) ?? 0n;
+    return low + (high << 128n);
+  }
+
+  return null;
+};
+
 let realms: {
   [key: string]: any;
 } = {};
@@ -27,6 +75,31 @@ export const getRealmNameById = (realmId: ID): string => {
   return features["name"];
 };
 
+const resolveRealmEntry = (realmId: ID): any | null => {
+  const dynamicRealm = realms[realmId.toString()];
+  if (dynamicRealm) {
+    return dynamicRealm;
+  }
+
+  const staticRealm = realmsJson["features"]?.[realmId - 1];
+  return staticRealm ?? null;
+};
+
+const resolveProducedResources = (packedValue: unknown, realmId: ID): number[] => {
+  const packedResources = toBigIntSafe(packedValue);
+  if (packedResources !== null) {
+    return unpackValue(packedResources);
+  }
+
+  // Fallback for schema/decoder drift where resources_packed can arrive in unexpected shape.
+  const offchainRealm = getOffchainRealm(realmId);
+  if (offchainRealm) {
+    return unpackValue(BigInt(offchainRealm.resourceTypesPacked));
+  }
+
+  return [];
+};
+
 export function getRealmInfo(entity: Entity, components: ClientComponents): RealmInfo | undefined {
   const structure = getComponentValue(components.Structure, entity);
   const structureBuildings = getComponentValue(components.StructureBuildings, entity);
@@ -37,8 +110,7 @@ export function getRealmInfo(entity: Entity, components: ClientComponents): Real
     const level = structure.base.level;
     const entity_id = structure.entity_id;
     const produced_resources = structure.resources_packed;
-
-    const resources = unpackValue(BigInt(produced_resources));
+    const resources = resolveProducedResources(produced_resources, realm_id);
 
     const resourceManager = new ResourceManager(components, entity_id);
 
@@ -66,13 +138,13 @@ export function getRealmInfo(entity: Entity, components: ClientComponents): Real
 }
 
 export function getOffchainRealm(realmId: ID): RealmInterface | undefined {
-  const realmsData = realms;
-  const realm = realmsData[realmId.toString()];
+  const realm = resolveRealmEntry(realmId);
   if (!realm) return;
 
   const resourceIds = realm.attributes
     .filter(({ trait_type }: Attribute) => trait_type === "Resource")
-    .map(({ value }: Attribute) => findResourceIdByTrait(value));
+    .map(({ value }: Attribute) => findResourceIdByTrait(value))
+    .filter((resourceId: unknown): resourceId is number => typeof resourceId === "number");
 
   const resourceTypesPacked = BigInt(packValues(resourceIds));
 

@@ -1684,7 +1684,9 @@ export function defineContractComponents(world: World) {
             end_grace_seconds: RecsType.Number,
             registration_grace_seconds: RecsType.Number,
           },
-          agent_controller_config: RecsType.BigInt,
+          agent_controller_config: {
+            address: RecsType.BigInt,
+          },
           realm_start_resources_config: {
             resources_list_id: RecsType.Number,
             resources_list_count: RecsType.Number,
@@ -1697,7 +1699,9 @@ export function defineContractComponents(world: World) {
             resources_mm_list_id: RecsType.Number,
             resources_mm_list_count: RecsType.Number,
           },
-          village_controller_config: RecsType.BigIntArray,
+          village_controller_config: {
+            addresses: RecsType.BigIntArray,
+          },
           village_pass_config: {
             token_address: RecsType.BigInt,
             mint_recipient_address: RecsType.BigInt,
