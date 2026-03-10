@@ -12,7 +12,7 @@ pub mod mock_sharding_proxy {
     }
 }
 
-use dojo::model::Model;
+use dojo::model::{Model, ModelStorage};
 use dojo::sharding::component::{IContractComponentDispatcher, IContractComponentDispatcherTrait};
 use dojo::sharding::compute_dojo_field_slot;
 use dojo::sharding::request::ShardModel;
@@ -30,7 +30,11 @@ use starknet::ContractAddress;
 use crate::alias::ID;
 use crate::constants::{DEFAULT_NS, DEFAULT_NS_STR};
 use crate::models::resource::resource::{Resource, ResourceImpl, Resource_fields};
-use crate::models::structure::{Structure_fields};
+use crate::models::resource::production::building::{Building, Population, StructureBuildings};
+use crate::models::position::Coord;
+use crate::models::structure::{
+    Structure, StructureCategory, Structure_fields,
+};
 use crate::models::config::WorldConfigUtilImpl;
 use crate::systems::sharding::contracts::{
     IShardingSystemsDispatcher, IShardingSystemsDispatcherTrait, shard_helpers,
@@ -120,6 +124,23 @@ fn non_admin_caller() -> ContractAddress {
 
 fn zero_address() -> ContractAddress {
     0x0_felt252.try_into().unwrap()
+}
+
+fn seed_realm_structure(ref world: WorldStorage, entity_id: ID, owner: ContractAddress, coord_x: u32, coord_y: u32) {
+    let mut structure: Structure = Default::default();
+    structure.entity_id = entity_id;
+    structure.owner = owner;
+    structure.base.troop_max_guard_count = 1;
+    structure.base.troop_max_explorer_count = 1;
+    structure.base.created_at = starknet::get_block_timestamp().try_into().unwrap();
+    structure.base.category = StructureCategory::Realm.into();
+    structure.base.coord_x = coord_x;
+    structure.base.coord_y = coord_y;
+    structure.base.level = 1;
+    structure.metadata.realm_id = 1;
+    structure.metadata.order = 1;
+    structure.category = StructureCategory::Realm.into();
+    world.write_model(@structure);
 }
 
 /// request_shard locks the balance field and balances are readable unchanged.
@@ -325,7 +346,7 @@ fn test_field_selector_constants() {
     assert!(Structure_fields::METADATA == selector!("metadata"), "metadata mismatch");
 }
 
-/// request_shard_all shards all game models with default Set CRDT.
+/// request_shard_all registers the expected shard-critical Eternum models.
 #[test]
 fn test_request_shard_all() {
     let mut world = setup_world();
@@ -343,6 +364,63 @@ fn test_request_shard_all() {
     // Balance should be unchanged — shard just initialized, no settlement yet.
     let stone = ResourceImpl::read_balance(ref world, entity_id, 1);
     assert!(stone == 100, "STONE should be 100 after shard_all init");
+}
+
+/// request_shard_all must block writes to the per-structure building summary model.
+#[test]
+#[should_panic]
+fn test_request_shard_all_blocks_structure_buildings_write() {
+    let mut world = setup_world();
+    let entity_id: ID = 42;
+    seed_realm_structure(ref world, entity_id, caller(), 100, 100);
+
+    let proxy_address = deploy_mock_proxy();
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+
+    start_cheat_caller_address(system_addr, caller());
+    dispatcher.request_shard_all(proxy_address, array![entity_id].span());
+    stop_cheat_caller_address(system_addr);
+
+    world.write_model(
+        @StructureBuildings {
+            entity_id,
+            packed_counts_1: 1,
+            packed_counts_2: 0,
+            packed_counts_3: 0,
+            population: Population { current: 1, max: 5 },
+            coord: Coord { alt: false, x: 100, y: 100 },
+        },
+    );
+}
+
+/// request_shard_all must block writes to buildable hex slots around the realm.
+#[test]
+#[should_panic]
+fn test_request_shard_all_blocks_building_slot_write() {
+    let mut world = setup_world();
+    let entity_id: ID = 42;
+    seed_realm_structure(ref world, entity_id, caller(), 100, 100);
+
+    let proxy_address = deploy_mock_proxy();
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+
+    start_cheat_caller_address(system_addr, caller());
+    dispatcher.request_shard_all(proxy_address, array![entity_id].span());
+    stop_cheat_caller_address(system_addr);
+
+    world.write_model(
+        @Building {
+            outer_col: 100,
+            outer_row: 100,
+            inner_col: 11,
+            inner_row: 10,
+            category: 3,
+            bonus_percent: 0,
+            entity_id: 999,
+            outer_entity_id: entity_id,
+            paused: false,
+        },
+    );
 }
 
 #[test]
