@@ -14,6 +14,21 @@ const FINAL_THRESHOLD_SECONDS = 30;
 
 type UrgencyState = "default" | "warning" | "critical" | "final";
 
+const formatCompactTimeRemaining = (secondsRemaining: number): string => {
+  const displaySeconds = Math.max(0, Math.floor(secondsRemaining));
+  const hours = Math.floor(displaySeconds / 3600);
+  const minutes = Math.floor((displaySeconds % 3600) / 60);
+  const seconds = displaySeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${minutes.toString().padStart(2, "0")}m`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+  }
+  return `${seconds}s`;
+};
+
 export const GameEndTimer = memo(() => {
   const gameEndAt = useUIStore((state) => state.gameEndAt);
   const setTooltip = useUIStore((state) => state.setTooltip);
@@ -84,13 +99,7 @@ export const GameEndTimer = memo(() => {
     return currentBlockTimestamp >= gameEndAt || secondsForDisplay <= 0;
   }, [currentBlockTimestamp, gameEndAt, secondsForDisplay]);
 
-  const { hours, minutes } = useMemo(() => {
-    const hrs = Math.floor(secondsForDisplay / 3600);
-    const mins = Math.floor((secondsForDisplay % 3600) / 60);
-    return { hours: hrs, minutes: mins };
-  }, [secondsForDisplay]);
-
-  const timeDisplay = useMemo(() => `${hours}h ${minutes.toString().padStart(2, "0")}m`, [hours, minutes]);
+  const timeDisplay = useMemo(() => formatCompactTimeRemaining(secondsForDisplay), [secondsForDisplay]);
 
   const urgencyState = useMemo<UrgencyState>(() => {
     if (hasGameEnded) return "default";

@@ -19,7 +19,7 @@ import {
 import { useDojo, usePlayerStructures } from "@bibliothecadao/react";
 import { SeasonEnded } from "@bibliothecadao/torii";
 import { ContractAddress, ResourceArrivalInfo, WORLD_CONFIG_ID } from "@bibliothecadao/types";
-import { useEntityQuery } from "@dojoengine/react";
+import { useComponentValue, useEntityQuery } from "@dojoengine/react";
 import { getComponentValue, Has } from "@dojoengine/recs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { env } from "../../env";
@@ -547,19 +547,15 @@ const SeasonTimerStoreManager = () => {
   } = useDojo();
   const setGameEndAt = useUIStore((state) => state.setGameEndAt);
   const setSeasonStartMainAt = useUIStore((state) => state.setGameStartMainAt);
+  const worldConfig = useComponentValue(components.WorldConfig, getEntityIdFromKeys([WORLD_CONFIG_ID]));
 
   useEffect(() => {
-    // Try to get season_config.end_at from WorldConfig
-    const worldConfig = getComponentValue(components.WorldConfig, getEntityIdFromKeys([WORLD_CONFIG_ID]));
-    const endAt = worldConfig?.season_config?.end_at;
-    if (endAt && typeof endAt === "number") {
-      setGameEndAt(endAt);
-    }
-    const startMainAt = worldConfig?.season_config?.start_main_at;
-    if (startMainAt && typeof startMainAt === "number") {
-      setSeasonStartMainAt(startMainAt);
-    }
-  }, [components, setGameEndAt, setSeasonStartMainAt]);
+    const endAt = Number(worldConfig?.season_config?.end_at);
+    setGameEndAt(Number.isFinite(endAt) && endAt > 0 ? endAt : null);
+
+    const startMainAt = Number(worldConfig?.season_config?.start_main_at);
+    setSeasonStartMainAt(Number.isFinite(startMainAt) && startMainAt > 0 ? startMainAt : null);
+  }, [setGameEndAt, setSeasonStartMainAt, worldConfig?.season_config?.end_at, worldConfig?.season_config?.start_main_at]);
   return null;
 };
 
