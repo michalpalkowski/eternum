@@ -46,6 +46,8 @@ const SHARDING_REQUESTED_SELECTOR = hash.getSelectorFromName("ShardingRequested"
 const SHARD_REQUEST_POLL_INTERVAL_MS = 2000;
 const SHARD_REQUEST_TIMEOUT_MS = 120_000;
 const SHARD_REQUEST_RECEIPT_CAPTURE_KEY = "__eternum_last_shard_request_receipt__";
+const RECEIPT_RECOVERY_TIMEOUT_MS = 10_000;
+const RECEIPT_RECOVERY_POLL_INTERVAL_MS = 500;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
@@ -300,37 +302,6 @@ const resolveRequestedShardContextFromReceipt = (params: {
   throw new Error("ShardingRequested event not found in transaction receipt");
 };
 
-const resolveRequestedShardContextFromChain = async (params: {
-  txHash: string;
-  account: ExecutableAccount;
-  expectedGameContractAddress: string;
-  expectedShardContractAddress: string;
-}): Promise<RequestedShardContext> => {
-  const callContract = params.account.provider?.callContract;
-  if (typeof callContract !== "function") {
-    throw new Error("Account provider does not support callContract fallback");
-  }
-
-  const result = await callContract({
-    contractAddress: params.expectedShardContractAddress,
-    entrypoint: "get_shard_id",
-    calldata: [params.expectedGameContractAddress],
-  });
-
-  if (!Array.isArray(result) || result.length === 0) {
-    throw new Error("get_shard_id returned empty result");
-  }
-
-  const onchainShardId = normalizeFeltToHex(result[0], "get_shard_id[0]");
-
-  return {
-    txHash: params.txHash,
-    gameContractAddress: params.expectedGameContractAddress,
-    onchainShardId,
-    shardId: `${params.expectedGameContractAddress}@${onchainShardId}`,
-  };
-};
-
 const parseOperatorRejection = (payload: unknown): string | null => {
   if (!isRecord(payload)) {
     return null;
@@ -439,6 +410,39 @@ const resolveRequestedShardContextFromOperatorStatus = async (params: {
   }
 
   return buildRequestedShardContextFromShardId(candidate.shardId);
+};
+
+const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+const resolveRequestedShardContextFromOperatorStatusWithRetry = async (params: {
+  operatorUrl: string;
+  expectedGameContractAddress: string;
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+}): Promise<RequestedShardContext> => {
+  const timeoutMs = params.timeoutMs ?? RECEIPT_RECOVERY_TIMEOUT_MS;
+  const pollIntervalMs = params.pollIntervalMs ?? RECEIPT_RECOVERY_POLL_INTERVAL_MS;
+  const deadline = Date.now() + timeoutMs;
+  let lastError: Error | null = null;
+
+  while (Date.now() <= deadline) {
+    try {
+      return await resolveRequestedShardContextFromOperatorStatus({
+        operatorUrl: params.operatorUrl,
+        expectedGameContractAddress: params.expectedGameContractAddress,
+      });
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("Operator recovery failed");
+    }
+
+    if (Date.now() >= deadline) {
+      break;
+    }
+
+    await sleep(pollIntervalMs);
+  }
+
+  throw lastError ?? new Error("Operator recovery failed");
 };
 
 export const useShardRequest = (
@@ -636,36 +640,11 @@ export const useShardRequest = (
       } catch (operatorRecoveryError) {
         const operatorRecoveryMessage =
           operatorRecoveryError instanceof Error ? operatorRecoveryError.message : "Operator recovery failed";
-        const operatorConfig = await fetchOperatorConfig(operatorUrl);
-        const normalizedShardContractAddress = normalizeFeltToHex(
-          operatorConfig.shardContractAddress,
-          "shard_contract_address",
-        );
-        try {
-          const requestedContext = await resolveRequestedShardContextFromChain({
-            txHash: "0x0",
-            account,
-            expectedGameContractAddress: normalizedWorldAddress,
-            expectedShardContractAddress: normalizedShardContractAddress,
-          });
-          beginTrackingRequestedShard(requestedContext);
-          return;
-        } catch (chainRecoveryError) {
-          const chainRecoveryMessage =
-            chainRecoveryError instanceof Error ? chainRecoveryError.message : "On-chain recovery failed";
-          failRequest(
-            "SHARD_ID_RESOLUTION_FAILED",
-            `${operatorRecoveryMessage}; get_shard_id fallback failed: ${chainRecoveryMessage}`,
-          );
-          return;
-        }
+        failRequest("SHARD_ID_RESOLUTION_FAILED", operatorRecoveryMessage);
+        return;
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to recover existing shard";
-      if (message.startsWith("Failed to fetch operator config: HTTP")) {
-        failRequest("OPERATOR_CONFIG_FAILED", message);
-        return;
-      }
       failRequest("SHARD_ID_RESOLUTION_FAILED", message);
     }
   }, [
@@ -712,10 +691,7 @@ export const useShardRequest = (
         const shardingContractAddress = options?.shardingContractAddress?.trim() || shardingContract.address;
         const worldAddress = options?.worldAddress?.trim() || dojoConfig.manifest.world.address;
         const normalizedWorldAddress = normalizeFeltToHex(worldAddress, "world_address");
-        const normalizedShardContractAddress = normalizeFeltToHex(
-          operatorConfig.shardContractAddress,
-          "shard_contract_address",
-        );
+        const normalizedShardContractAddress = normalizeFeltToHex(operatorConfig.shardContractAddress, "shard_contract_address");
 
         const requestShardCall: Call = {
           contractAddress: shardingContractAddress,
@@ -732,34 +708,19 @@ export const useShardRequest = (
         } catch (error) {
           const message = error instanceof Error ? error.message : "request_shard_all transaction failed";
           if (isShardAlreadyLockedError(message)) {
-            let requestedContext: RequestedShardContext;
             try {
-              requestedContext = await resolveRequestedShardContextFromOperatorStatus({
+              const requestedContext = await resolveRequestedShardContextFromOperatorStatus({
                 operatorUrl,
                 expectedGameContractAddress: normalizedWorldAddress,
               });
+              beginTrackingRequestedShard(requestedContext);
+              return;
             } catch (operatorRecoveryError) {
               const operatorRecoveryMessage =
                 operatorRecoveryError instanceof Error ? operatorRecoveryError.message : "Operator recovery failed";
-              try {
-                requestedContext = await resolveRequestedShardContextFromChain({
-                  txHash: "0x0",
-                  account,
-                  expectedGameContractAddress: normalizedWorldAddress,
-                  expectedShardContractAddress: normalizedShardContractAddress,
-                });
-              } catch (chainRecoveryError) {
-                const chainRecoveryMessage =
-                  chainRecoveryError instanceof Error ? chainRecoveryError.message : "Failed to recover existing shard";
-                failRequest(
-                  "EXECUTE_FAILED",
-                  `${message}; operator recovery failed: ${operatorRecoveryMessage}; get_shard_id fallback failed: ${chainRecoveryMessage}`,
-                );
-                return;
-              }
+              failRequest("EXECUTE_FAILED", `${message}; operator recovery failed: ${operatorRecoveryMessage}`);
+              return;
             }
-            beginTrackingRequestedShard(requestedContext);
-            return;
           }
           failRequest("EXECUTE_FAILED", message);
           return;
@@ -807,20 +768,18 @@ export const useShardRequest = (
           });
 
           try {
-            requestedContext = await resolveRequestedShardContextFromChain({
-              txHash,
-              account,
+            requestedContext = await resolveRequestedShardContextFromOperatorStatusWithRetry({
+              operatorUrl,
               expectedGameContractAddress: normalizedWorldAddress,
-              expectedShardContractAddress: normalizedShardContractAddress,
             });
           } catch (fallbackError) {
             const fallbackMessage =
               fallbackError instanceof Error
                 ? fallbackError.message
-                : "Failed to resolve shard ID from on-chain fallback";
+                : "Failed to resolve shard ID from operator recovery";
             failRequest(
               "SHARD_ID_RESOLUTION_FAILED",
-              `${receiptResolutionMessage}; fallback get_shard_id failed: ${fallbackMessage}`,
+              `${receiptResolutionMessage}; operator recovery failed: ${fallbackMessage}`,
             );
             return;
           }

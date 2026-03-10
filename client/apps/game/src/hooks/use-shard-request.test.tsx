@@ -177,17 +177,13 @@ describe("useShardRequest", () => {
     expect(current.error).toContain("shards array");
   });
 
-  it("falls back to get_shard_id when receipt does not expose ShardingRequested event", async () => {
-    const callContract = vi.fn().mockResolvedValue(["0x9"]);
+  it("recovers shard id from operator status when receipt does not expose ShardingRequested event", async () => {
     const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const account: ExecutableAccount = {
       execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" }),
       waitForTransaction: vi
         .fn<NonNullable<ExecutableAccount["waitForTransaction"]>>()
         .mockResolvedValue({ events: [] }),
-      provider: {
-        callContract,
-      },
     };
 
     fetchMock
@@ -195,6 +191,23 @@ describe("useShardRequest", () => {
         new Response(JSON.stringify({ shard_contract_address: "0x1234abcd" }), {
           status: 200,
         }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            shards: [
+              {
+                phase: "gameplay_active",
+                katana_url: "http://localhost:5050",
+                torii_url: "http://localhost:8080",
+                torii_grpc_url: "http://localhost:18090",
+                game_contract_address: "0xabc123",
+                shard_id: "0xabc123@0x9",
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
       )
       .mockResolvedValueOnce(
         new Response(
@@ -239,11 +252,6 @@ describe("useShardRequest", () => {
     });
     await act(async () => Promise.resolve());
 
-    expect(callContract).toHaveBeenCalledWith({
-      contractAddress: "0x1234abcd",
-      entrypoint: "get_shard_id",
-      calldata: ["0xabc123"],
-    });
     expect(consoleWarnSpy).toHaveBeenCalledWith(
       "[ShardRequest] Failed to resolve ShardingRequested event from receipt",
       expect.objectContaining({
@@ -265,7 +273,6 @@ describe("useShardRequest", () => {
   });
 
   it("extracts ShardingRequested from wrapped transaction_receipt event shape", async () => {
-    const callContract = vi.fn();
     const account: ExecutableAccount = {
       execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" }),
       waitForTransaction: vi.fn<NonNullable<ExecutableAccount["waitForTransaction"]>>().mockResolvedValue({
@@ -281,9 +288,6 @@ describe("useShardRequest", () => {
           ],
         },
       }),
-      provider: {
-        callContract,
-      },
     };
 
     fetchMock
@@ -335,7 +339,6 @@ describe("useShardRequest", () => {
     });
     await act(async () => Promise.resolve());
 
-    expect(callContract).not.toHaveBeenCalled();
     expect(getHookState(latestState).phase).toBe("ready");
     expect(getHookState(latestState).targetShardId).toBe("0xabc123@0x9");
   });
