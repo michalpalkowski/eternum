@@ -32,6 +32,10 @@ export class ClientConfigManager {
   private static _instance: ClientConfigManager;
   private components!: ContractComponents;
   private config!: Config;
+  private structureLevelConfigCache = new Map<number, any>();
+  private resourceListCache = new Map<string, any>();
+  private structureLevelConfigCachePrimed = false;
+  private resourceListCachePrimed = false;
   buildingOutputs: Record<number, number> = {};
   complexSystemResourceInputs: Record<number, { resource: ResourcesIds; amount: number }[]> = {};
   complexSystemResourceOutput: Record<number, { resource: ResourcesIds; amount: number }> = {};
@@ -55,6 +59,7 @@ export class ClientConfigManager {
   public setDojo(components: ContractComponents, config: Config) {
     this.components = components;
     this.config = config;
+    this.resetRuntimeCaches();
 
     this.initializeResourceProduction();
     this.initializeHyperstructureTotalCosts();
@@ -63,6 +68,28 @@ export class ClientConfigManager {
     this.initializeStructureCosts();
     this.initializeResourceWeights();
     this.initializeMapCenter();
+  }
+
+  private resetRuntimeCaches() {
+    this.structureLevelConfigCache.clear();
+    this.resourceListCache.clear();
+    this.structureLevelConfigCachePrimed = false;
+    this.resourceListCachePrimed = false;
+
+    this.buildingOutputs = {};
+    this.complexSystemResourceInputs = {};
+    this.complexSystemResourceOutput = {};
+    this.resourceOutputRate = {};
+    this.simpleSystemResourceInputs = {};
+    this.simpleSystemResourceOutput = {};
+    this.laborOutputPerResource = {};
+    this.hyperstructureTotalCosts = [];
+    this.realmUpgradeCosts = {};
+    this.complexBuildingCosts = {};
+    this.simpleBuildingCosts = {};
+    this.structureCosts = {};
+    this.resourceWeightsKg = {};
+    this.mapCenter = MAP_CENTER;
   }
 
   public static instance(): ClientConfigManager {
@@ -105,6 +132,80 @@ export class ClientConfigManager {
     return getComponentValue(this.components.WorldConfig, worldConfigEntity);
   }
 
+  private getResourceListCacheKey(entityId: number, index: number): string {
+    return `${entityId}:${index}`;
+  }
+
+  private primeStructureLevelConfigCache() {
+    if (this.structureLevelConfigCachePrimed) {
+      return;
+    }
+
+    for (const entity of runQuery([Has(this.components.StructureLevelConfig)])) {
+      const value = getComponentValue(this.components.StructureLevelConfig, entity);
+      const level = Number((value as { level?: unknown } | null)?.level);
+      if (Number.isFinite(level)) {
+        this.structureLevelConfigCache.set(level, value);
+      }
+    }
+
+    this.structureLevelConfigCachePrimed = true;
+  }
+
+  private primeResourceListCache() {
+    if (this.resourceListCachePrimed) {
+      return;
+    }
+
+    for (const entity of runQuery([Has(this.components.ResourceList)])) {
+      const value = getComponentValue(this.components.ResourceList, entity);
+      const entityId = Number((value as { entity_id?: unknown } | null)?.entity_id);
+      const index = Number((value as { index?: unknown } | null)?.index);
+      if (Number.isFinite(entityId) && Number.isFinite(index)) {
+        this.resourceListCache.set(this.getResourceListCacheKey(entityId, index), value);
+      }
+    }
+
+    this.resourceListCachePrimed = true;
+  }
+
+  private getStructureLevelConfig(level: number) {
+    const cached = this.structureLevelConfigCache.get(level);
+    if (cached) {
+      return cached;
+    }
+
+    const directEntityKey = getEntityIdFromKeys([BigInt(level)]);
+    const directValue = getComponentValue(this.components.StructureLevelConfig, directEntityKey);
+    if (Number((directValue as { level?: unknown } | null)?.level) === level) {
+      this.structureLevelConfigCache.set(level, directValue);
+      return directValue;
+    }
+
+    this.primeStructureLevelConfigCache();
+    return this.structureLevelConfigCache.get(level);
+  }
+
+  private getResourceListValue(entityId: number, index: number) {
+    const cacheKey = this.getResourceListCacheKey(entityId, index);
+    const cached = this.resourceListCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const directEntityKey = getEntityIdFromKeys([BigInt(entityId), BigInt(index)]);
+    const directValue = getComponentValue(this.components.ResourceList, directEntityKey);
+    const directEntityId = Number((directValue as { entity_id?: unknown } | null)?.entity_id);
+    const directIndex = Number((directValue as { index?: unknown } | null)?.index);
+    if (directEntityId === entityId && directIndex === index) {
+      this.resourceListCache.set(cacheKey, directValue);
+      return directValue;
+    }
+
+    this.primeResourceListCache();
+    return this.resourceListCache.get(cacheKey);
+  }
+
   private initializeMapCenter() {
     const worldConfig = this.getWorldConfig();
     if (worldConfig) {
@@ -135,10 +236,7 @@ export class ClientConfigManager {
       const complexSystemResourceInputs: { resource: ResourcesIds; amount: number }[] = [];
 
       for (let index = 0; index < complexSystemResourceInputCount; index++) {
-        const resource = getComponentValue(
-          this.components.ResourceList,
-          getEntityIdFromKeys([BigInt(complexSystemResourceInputEntityId), BigInt(index)]),
-        );
+        const resource = this.getResourceListValue(Number(complexSystemResourceInputEntityId), index);
 
         if (resource) {
           const resource_type = resource.resource_type;
@@ -151,10 +249,7 @@ export class ClientConfigManager {
       const simpleSystemResourceInputEntityId = productionConfig?.simple_input_list_id ?? 0;
       const simpleSystemResourceInputs: { resource: ResourcesIds; amount: number }[] = [];
       for (let index = 0; index < simpleSystemResourceInputCount; index++) {
-        const resource = getComponentValue(
-          this.components.ResourceList,
-          getEntityIdFromKeys([BigInt(simpleSystemResourceInputEntityId), BigInt(index)]),
-        );
+        const resource = this.getResourceListValue(Number(simpleSystemResourceInputEntityId), index);
 
         if (resource) {
           const resource_type = resource.resource_type;
@@ -213,14 +308,11 @@ export class ClientConfigManager {
     const maxLevel = Number(worldConfig?.structure_max_level_config?.realm_max) || 0;
 
     for (let level = 1; level <= maxLevel; level++) {
-      const levelConfig = getComponentValue(this.components.StructureLevelConfig, getEntityIdFromKeys([BigInt(level)]));
+      const levelConfig = this.getStructureLevelConfig(level);
       if (levelConfig) {
         const inputs: { resource: ResourcesIds; amount: number }[] = [];
         for (let index = 0; index < levelConfig.required_resource_count; index++) {
-          const resource = getComponentValue(
-            this.components.ResourceList,
-            getEntityIdFromKeys([BigInt(levelConfig.required_resources_id), BigInt(index)]),
-          );
+          const resource = this.getResourceListValue(Number(levelConfig.required_resources_id), index);
           if (resource) {
             inputs.push({
               resource: resource.resource_type as ResourcesIds,
@@ -245,10 +337,7 @@ export class ClientConfigManager {
         const complexInputs: { resource: ResourcesIds; amount: number }[] = [];
 
         for (let index = 0; index < complexResourceCount; index++) {
-          const resource = getComponentValue(
-            this.components.ResourceList,
-            getEntityIdFromKeys([BigInt(complexEntityId), BigInt(index)]),
-          );
+          const resource = this.getResourceListValue(Number(complexEntityId), index);
 
           if (resource) {
             complexInputs.push({
@@ -266,10 +355,7 @@ export class ClientConfigManager {
         const simpleInputs: { resource: ResourcesIds; amount: number }[] = [];
 
         for (let index = 0; index < simpleResourceCount; index++) {
-          const resource = getComponentValue(
-            this.components.ResourceList,
-            getEntityIdFromKeys([BigInt(simpleEntityId), BigInt(index)]),
-          );
+          const resource = this.getResourceListValue(Number(simpleEntityId), index);
 
           if (resource) {
             simpleInputs.push({
