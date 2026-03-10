@@ -2,7 +2,7 @@ import { useDojo } from "@bibliothecadao/react";
 import { WORLD_CONFIG_ID } from "@bibliothecadao/types";
 import { useComponentValue } from "@dojoengine/react";
 import { getEntityIdFromKeys } from "@dojoengine/utils";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { env } from "../../../../env";
 import { useShardSettlement } from "@/hooks/use-shard-settlement";
 import { useShardRequest } from "@/hooks/use-shard-request";
@@ -63,24 +63,41 @@ export const ShardRequestButton = ({ entityId }: { entityId: number }) => {
 
 const ShardButton = ({ entityId, account }: { entityId: number; account: ExecutableAccount | null }) => {
   const operatorUrl = env.VITE_PUBLIC_SHARD_OPERATOR_URL;
-  const { phase, error, errorCode, requestShard, openShardTab, reset } = useShardRequest(account, operatorUrl ?? "");
+  const { phase, error, errorCode, targetShardId, requestShard, recoverShard, openShardTab, reset } = useShardRequest(
+    account,
+    operatorUrl ?? "",
+  );
+  const autoOpenRecoveredShardRef = useRef(false);
+
+  useEffect(() => {
+    if (phase !== "ready" || !autoOpenRecoveredShardRef.current) {
+      return;
+    }
+    autoOpenRecoveredShardRef.current = false;
+    openShardTab();
+  }, [openShardTab, phase]);
 
   const handleClick = () => {
     if (operatorUrl === undefined) {
       return;
     }
     if (phase === "idle") {
+      autoOpenRecoveredShardRef.current = false;
       void requestShard([entityId]);
       return;
     }
     if (phase === "ready") {
+      autoOpenRecoveredShardRef.current = false;
       openShardTab();
       return;
     }
     if (phase === "error") {
-      reset();
+      autoOpenRecoveredShardRef.current = true;
+      void recoverShard();
     }
   };
+
+  const isRecoverableError = phase === "error" && (targetShardId !== null || error?.toLowerCase().includes("locked by shard"));
 
   const label = (() => {
     switch (phase) {
@@ -91,7 +108,7 @@ const ShardButton = ({ entityId, account }: { entityId: number; account: Executa
       case "ready":
         return "Open Shard";
       case "error":
-        return "Retry";
+        return isRecoverableError ? "Recover Shard" : "Retry";
       default:
         return "Shard";
     }
@@ -112,6 +129,17 @@ const ShardButton = ({ entityId, account }: { entityId: number; account: Executa
           {errorCode !== null ? `[${errorCode}] ` : ""}
           {error}
         </span>
+      )}
+      {phase === "error" && (
+        <button
+          onClick={() => {
+            autoOpenRecoveredShardRef.current = false;
+            reset();
+          }}
+          className="bg-black/20 hover:bg-black/30 text-gold/80 text-xs font-semibold px-2 py-1 rounded transition-colors"
+        >
+          Reset
+        </button>
       )}
       {phase === "waiting" && <span className="text-amber-300 text-xs animate-pulse">Waiting for operator...</span>}
     </div>

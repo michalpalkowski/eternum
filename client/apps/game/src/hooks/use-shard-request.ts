@@ -238,6 +238,30 @@ const parseOperatorRejection = (payload: unknown): string | null => {
   return code === null ? reason : `${reason} (${code})`;
 };
 
+const fetchOperatorConfig = async (operatorUrl: string) => {
+  const configResponse = await fetch(`${operatorUrl}/config`);
+  if (!configResponse.ok) {
+    throw new Error(`Failed to fetch operator config: HTTP ${configResponse.status}`);
+  }
+  const configPayload: unknown = await configResponse.json();
+  return parseOperatorConfigResponse(configPayload);
+};
+
+const isShardAlreadyLockedError = (message: string): boolean =>
+  /slot locked by shard/i.test(message) || /locked by shard/i.test(message);
+
+const buildRequestedShardContextFromShardId = (shardId: string): RequestedShardContext => {
+  const parts = parseShardIdParts(shardId);
+  const normalizedOnchainShardId = normalizeOnchainShardId(parts.onchainShardId);
+
+  return {
+    txHash: "0x0",
+    gameContractAddress: parts.gameContractAddress,
+    onchainShardId: normalizedOnchainShardId,
+    shardId: `${parts.gameContractAddress}@${normalizedOnchainShardId}`,
+  };
+};
+
 export const useShardRequest = (
   account: ExecutableAccount | null,
   operatorUrl: string,
@@ -377,6 +401,81 @@ export const useShardRequest = (
     }
   }, [failRequest, operatorUrl, stopPolling]);
 
+  const beginTrackingRequestedShard = useCallback(
+    (requestedContext: RequestedShardContext) => {
+      stopPolling();
+      setShardUrls(null);
+      setTargetShardId(requestedContext.shardId);
+      setErrorCode(null);
+      setError(null);
+      setPhase("waiting");
+      setMainShardRequestState({
+        phase: "waiting",
+        targetShardId: requestedContext.shardId,
+      });
+      pollTargetRef.current = requestedContext;
+      pollStartedAtRef.current = Date.now();
+      pollRef.current = setInterval(() => {
+        void pollShardStatus();
+      }, SHARD_REQUEST_POLL_INTERVAL_MS);
+      void pollShardStatus();
+    },
+    [pollShardStatus, setMainShardRequestState, stopPolling],
+  );
+
+  const recoverShard = useCallback(async () => {
+    if (account === null) {
+      failRequest("MISSING_ACCOUNT", "Wallet account is required to recover an existing shard");
+      return;
+    }
+    if (operatorUrl.trim().length === 0) {
+      failRequest("MISSING_OPERATOR_URL", "Missing shard operator URL");
+      return;
+    }
+
+    const persistedTargetShardId = useShardStore.getState().mainShardTargetShardId;
+    const candidateShardId = targetShardId ?? persistedTargetShardId;
+    if (candidateShardId !== null) {
+      try {
+        beginTrackingRequestedShard(buildRequestedShardContextFromShardId(candidateShardId));
+        return;
+      } catch {
+        // Fall through to an on-chain lookup when the cached shard id is malformed.
+      }
+    }
+
+    try {
+      const operatorConfig = await fetchOperatorConfig(operatorUrl);
+      const worldAddress = options?.worldAddress?.trim() || dojoConfig.manifest.world.address;
+      const normalizedWorldAddress = normalizeFeltToHex(worldAddress, "world_address");
+      const normalizedShardContractAddress = normalizeFeltToHex(
+        operatorConfig.shardContractAddress,
+        "shard_contract_address",
+      );
+      const requestedContext = await resolveRequestedShardContextFromChain({
+        txHash: "0x0",
+        account,
+        expectedGameContractAddress: normalizedWorldAddress,
+        expectedShardContractAddress: normalizedShardContractAddress,
+      });
+      beginTrackingRequestedShard(requestedContext);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to recover existing shard";
+      if (message.startsWith("Failed to fetch operator config: HTTP")) {
+        failRequest("OPERATOR_CONFIG_FAILED", message);
+        return;
+      }
+      failRequest("SHARD_ID_RESOLUTION_FAILED", message);
+    }
+  }, [
+    account,
+    beginTrackingRequestedShard,
+    failRequest,
+    operatorUrl,
+    options?.worldAddress,
+    targetShardId,
+  ]);
+
   const requestShard = useCallback(
     async (entityIds: number[]) => {
       if (phase !== "idle") {
@@ -406,12 +505,7 @@ export const useShardRequest = (
       });
 
       try {
-        const configResponse = await fetch(`${operatorUrl}/config`);
-        if (!configResponse.ok) {
-          throw new Error(`Failed to fetch operator config: HTTP ${configResponse.status}`);
-        }
-        const configPayload: unknown = await configResponse.json();
-        const operatorConfig = parseOperatorConfigResponse(configPayload);
+        const operatorConfig = await fetchOperatorConfig(operatorUrl);
 
         const shardingContract = getContractByName(dojoConfig.manifest, "s1_eternum", "sharding_systems");
         const shardingContractAddress = options?.shardingContractAddress?.trim() || shardingContract.address;
@@ -436,6 +530,23 @@ export const useShardRequest = (
           executeResult = await account.execute([requestShardCall]);
         } catch (error) {
           const message = error instanceof Error ? error.message : "request_shard_all transaction failed";
+          if (isShardAlreadyLockedError(message)) {
+            try {
+              const requestedContext = await resolveRequestedShardContextFromChain({
+                txHash: "0x0",
+                account,
+                expectedGameContractAddress: normalizedWorldAddress,
+                expectedShardContractAddress: normalizedShardContractAddress,
+              });
+              beginTrackingRequestedShard(requestedContext);
+              return;
+            } catch (recoveryError) {
+              const recoveryMessage =
+                recoveryError instanceof Error ? recoveryError.message : "Failed to recover existing shard";
+              failRequest("EXECUTE_FAILED", `${message}; recovery via get_shard_id failed: ${recoveryMessage}`);
+              return;
+            }
+          }
           failRequest("EXECUTE_FAILED", message);
           return;
         }
@@ -494,18 +605,7 @@ export const useShardRequest = (
           }
         }
 
-        setTargetShardId(requestedContext.shardId);
-        setPhase("waiting");
-        setMainShardRequestState({
-          phase: "waiting",
-          targetShardId: requestedContext.shardId,
-        });
-        pollTargetRef.current = requestedContext;
-        pollStartedAtRef.current = Date.now();
-        pollRef.current = setInterval(() => {
-          void pollShardStatus();
-        }, SHARD_REQUEST_POLL_INTERVAL_MS);
-        void pollShardStatus();
+        beginTrackingRequestedShard(requestedContext);
       } catch (requestError) {
         const message = requestError instanceof Error ? requestError.message : "Shard request failed";
         failRequest("OPERATOR_CONFIG_FAILED", message);
@@ -518,8 +618,7 @@ export const useShardRequest = (
       options?.shardingContractAddress,
       options?.worldAddress,
       phase,
-      pollShardStatus,
-      setMainShardRequestState,
+      beginTrackingRequestedShard,
     ],
   );
 
@@ -557,6 +656,7 @@ export const useShardRequest = (
     shardUrls,
     targetShardId,
     requestShard,
+    recoverShard,
     openShardTab,
     reset,
   };

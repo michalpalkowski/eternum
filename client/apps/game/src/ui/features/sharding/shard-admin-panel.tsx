@@ -1,5 +1,5 @@
 import { getContractByName } from "@dojoengine/core";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAccountStore } from "@/hooks/store/use-account-store";
 import { useShardRequest } from "@/hooks/use-shard-request";
@@ -31,7 +31,7 @@ export const ShardAdminPanel = () => {
   const [worldAddress, setWorldAddress] = useState(dojoConfig.manifest.world.address);
   const [shardingContractAddress, setShardingContractAddress] = useState(defaultShardingContractAddress);
 
-  const { phase, error, errorCode, requestShard, openShardTab, reset, targetShardId } = useShardRequest(
+  const { phase, error, errorCode, requestShard, recoverShard, openShardTab, reset, targetShardId } = useShardRequest(
     (account as ExecutableAccount | null) ?? null,
     operatorUrl,
     {
@@ -39,6 +39,15 @@ export const ShardAdminPanel = () => {
       shardingContractAddress,
     },
   );
+  const autoOpenRecoveredShardRef = useRef(false);
+
+  useEffect(() => {
+    if (phase !== "ready" || !autoOpenRecoveredShardRef.current) {
+      return;
+    }
+    autoOpenRecoveredShardRef.current = false;
+    openShardTab();
+  }, [openShardTab, phase]);
 
   const parsedEntityId = parseEntityId(entityIdInput);
 
@@ -47,17 +56,22 @@ export const ShardAdminPanel = () => {
       return;
     }
     if (phase === "idle" && parsedEntityId !== null) {
+      autoOpenRecoveredShardRef.current = false;
       void requestShard([parsedEntityId]);
       return;
     }
     if (phase === "ready") {
+      autoOpenRecoveredShardRef.current = false;
       openShardTab();
       return;
     }
     if (phase === "error") {
-      reset();
+      autoOpenRecoveredShardRef.current = true;
+      void recoverShard();
     }
   };
+
+  const isRecoverableError = phase === "error" && (targetShardId !== null || error?.toLowerCase().includes("locked by shard"));
 
   const buttonLabel = (() => {
     switch (phase) {
@@ -68,7 +82,7 @@ export const ShardAdminPanel = () => {
       case "ready":
         return "Open Shard";
       case "error":
-        return "Reset";
+        return isRecoverableError ? "Recover Shard" : "Retry";
       default:
         return "Request Shard";
     }
@@ -115,6 +129,18 @@ export const ShardAdminPanel = () => {
         >
           {buttonLabel}
         </button>
+        {phase === "error" && (
+          <button
+            type="button"
+            onClick={() => {
+              autoOpenRecoveredShardRef.current = false;
+              reset();
+            }}
+            className="rounded-md bg-black/20 px-3 py-2 text-sm font-semibold text-gold/80 transition-colors hover:bg-black/30"
+          >
+            Reset
+          </button>
+        )}
         {phase === "waiting" && targetShardId !== null && (
           <span className="text-xs text-amber-300">Tracking shard: {targetShardId}</span>
         )}
