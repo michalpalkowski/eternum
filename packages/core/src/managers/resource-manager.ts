@@ -1,8 +1,9 @@
 // import { getEntityIdFromKeys, gramToKg, multiplyByPrecision } from "@/ui/utils/utils";
 import { BuildingType, ClientComponents, ID, Resource, ResourcesIds, RESOURCE_PRECISION } from "@bibliothecadao/types";
-import { ComponentValue, getComponentValue } from "@dojoengine/recs";
+import { ComponentValue } from "@dojoengine/recs";
 import { getEntityIdFromKeys } from "@dojoengine/utils";
 import { uuid } from "@latticexyz/utils";
+import { resolveComponentByNumericEntityId } from "../utils/component-resolution";
 import { divideByPrecision, getBuildingCount, gramToKg, kgToGram, multiplyByPrecision } from "../utils";
 import { configManager } from "./config-manager";
 
@@ -27,8 +28,12 @@ export class ResourceManager {
     return this._getResource();
   }
 
+  private _getResourceEntry() {
+    return resolveComponentByNumericEntityId(this.components.Resource, this.entityId);
+  }
+
   private _getResource() {
-    return getComponentValue(this.components.Resource, getEntityIdFromKeys([BigInt(this.entityId)]));
+    return this._getResourceEntry()?.value;
   }
 
   public isFood(resourceId: ResourcesIds): boolean {
@@ -79,11 +84,12 @@ export class ResourceManager {
   public optimisticResourceUpdate = (resourceId: ResourcesIds, actualResourceChange: number) => {
     const overrideId = uuid();
 
-    const entity = getEntityIdFromKeys([BigInt(this.entityId)]);
+    const resourceEntry = this._getResourceEntry();
+    const entity = resourceEntry?.entity ?? getEntityIdFromKeys([BigInt(this.entityId)]);
     const currentBalance = this.balance(resourceId);
     const weight = configManager.getResourceWeightKg(resourceId) || 0;
     // current weight in nanograms per unit with precision
-    const currentWeight = getComponentValue(this.components.Resource, entity)?.weight || { capacity: 0n, weight: 0n };
+    const currentWeight = resourceEntry?.value?.weight || { capacity: 0n, weight: 0n };
     const amountWithPrecision = BigInt(Math.floor(multiplyByPrecision(actualResourceChange)));
     const weightChange = BigInt(kgToGram(weight)) * amountWithPrecision;
 
@@ -591,10 +597,7 @@ export class ResourceManager {
 
   public getStoreCapacityKg(): { capacityKg: number; capacityUsedKg: number; quantity: number } {
     const resource = this._getResource()!;
-    const structureBuildings = getComponentValue(
-      this.components.StructureBuildings,
-      getEntityIdFromKeys([BigInt(this.entityId || 0)]),
-    );
+    const structureBuildings = resolveComponentByNumericEntityId(this.components.StructureBuildings, this.entityId || 0)?.value;
     const packBuildingCounts = [
       structureBuildings?.packed_counts_1 || 0n,
       structureBuildings?.packed_counts_2 || 0n,

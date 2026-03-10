@@ -1,9 +1,10 @@
 import { BuildingType, ClientComponents, ID, ResourceCost, ResourcesIds } from "@bibliothecadao/types";
 import { getComponentValue } from "@dojoengine/recs";
 import { configManager, getBuildingCount, getEntityIdFromKeys } from "..";
+import { resolveComponentByNumericEntityAndIndex, resolveComponentByNumericEntityId } from "./component-resolution";
 
 export const getBuildingQuantity = (entityId: ID, buildingType: BuildingType, components: ClientComponents) => {
-  const structureBuildings = getComponentValue(components.StructureBuildings, getEntityIdFromKeys([BigInt(entityId)]));
+  const structureBuildings = resolveComponentByNumericEntityId(components.StructureBuildings, entityId)?.value;
 
   const buildingCount = getBuildingCount(buildingType, [
     structureBuildings?.packed_counts_1 || 0n,
@@ -53,10 +54,7 @@ const resolveBuildingCostsFromComponents = (
 
   const costs: ResourceCost[] = [];
   for (let index = 0; index < costListCount; index++) {
-    const resource = getComponentValue(
-      components.ResourceList,
-      getEntityIdFromKeys([costListId, BigInt(index)]),
-    );
+    const resource = resolveComponentByNumericEntityAndIndex(components.ResourceList, Number(costListId), index)?.value;
 
     if (!resource) {
       continue;
