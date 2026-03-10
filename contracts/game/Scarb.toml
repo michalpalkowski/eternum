@@ -10,7 +10,8 @@ sierra-replace-ids = true
 [dependencies]
 starknet = "2.13.1"
 # dojo = { path = "/home/michal/Repos/dojo/crates/dojo/core" }
-dojo = { git = "https://github.com/michalpalkowski/dojo", branch = "feature/sharding" }
+# Pin exact Dojo revision so local-dev builds against the same audited sharding code every time.
+dojo = { git = "https://github.com/michalpalkowski/dojo", rev = "3e8d0b9fc46830075945ef85971b72384832eb27" }
 alexandria_math = { git = "https://github.com/keep-starknet-strange/alexandria.git", tag = "v0.5.2" }
 alexandria_data_structures = { git = "https://github.com/keep-starknet-strange/alexandria.git", tag = "v0.5.2" }
 achievement = { path = "/home/michal/Repos/arcade/packages/achievement" }
@@ -21,7 +22,7 @@ cubit = { git = "https://github.com/credence0x/cubit.git", branch = "feat/cairo-
 snforge_std = "0.51.2"
 assert_macros = "2.13"
 # dojo_snf_test = { path = "/home/michal/Repos/dojo/crates/dojo/dojo-snf-test" }
-dojo_snf_test = { git = "https://github.com/michalpalkowski/dojo", branch = "feature/sharding" }
+dojo_snf_test = { git = "https://github.com/michalpalkowski/dojo", rev = "3e8d0b9fc46830075945ef85971b72384832eb27" }
 openzeppelin_token = "2.0.0"
 openzeppelin = "2.0.0"
 
