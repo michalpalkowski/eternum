@@ -287,7 +287,9 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
   console.log("[DOJO SETUP COMPLETED]");
 
   const initialSyncResult = await initialSync(setupResult, uiStore, syncingStore.setInitialSyncProgress, {
-    enforceProtocolChecks: shardSessionParams !== null,
+    // Local worlds should fail fast on protocol/schema drift to avoid entering
+    // a partially hydrated game state (disabled construction, zeroed timers).
+    enforceProtocolChecks: shardSessionParams !== null || chain === "local",
   });
 
   console.log("[INITIAL SYNC COMPLETED]");

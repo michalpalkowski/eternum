@@ -82,6 +82,12 @@ const GLOBAL_STREAM_CLAUSE = buildModelKeysClause(GLOBAL_STREAM_MODELS);
 
 const MAP_CENTER_FELT = 2_147_483_646;
 const SPATIAL_BOOTSTRAP_HYDRATION_BATCH_SIZE = 64;
+const REQUIRED_BOOTSTRAP_CONFIG_MODELS = [
+  "BuildingCategoryConfig",
+  "ResourceFactoryConfig",
+  "ResourceList",
+  "StructureLevelConfig",
+] as const;
 
 const applyMapCenterOffset = (mapCenterOffset: number): void => {
   const manager = configManager as any;
@@ -430,28 +436,77 @@ const ensureWorldConfigReady = async (
       console.warn("[sync] WorldConfig SQL fallback query failed", sqlError);
     }
 
-    if (sqlMapCenterOffset !== null) {
-      applyMapCenterOffset(sqlMapCenterOffset);
-      console.warn("[sync] WorldConfig not materialized in RECS, but SQL confirms presence", {
-        fetchedCount,
-        recsEntityCount: worldConfigEntities.size,
-        mapCenterOffset: sqlMapCenterOffset,
-      });
-      return sqlMapCenterOffset;
-    }
-
     throw new Error(
-      `[sync] Protocol violation: WorldConfig missing after bootstrap sync (attempts=${maxAttempts}, delay_ms=${attemptDelayMs}, fetched_count=${fetchedCount}, recs_entity_count=${worldConfigEntities.size})`,
+      `[sync] Protocol violation (error_code=world_config_not_materialized): WorldConfig missing after bootstrap sync (attempts=${maxAttempts}, delay_ms=${attemptDelayMs}, fetched_count=${fetchedCount}, recs_entity_count=${worldConfigEntities.size}, sql_map_center_offset=${String(sqlMapCenterOffset)})`,
     );
   }
 
   const mapCenterOffset = Number(worldConfig.map_center_offset ?? 0);
+  const startMainAt = Number(worldConfig.season_config?.start_main_at ?? 0);
+  const endAt = Number(worldConfig.season_config?.end_at ?? 0);
+
+  if (!Number.isFinite(mapCenterOffset)) {
+    throw new Error(
+      `[sync] Protocol violation (error_code=schema_shape_mismatch): WorldConfig.map_center_offset is not numeric (${String(worldConfig.map_center_offset)})`,
+    );
+  }
+  if (!Number.isFinite(startMainAt) || !Number.isFinite(endAt) || startMainAt <= 0 || endAt <= 0 || endAt <= startMainAt) {
+    throw new Error(
+      `[sync] Protocol violation (error_code=world_config_timer_fields_missing): invalid season timing (start_main_at=${String(worldConfig.season_config?.start_main_at)}, end_at=${String(worldConfig.season_config?.end_at)})`,
+    );
+  }
+
   applyMapCenterOffset(mapCenterOffset);
   console.log("[sync] WorldConfig ready", {
     entityCount: worldConfigEntities.size,
     mapCenterOffset,
+    startMainAt,
+    endAt,
   });
   return mapCenterOffset;
+};
+
+const ensureBootstrapConfigModelsReady = async (setup: SetupResult): Promise<void> => {
+  const contractComponents = setup.network.contractComponents as any;
+  const requiredModels: Array<{
+    name: (typeof REQUIRED_BOOTSTRAP_CONFIG_MODELS)[number];
+    component: Component<Schema, Metadata, undefined> | undefined;
+  }> = REQUIRED_BOOTSTRAP_CONFIG_MODELS.map((name) => ({
+    name,
+    component: contractComponents[name],
+  }));
+
+  const missingComponents = requiredModels
+    .filter((entry) => entry.component === undefined)
+    .map((entry) => entry.name);
+  if (missingComponents.length > 0) {
+    throw new Error(
+      `[sync] Protocol violation (error_code=schema_shape_mismatch): missing required config components (${missingComponents.join(", ")})`,
+    );
+  }
+
+  const maxAttempts = 60;
+  const attemptDelayMs = 100;
+  let modelCounts: Record<string, number> = {};
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    modelCounts = Object.fromEntries(
+      requiredModels.map((entry) => [entry.name, runQuery([Has(entry.component as Component<any, any, any>)]).size]),
+    );
+
+    if (Object.values(modelCounts).every((count) => count > 0)) {
+      console.log("[sync] Bootstrap config models ready", { attempt, modelCounts });
+      return;
+    }
+
+    if (attempt < maxAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, attemptDelayMs));
+    }
+  }
+
+  throw new Error(
+    `[sync] Protocol violation (error_code=config_models_not_ready): config models missing after bootstrap sync (attempts=${maxAttempts}, delay_ms=${attemptDelayMs}, counts=${JSON.stringify(modelCounts)})`,
+  );
 };
 
 const hydrateSpatialStructuresFromSqlSnapshot = async (
@@ -617,6 +672,15 @@ export const initialSync = async (
       throw error;
     }
     console.warn("[sync] Non-fatal protocol check failed on main world", error);
+  }
+
+  try {
+    await ensureBootstrapConfigModelsReady(setup);
+  } catch (error) {
+    if (enforceProtocolChecks) {
+      throw error;
+    }
+    console.warn("[sync] Non-fatal protocol check failed for config model readiness", error);
   }
 
   updateProgress(50);

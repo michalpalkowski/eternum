@@ -16,7 +16,7 @@ export const setSqlApiBaseUrl = (baseUrl: string) => {
   sqlApi = new SqlApi(currentBaseUrl, cacheBaseUrl);
 };
 
-const getSqlApiBaseUrl = () => currentBaseUrl;
+export const getSqlApiBaseUrl = () => currentBaseUrl;
 
 export const fetchWorldConfigMapCenterOffset = async (): Promise<number | null> => {
   const query = encodeURIComponent(
