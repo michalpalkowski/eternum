@@ -52,8 +52,8 @@ import {
   Structure,
   StructureType,
 } from "@bibliothecadao/types";
-import { useComponentValue } from "@dojoengine/react";
-import { ComponentValue, getComponentValue } from "@dojoengine/recs";
+import { useComponentValue, useEntityQuery } from "@dojoengine/react";
+import { ComponentValue, Entity, getComponentValue, Has } from "@dojoengine/recs";
 import { getEntityIdFromKeys } from "@dojoengine/utils";
 import clsx from "clsx";
 import type { LucideIcon } from "lucide-react";
@@ -1081,11 +1081,13 @@ export const LeftCommandSidebar = memo(() => {
   const setStructureEntityId = useUIStore((state) => state.setStructureEntityId);
   const setSelectedHex = useUIStore((state) => state.setSelectedHex);
   const structures = useUIStore((state) => state.playerStructures);
+  const structuresWithKeys = structures as Array<{ entityId: number | string; recsEntityKey?: string }>;
   const toggleModal = useUIStore((state) => state.toggleModal);
   const { structureGroups, updateStructureGroup } = useStructureGroups();
   const { favorites, toggleFavorite } = useFavoriteStructures();
   const goToStructure = useGoToStructure(setup);
   const mode = useGameModeConfig();
+  const knownStructureEntities = useEntityQuery([Has(components.Structure)]);
 
   const [structureNameChange, setStructureNameChange] = useState<ComponentValue<
     ClientComponents["Structure"]["schema"]
@@ -1144,8 +1146,46 @@ export const LeftCommandSidebar = memo(() => {
     prevChatOpen.current = isChatOpen;
   }, [isChatOpen, setView, view]);
 
+  const selectedStructureEntityKey = useMemo(() => {
+    const numericStructureEntityId = Number(structureEntityId);
+    if (!Number.isFinite(numericStructureEntityId)) {
+      return undefined;
+    }
+
+    const selected = structuresWithKeys.find((item) => Number(item.entityId) === numericStructureEntityId);
+    if (selected?.recsEntityKey) {
+      const selectedStructure = getComponentValue(components.Structure, selected.recsEntityKey as Entity);
+      const selectedStructureEntityId = Number((selectedStructure as { entity_id?: unknown } | null)?.entity_id);
+      if (Number.isFinite(selectedStructureEntityId) && selectedStructureEntityId === numericStructureEntityId) {
+        return selected.recsEntityKey;
+      }
+    }
+
+    try {
+      const directEntityKey = getEntityIdFromKeys([BigInt(numericStructureEntityId)]);
+      const directStructure = getComponentValue(components.Structure, directEntityKey as Entity);
+      const directStructureEntityId = Number((directStructure as { entity_id?: unknown } | null)?.entity_id);
+      if (Number.isFinite(directStructureEntityId) && directStructureEntityId === numericStructureEntityId) {
+        return directEntityKey;
+      }
+    } catch {
+      // fall through to query scan
+    }
+
+    for (const candidate of knownStructureEntities) {
+      const candidateStructure = getComponentValue(components.Structure, candidate);
+      if (!candidateStructure) continue;
+      const candidateEntityId = Number((candidateStructure as { entity_id?: unknown }).entity_id);
+      if (Number.isFinite(candidateEntityId) && candidateEntityId === numericStructureEntityId) {
+        return candidate;
+      }
+    }
+
+    return undefined;
+  }, [components.Structure, knownStructureEntities, structureEntityId, structuresWithKeys]);
+
   // listen to structure updates
-  const structure = useComponentValue(components.Structure, getEntityIdFromKeys([BigInt(structureEntityId)]));
+  const structure = useComponentValue(components.Structure, selectedStructureEntityKey as Entity | undefined);
 
   const structureInfo = useMemo(() => {
     // Include structureNameVersion to refresh cached info when renames happen locally.
@@ -1153,13 +1193,18 @@ export const LeftCommandSidebar = memo(() => {
     return mode.structure.getEntityInfo(structureEntityId, ContractAddress(account.address), components);
   }, [structureEntityId, structure, account.address, components, structureNameVersion, mode]);
 
-  const isRealmOrVillage = useMemo(
-    () =>
+  const isRealmOrVillage = useMemo(() => {
+    const liveCategory = Number((structure as { base?: { category?: unknown } } | undefined)?.base?.category);
+    if (Number.isFinite(liveCategory)) {
+      return liveCategory === StructureType.Realm || liveCategory === StructureType.Village;
+    }
+
+    return (
       Boolean(structureInfo) &&
       (structureInfo?.structureCategory === StructureType.Realm ||
-        structureInfo?.structureCategory === StructureType.Village),
-    [structureInfo],
-  );
+        structureInfo?.structureCategory === StructureType.Village)
+    );
+  }, [structure, structureInfo]);
 
   const realmNavigationItems = useMemo(
     () =>

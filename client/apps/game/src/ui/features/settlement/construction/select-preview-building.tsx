@@ -129,14 +129,18 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
   const knownStructureEntities = useEntityQuery([Has(dojo.setup.components.Structure)]);
 
   const selectedStructureEntityKey = useMemo(() => {
-    const selected = playerStructures.find((structure) => Number(structure.entityId) === Number(entityId));
-    if (selected?.recsEntityKey) {
-      return selected.recsEntityKey;
-    }
-
     const numericEntityId = Number(entityId);
     if (!Number.isFinite(numericEntityId)) {
       return undefined;
+    }
+
+    const selected = playerStructures.find((structure) => Number(structure.entityId) === Number(entityId));
+    if (selected?.recsEntityKey) {
+      const selectedStructure = getComponentValue(dojo.setup.components.Structure, selected.recsEntityKey as Entity);
+      const selectedStructureEntityId = Number((selectedStructure as { entity_id?: unknown } | null)?.entity_id);
+      if (Number.isFinite(selectedStructureEntityId) && selectedStructureEntityId === numericEntityId) {
+        return selected.recsEntityKey;
+      }
     }
 
     for (const candidate of knownStructureEntities) {

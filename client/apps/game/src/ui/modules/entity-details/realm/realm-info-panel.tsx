@@ -121,14 +121,18 @@ export const RealmInfoPanel = memo(({ className }: { className?: string }) => {
   const goToStructure = useGoToStructure(setup);
   const knownStructureEntities = useEntityQuery([Has(components.Structure)]);
   const selectedStructureEntityKey = useMemo(() => {
-    const selected = playerStructures.find((structure) => Number(structure.entityId) === Number(structureEntityId));
-    if (selected?.recsEntityKey) {
-      return selected.recsEntityKey;
-    }
-
     const numericStructureEntityId = Number(structureEntityId);
     if (!Number.isFinite(numericStructureEntityId)) {
       return undefined;
+    }
+
+    const selected = playerStructures.find((structure) => Number(structure.entityId) === Number(structureEntityId));
+    if (selected?.recsEntityKey) {
+      const selectedStructure = getComponentValue(components.Structure, selected.recsEntityKey as Entity);
+      const selectedStructureEntityId = Number((selectedStructure as { entity_id?: unknown } | null)?.entity_id);
+      if (Number.isFinite(selectedStructureEntityId) && selectedStructureEntityId === numericStructureEntityId) {
+        return selected.recsEntityKey;
+      }
     }
 
     for (const candidate of knownStructureEntities) {

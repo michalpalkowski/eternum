@@ -225,7 +225,27 @@ export const createConstructionMenu = ({
     const buildingCosts = getBuildingCosts(structureEntityId, components, building, simpleCostEnabled);
 
     if (!buildingCosts) {
-      return null;
+      if (import.meta.env.DEV) {
+        logConstructionMenuDiagnostics("action-config-missing", {
+          structureEntityId,
+          label,
+          building,
+          resource: resource ?? null,
+          simpleCostEnabled,
+        });
+      }
+      const iconDescriptor = iconResource ?? resource ?? label;
+      return makeBuildingAction({
+        suffix,
+        label,
+        icon,
+        building,
+        view: LeftView.ConstructionView,
+        resource,
+        iconComponent: createResourceIconComponent(iconDescriptor, true),
+        disabled: true,
+        hint: "Configuration not synchronized",
+      });
     }
 
     const hasBalance = checkBalance(buildingCosts as any);

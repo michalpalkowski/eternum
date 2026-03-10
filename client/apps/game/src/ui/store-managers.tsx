@@ -458,16 +458,29 @@ const ButtonStateStoreManager = () => {
   const structureEntityId = useUIStore((state) => state.structureEntityId);
   const playerStructures = useUIStore((state) => state.playerStructures);
 
-  const structureIsMine = useMemo(
-    () => playerStructures.some((structure) => structure.entityId === structureEntityId),
-    [playerStructures, structureEntityId],
-  );
+  const structureIsMine = useMemo(() => {
+    const selectedStructureId = Number(structureEntityId);
+    if (!Number.isFinite(selectedStructureId)) {
+      return false;
+    }
+
+    return playerStructures.some((structure) => {
+      const playerStructureId = Number(structure.entityId);
+      return Number.isFinite(playerStructureId) && playerStructureId === selectedStructureId;
+    });
+  }, [playerStructures, structureEntityId]);
 
   useEffect(() => {
-    const seasonHasStarted = env.VITE_PUBLIC_SEASON_START_TIME < Date.now() / 1000;
+    const nowSeconds = Date.now() / 1000;
+    const seasonStartTime = Number(env.VITE_PUBLIC_SEASON_START_TIME);
+    const seasonHasStarted =
+      env.VITE_PUBLIC_CHAIN === "local" ||
+      !Number.isFinite(seasonStartTime) ||
+      seasonStartTime <= 0 ||
+      seasonStartTime < nowSeconds;
     const disableButtons = !structureIsMine || account.address === "0x0" || !seasonHasStarted;
     setDisableButtons(disableButtons);
-  }, [setDisableButtons, structureIsMine, account.address]);
+  }, [account.address, playerStructures, setDisableButtons, structureEntityId, structureIsMine]);
 
   return null;
 };
