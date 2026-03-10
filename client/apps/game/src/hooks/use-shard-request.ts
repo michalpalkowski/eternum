@@ -623,7 +623,7 @@ export const useShardRequest = (
         beginTrackingRequestedShard(buildRequestedShardContextFromShardId(candidateShardId));
         return;
       } catch {
-        // Fall through to an on-chain lookup when the cached shard id is malformed.
+        // Fall through to operator-status recovery when the cached shard id is malformed.
       }
     }
 
