@@ -2,6 +2,7 @@ import { getContractByName } from "@dojoengine/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { hash, type Call } from "starknet";
 import { dojoConfig } from "../../dojo-config";
+import { useShardStore } from "./store/use-shard-store";
 import {
   buildShardPlayUrl,
   parseShardIdParts,
@@ -220,6 +221,8 @@ export const useShardRequest = (
   const pollLockRef = useRef(false);
   const pollStartedAtRef = useRef<number | null>(null);
   const pollTargetRef = useRef<RequestedShardContext | null>(null);
+  const setMainShardRequestState = useShardStore((state) => state.setMainShardRequestState);
+  const clearMainShardRequestState = useShardStore((state) => state.clearMainShardRequestState);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current !== null) {
@@ -233,12 +236,19 @@ export const useShardRequest = (
 
   const failRequest = useCallback(
     (code: ShardRequestErrorCode, message: string) => {
+      const currentTargetShardId = pollTargetRef.current?.shardId ?? targetShardId;
       stopPolling();
       setErrorCode(code);
       setError(message);
       setPhase("error");
+      setMainShardRequestState({
+        phase: "error",
+        targetShardId: currentTargetShardId,
+        errorCode: code,
+        error: message,
+      });
     },
-    [stopPolling],
+    [setMainShardRequestState, stopPolling, targetShardId],
   );
 
   useEffect(() => stopPolling, [stopPolling]);
@@ -324,6 +334,10 @@ export const useShardRequest = (
       setErrorCode(null);
       setError(null);
       setPhase("ready");
+      setMainShardRequestState({
+        phase: "ready",
+        targetShardId: shardEntry.shardId,
+      });
     } catch (pollError) {
       const message = pollError instanceof Error ? pollError.message : "Failed to poll shard status";
       failRequest("POLL_FAILED", message);
@@ -355,6 +369,10 @@ export const useShardRequest = (
       setError(null);
       setShardUrls(null);
       setTargetShardId(null);
+      setMainShardRequestState({
+        phase: "requesting",
+        targetShardId: null,
+      });
 
       try {
         const configResponse = await fetch(`${operatorUrl}/config`);
@@ -429,6 +447,10 @@ export const useShardRequest = (
 
         setTargetShardId(requestedContext.shardId);
         setPhase("waiting");
+        setMainShardRequestState({
+          phase: "waiting",
+          targetShardId: requestedContext.shardId,
+        });
         pollTargetRef.current = requestedContext;
         pollStartedAtRef.current = Date.now();
         pollRef.current = setInterval(() => {
@@ -440,7 +462,16 @@ export const useShardRequest = (
         failRequest("OPERATOR_CONFIG_FAILED", message);
       }
     },
-    [account, failRequest, operatorUrl, options?.shardingContractAddress, options?.worldAddress, phase, pollShardStatus],
+    [
+      account,
+      failRequest,
+      operatorUrl,
+      options?.shardingContractAddress,
+      options?.worldAddress,
+      phase,
+      pollShardStatus,
+      setMainShardRequestState,
+    ],
   );
 
   const openShardTab = useCallback(() => {
@@ -467,7 +498,8 @@ export const useShardRequest = (
     setError(null);
     setShardUrls(null);
     setTargetShardId(null);
-  }, [stopPolling]);
+    clearMainShardRequestState();
+  }, [clearMainShardRequestState, stopPolling]);
 
   return {
     phase,

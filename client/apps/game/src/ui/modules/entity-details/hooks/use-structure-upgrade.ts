@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from "react";
 
+import { useMainShardWriteGuard } from "@/hooks/use-main-shard-write-guard";
 import { useBlockTimestamp } from "@/hooks/helpers/use-block-timestamp";
 import { useResolvedStructureEntityKey } from "@/hooks/helpers/use-resolved-structure-entity-key";
 import {
@@ -35,12 +36,15 @@ interface StructureUpgradeResult {
   missingRequirements: UpgradeRequirement[];
   isOwner: boolean;
   isMaxLevel: boolean;
+  isWriteBlocked: boolean;
+  writeBlockReason: string | null;
   handleUpgrade: () => Promise<void>;
 }
 
 export const useStructureUpgrade = (structureEntityId: number | null): StructureUpgradeResult | null => {
   const dojo = useDojo();
   const { currentDefaultTick } = useBlockTimestamp();
+  const { isWriteBlocked, writeBlockReason } = useMainShardWriteGuard();
   const realmEntity = useResolvedStructureEntityKey(structureEntityId);
 
   const liveStructure = useComponentValue(dojo.setup.components.Structure, realmEntity as any);
@@ -125,12 +129,13 @@ export const useStructureUpgrade = (structureEntityId: number | null): Structure
 
   const handleUpgrade = useCallback(async () => {
     if (!structureInfo) return;
+    if (isWriteBlocked) return;
 
     await dojo.setup.systemCalls.upgrade_realm({
       signer: dojo.account.account,
       realm_entity_id: structureInfo.entityId,
     });
-  }, [dojo.account.account, dojo.setup.systemCalls, structureInfo]);
+  }, [dojo.account.account, dojo.setup.systemCalls, isWriteBlocked, structureInfo]);
 
   if (!structureInfo) return null;
 
@@ -147,6 +152,8 @@ export const useStructureUpgrade = (structureEntityId: number | null): Structure
     missingRequirements,
     isOwner,
     isMaxLevel: nextLevel === null,
+    isWriteBlocked,
+    writeBlockReason,
     handleUpgrade,
   };
 };

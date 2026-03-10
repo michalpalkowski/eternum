@@ -144,9 +144,10 @@ export const RealmUpgradeCompact = () => {
 
   const { nextLevel, missingRequirements, requirements, canUpgrade, handleUpgrade, nextLevelName, isOwner } =
     upgradeInfo;
+  const upgradeDisabled = !canUpgrade || isUpgrading || upgradeInfo.isWriteBlocked;
 
   const onUpgrade = async () => {
-    if (!canUpgrade || isUpgrading || !isOwner) return;
+    if (!canUpgrade || isUpgrading || !isOwner || upgradeInfo.isWriteBlocked) return;
     setIsUpgrading(true);
     try {
       await handleUpgrade();
@@ -218,9 +219,10 @@ export const RealmUpgradeCompact = () => {
             variant={canUpgrade ? "gold" : "outline"}
             size="md"
             className="w-full"
-            disabled={!canUpgrade || isUpgrading}
+            disabled={upgradeDisabled}
             isLoading={isUpgrading}
             onClick={onUpgrade}
+            title={upgradeInfo.writeBlockReason ?? undefined}
           >
             {canUpgrade ? "Upgrade" : "Need resources"}
           </Button>

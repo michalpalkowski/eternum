@@ -1,5 +1,6 @@
 import { usePlayResourceSound } from "@/audio";
 import { useGameModeConfig } from "@/config/game-modes/use-game-mode-config";
+import { useMainShardWriteGuard } from "@/hooks/use-main-shard-write-guard";
 import { useResolvedStructureEntityKey } from "@/hooks/helpers/use-resolved-structure-entity-key";
 import { useUIStore } from "@/hooks/store/use-ui-store";
 import { BUILDING_IMAGES_PATH } from "@/ui/config";
@@ -114,6 +115,7 @@ type ResourceProductionStatus = {
 
 export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?: string; entityId: number }) => {
   const dojo = useDojo();
+  const { isWriteBlocked, writeBlockReason } = useMainShardWriteGuard();
 
   const currentDefaultTick = getBlockTimestamp().currentDefaultTick;
   const [timerTick, setTimerTick] = useState(0);
@@ -238,6 +240,10 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
 
   const handleAutoBuild = useCallback(
     async (target: { type: BuildingType; resource?: ResourcesIds }) => {
+      if (isWriteBlocked) {
+        toast.error(writeBlockReason ?? "Main-chain writes are blocked while a shard request is active.");
+        return;
+      }
       if (!realm?.position) {
         toast.error("Select a realm before building.");
         return;
@@ -313,15 +319,21 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
       dojo.setup.components,
       dojo.setup.systemCalls,
       entityId,
+      isWriteBlocked,
       realm?.position,
       setPreviewBuilding,
       setSelectedBuildingHex,
       useSimpleCost,
+      writeBlockReason,
     ],
   );
 
   const handleDestroyBuilding = useCallback(
     async (target: { type: BuildingType; resource?: ResourcesIds }) => {
+      if (isWriteBlocked) {
+        toast.error(writeBlockReason ?? "Main-chain writes are blocked while a shard request is active.");
+        return;
+      }
       if (!realm?.position) {
         toast.error("Select a realm before destroying.");
         return;
@@ -373,15 +385,21 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
       dojo.setup.components,
       dojo.setup.systemCalls,
       entityId,
+      isWriteBlocked,
       previewBuilding?.resource,
       previewBuilding?.type,
       realm?.position,
       setPreviewBuilding,
+      writeBlockReason,
     ],
   );
 
   const handlePauseResumeAll = useCallback(
     async (target: { type: BuildingType; resource?: ResourcesIds }) => {
+      if (isWriteBlocked) {
+        toast.error(writeBlockReason ?? "Main-chain writes are blocked while a shard request is active.");
+        return;
+      }
       if (!realm?.position) {
         toast.error("Select a realm before managing production.");
         return;
@@ -431,7 +449,15 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
         });
       }
     },
-    [dojo.account.account, dojo.setup.components, dojo.setup.systemCalls, entityId, realm?.position],
+    [
+      dojo.account.account,
+      dojo.setup.components,
+      dojo.setup.systemCalls,
+      entityId,
+      isWriteBlocked,
+      realm?.position,
+      writeBlockReason,
+    ],
   );
 
   const existingBuildings = realm?.position
@@ -685,12 +711,14 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
                   resourceId === ResourcesIds.Mithral ||
                   resourceId === ResourcesIds.Adamantine);
               const canBuild = !isLaborLockedResource && hasBalance && realm?.hasCapacity && hasEnoughPopulation;
-              const disabledReason = isRealmFull
-                ? "Realm full"
-                : isLaborLockedResource
-                  ? "Switch to Resource mode to create this building."
-                  : undefined;
-              const disabled = isLaborLockedResource || isRealmFull;
+              const disabledReason = isWriteBlocked
+                ? writeBlockReason ?? undefined
+                : isRealmFull
+                  ? "Realm full"
+                  : isLaborLockedResource
+                    ? "Switch to Resource mode to create this building."
+                    : undefined;
+              const disabled = isWriteBlocked || isLaborLockedResource || isRealmFull;
               const buildKey = building.toString();
               const isPending = Boolean(pendingBuilds[buildKey]);
               const count = getBuildingCountFor(building);
@@ -706,7 +734,7 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
                   buildingId={building}
                   resourceId={resourceId}
                   onClick={() => {
-                    if (!canBuild || isRealmFull) {
+                    if (!canBuild || isRealmFull || isWriteBlocked) {
                       return;
                     }
                     if (previewBuilding?.type === building && previewBuilding?.resource === resourceId) {
@@ -735,13 +763,13 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
                   disabledReason={disabledReason}
                   count={count}
                   onBuild={() => handleAutoBuild({ type: building, resource: resourceId })}
-                  buildDisabled={!canBuild || isPending || isRealmFull}
+                  buildDisabled={!canBuild || isPending || isRealmFull || isWriteBlocked}
                   buildLoading={isPending}
                   onDestroy={() => handleDestroyBuilding({ type: building, resource: resourceId })}
-                  destroyDisabled={destroyDisabled}
+                  destroyDisabled={destroyDisabled || isWriteBlocked}
                   destroyLoading={destroyPending}
                   onPauseResumeAll={() => handlePauseResumeAll({ type: building, resource: resourceId })}
-                  pauseResumeAllDisabled={count <= 0 || pauseResumePending}
+                  pauseResumeAllDisabled={count <= 0 || pauseResumePending || isWriteBlocked}
                   pauseResumeAllLoading={pauseResumePending}
                   allPaused={allPausedState ?? false}
                 />
@@ -792,7 +820,11 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
                   building === BuildingType.WorkersHut
                     ? hasBalance
                     : hasBalance && realm?.hasCapacity && hasEnoughPopulation;
-                const disabledReason = isRealmFull ? "Realm full" : undefined;
+                const disabledReason = isWriteBlocked
+                  ? writeBlockReason ?? undefined
+                  : isRealmFull
+                    ? "Realm full"
+                    : undefined;
                 const disabled = Boolean(disabledReason);
                 const buildKey = building.toString();
                 const isPending = Boolean(pendingBuilds[buildKey]);
@@ -819,7 +851,7 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
                     key={index}
                     buildingId={building}
                     onClick={() => {
-                      if (!canBuild || isRealmFull) {
+                      if (!canBuild || isRealmFull || isWriteBlocked) {
                         return;
                       }
                       if (previewBuilding?.type === building) {
@@ -853,13 +885,13 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
                     disabledReason={disabledReason}
                     count={count}
                     onBuild={() => handleAutoBuild({ type: building })}
-                    buildDisabled={!canBuild || isPending || isRealmFull}
+                    buildDisabled={!canBuild || isPending || isRealmFull || isWriteBlocked}
                     buildLoading={isPending}
                     onDestroy={() => handleDestroyBuilding({ type: building })}
-                    destroyDisabled={destroyDisabled}
+                    destroyDisabled={destroyDisabled || isWriteBlocked}
                     destroyLoading={destroyPending}
                     onPauseResumeAll={showPauseResume ? () => handlePauseResumeAll({ type: building }) : undefined}
-                    pauseResumeAllDisabled={count <= 0 || pauseResumePending}
+                    pauseResumeAllDisabled={count <= 0 || pauseResumePending || isWriteBlocked}
                     pauseResumeAllLoading={pauseResumePending}
                     allPaused={allPausedState ?? false}
                   />
@@ -958,11 +990,13 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
                             const isTierLockedInSimpleMode = useSimpleCost && (info?.tier ?? 0) > 1;
                             const canBuild =
                               !isTierLockedInSimpleMode && hasBalance && realm?.hasCapacity && hasEnoughPopulation;
-                            const disabledReason = isRealmFull
-                              ? "Realm full"
-                              : isTierLockedInSimpleMode && info?.tier
-                                ? `Switch to Resource mode to build Tier ${info.tier} military buildings.`
-                                : undefined;
+                            const disabledReason = isWriteBlocked
+                              ? writeBlockReason ?? undefined
+                              : isRealmFull
+                                ? "Realm full"
+                                : isTierLockedInSimpleMode && info?.tier
+                                  ? `Switch to Resource mode to build Tier ${info.tier} military buildings.`
+                                  : undefined;
                             const buildKey = building.toString();
                             const isPending = Boolean(pendingBuilds[buildKey]);
                             const count = getBuildingCountFor(building);
@@ -982,7 +1016,7 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
                                 key={index}
                                 buildingId={building}
                                 onClick={() => {
-                                  if (!canBuild || isRealmFull) return;
+                                  if (!canBuild || isRealmFull || isWriteBlocked) return;
                                   if (previewBuilding?.type === building) {
                                     setPreviewBuilding(null);
                                   } else {
@@ -1007,17 +1041,17 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
                                 }
                                 hasFunds={hasBalance}
                                 hasPopulation={hasEnoughPopulation}
-                                disabled={isTierLockedInSimpleMode || isRealmFull}
+                                disabled={isWriteBlocked || isTierLockedInSimpleMode || isRealmFull}
                                 disabledReason={disabledReason}
                                 count={count}
                                 onBuild={() => handleAutoBuild({ type: building })}
-                                buildDisabled={!canBuild || isPending || isRealmFull}
+                                buildDisabled={!canBuild || isPending || isRealmFull || isWriteBlocked}
                                 buildLoading={isPending}
                                 onDestroy={() => handleDestroyBuilding({ type: building })}
-                                destroyDisabled={destroyDisabled}
+                                destroyDisabled={destroyDisabled || isWriteBlocked}
                                 destroyLoading={destroyPending}
                                 onPauseResumeAll={() => handlePauseResumeAll({ type: building })}
-                                pauseResumeAllDisabled={count <= 0 || pauseResumePending}
+                                pauseResumeAllDisabled={count <= 0 || pauseResumePending || isWriteBlocked}
                                 pauseResumeAllLoading={pauseResumePending}
                                 allPaused={allPausedState ?? false}
                               />

@@ -678,7 +678,7 @@ const StructureLevelUpButton = ({ structureEntityId, className }: StructureLevel
   const isAtMaxLevel = upgradeInfo.isMaxLevel || currentLevel >= maxLevel;
   const meetsRequirements = (upgradeInfo.missingRequirements?.length ?? 0) === 0;
   const canUpgrade = upgradeInfo.isOwner && !isAtMaxLevel && meetsRequirements;
-  const isDisabled = !canUpgrade || isUpgrading || isAtMaxLevel;
+  const isDisabled = !canUpgrade || isUpgrading || isAtMaxLevel || upgradeInfo.isWriteBlocked;
   const shouldGlow = canUpgrade && !isDisabled;
   const nextLevel = upgradeInfo.nextLevel ?? 0;
 
@@ -778,6 +778,7 @@ const StructureLevelUpButton = ({ structureEntityId, className }: StructureLevel
             : "border-gold/20 bg-black/30 text-gold/50 cursor-not-allowed",
         )}
         aria-label="Level up realm"
+        title={upgradeInfo.writeBlockReason ?? "Level up realm"}
       >
         {isUpgrading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : renderIcon()}
       </button>

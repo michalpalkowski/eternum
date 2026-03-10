@@ -1,3 +1,4 @@
+import { useMainShardWriteGuard } from "@/hooks/use-main-shard-write-guard";
 import { sqlApi } from "@/services/api";
 import { Position as PositionInterface } from "@bibliothecadao/eternum";
 
@@ -36,6 +37,7 @@ import clsx from "clsx";
 import LockIcon from "lucide-react/dist/esm/icons/lock";
 import Pen from "lucide-react/dist/esm/icons/pen";
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 
 type ArmyManagementCardProps = {
   owner_entity: ID;
@@ -101,6 +103,7 @@ export const ArmyCreate = ({
     account: { account },
   } = useDojo();
   const queryClient = useQueryClient();
+  const { isWriteBlocked, writeBlockReason } = useMainShardWriteGuard();
 
   const currentDefaultTick = getBlockTimestamp().currentDefaultTick;
 
@@ -166,6 +169,10 @@ export const ArmyCreate = ({
   }, [freeDirections]);
 
   const handleBuyArmy = async (isExplorer: boolean, troopType: TroopType, troopTier: TroopTier, troopCount: number) => {
+    if (isWriteBlocked) {
+      toast.error(writeBlockReason ?? "Main-chain writes are blocked while a shard request is active.");
+      return;
+    }
     setIsLoading(true);
 
     const homeDirection =
@@ -483,9 +490,10 @@ export const ArmyCreate = ({
       <div className="flex justify-center gap-2 w-full mt-6">
         <Button
           className={clsx(onCancel ? "w-1/2" : "w-full", !canCreate && "opacity-50 cursor-not-allowed")}
-          disabled={!canCreate}
+          disabled={!canCreate || isWriteBlocked}
           variant="gold"
           isLoading={isLoading}
+          title={writeBlockReason ?? undefined}
           onClick={() =>
             handleBuyArmy(isExplorer, selectedTroopType, selectedTier, troopCount).finally(() => {
               setTroopCount(0);

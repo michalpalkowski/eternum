@@ -1,3 +1,4 @@
+import { useMainShardWriteGuard } from "@/hooks/use-main-shard-write-guard";
 import { useUIStore } from "@/hooks/store/use-ui-store";
 import Button from "@/ui/design-system/atoms/button";
 import { ResourceCost } from "@/ui/design-system/molecules/resource-cost";
@@ -6,6 +7,7 @@ import { configManager, divideByPrecision, getBalance, getEntityIdFromKeys } fro
 import { useDojo } from "@bibliothecadao/react";
 import { ContractAddress, ID, LEVEL_DESCRIPTIONS, RealmLevels, ResourcesIds } from "@bibliothecadao/types";
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 // todo: fix this
 import { sqlApi } from "@/services/api";
 import { getBlockTimestamp } from "@bibliothecadao/eternum";
@@ -29,6 +31,7 @@ export const Castle = () => {
   const [isLevelUpLoading, setIsLevelUpLoading] = useState(false);
   const [wonderStructureId, setWonderStructureId] = useState<ID | null>(null);
   const [showMissingResources, setShowMissingResources] = useState(false);
+  const { isWriteBlocked, writeBlockReason } = useMainShardWriteGuard();
 
   const productionBoostBonus = useComponentValue(
     dojo.setup.components.ProductionBoostBonus,
@@ -119,6 +122,10 @@ export const Castle = () => {
   }, [getNextRealmLevel, structureEntityId, currentDefaultTick, dojo.setup.components]);
 
   const levelUpRealm = async () => {
+    if (isWriteBlocked) {
+      toast.error(writeBlockReason ?? "Main-chain writes are blocked while a shard request is active.");
+      return;
+    }
     setIsLevelUpLoading(true);
     if (!structure) return;
 
@@ -189,10 +196,11 @@ export const Castle = () => {
               {getNextRealmLevel && isOwner && (
                 <Button
                   variant={checkBalance ? "gold" : "outline"}
-                  disabled={!checkBalance}
+                  disabled={!checkBalance || isWriteBlocked}
                   isLoading={isLevelUpLoading}
                   onClick={levelUpRealm}
                   className="w-full"
+                  title={writeBlockReason ?? undefined}
                 >
                   {checkBalance ? `Upgrade to ${RealmLevels[getNextRealmLevel]}` : "Need Resources"}
                   <ArrowUpRightIcon className="w-4 h-4 ml-2" />

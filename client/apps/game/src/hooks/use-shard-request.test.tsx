@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hash } from "starknet";
 import type { ExecutableAccount } from "@/sharding/types";
+import { useShardStore } from "./store/use-shard-store";
 import { useShardRequest } from "./use-shard-request";
 
 const { dojoConfigMock } = vi.hoisted(() => ({
@@ -61,6 +62,7 @@ describe("useShardRequest", () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     vi.useFakeTimers();
     latestState = null;
+    useShardStore.getState().clearMainShardRequestState();
 
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -275,11 +277,15 @@ describe("useShardRequest", () => {
     });
     expect(getHookState(latestState).phase).toBe("waiting");
     expect(getHookState(latestState).targetShardId).toBe("0xabc123@0x9");
+    expect(useShardStore.getState().mainShardRequestPhase).toBe("waiting");
+    expect(useShardStore.getState().mainShardTargetShardId).toBe("0xabc123@0x9");
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2_000);
     });
     expect(getHookState(latestState).phase).toBe("ready");
     expect(getHookState(latestState).shardUrls?.shardId).toBe("0xabc123@0x9");
+    expect(useShardStore.getState().mainShardRequestPhase).toBe("ready");
+    expect(useShardStore.getState().mainShardTargetShardId).toBe("0xabc123@0x9");
   });
 });

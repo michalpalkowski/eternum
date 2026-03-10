@@ -7,6 +7,8 @@ import {
   type RuntimeContext,
 } from "@/sharding/runtime-context";
 
+export type MainShardRequestPhase = "idle" | "requesting" | "waiting" | "ready" | "error";
+
 const resolveCanonicalMainGameReturnUrl = (
   params: Pick<ShardSessionParams, "mainUrl">,
   runtimeContext?: RuntimeContext | null,
@@ -40,9 +42,20 @@ interface ShardState {
   shardToriiGrpcUrl: string | null;
   mainUrl: string | null;
   mainGameReturnUrl: string | null;
+  mainShardRequestPhase: MainShardRequestPhase;
+  mainShardTargetShardId: string | null;
+  mainShardRequestErrorCode: string | null;
+  mainShardRequestError: string | null;
   setRuntimeContext: (context: RuntimeContext) => void;
   enterShardMode: (params: ShardSessionParams, runtimeContext?: RuntimeContext | null) => void;
   clearShardMode: () => void;
+  setMainShardRequestState: (state: {
+    phase: MainShardRequestPhase;
+    targetShardId?: string | null;
+    errorCode?: string | null;
+    error?: string | null;
+  }) => void;
+  clearMainShardRequestState: () => void;
 }
 
 export const useShardStore = create<ShardState>()((set) => ({
@@ -55,6 +68,10 @@ export const useShardStore = create<ShardState>()((set) => ({
   shardToriiGrpcUrl: null,
   mainUrl: null,
   mainGameReturnUrl: null,
+  mainShardRequestPhase: "idle",
+  mainShardTargetShardId: null,
+  mainShardRequestErrorCode: null,
+  mainShardRequestError: null,
   setRuntimeContext: (context: RuntimeContext) => {
     if (context.kind !== "shard") {
       set({
@@ -67,6 +84,10 @@ export const useShardStore = create<ShardState>()((set) => ({
         shardToriiGrpcUrl: null,
         mainUrl: null,
         mainGameReturnUrl: null,
+        mainShardRequestPhase: "idle",
+        mainShardTargetShardId: null,
+        mainShardRequestErrorCode: null,
+        mainShardRequestError: null,
       });
       return;
     }
@@ -82,6 +103,10 @@ export const useShardStore = create<ShardState>()((set) => ({
       shardToriiGrpcUrl: context.shard.toriiGrpcUrl,
       mainUrl: canonicalMainGameReturnUrl,
       mainGameReturnUrl: canonicalMainGameReturnUrl,
+      mainShardRequestPhase: "idle",
+      mainShardTargetShardId: null,
+      mainShardRequestErrorCode: null,
+      mainShardRequestError: null,
     });
   },
   enterShardMode: ({ shardId, operatorUrl, rpcUrl, toriiUrl, toriiGrpcUrl, mainUrl }, runtimeContext?: RuntimeContext | null) => {
@@ -109,6 +134,10 @@ export const useShardStore = create<ShardState>()((set) => ({
       shardToriiGrpcUrl: toriiGrpcUrl,
       mainUrl: canonicalMainGameReturnUrl,
       mainGameReturnUrl: canonicalMainGameReturnUrl,
+      mainShardRequestPhase: "idle",
+      mainShardTargetShardId: null,
+      mainShardRequestErrorCode: null,
+      mainShardRequestError: null,
     });
   },
   clearShardMode: () => {
@@ -123,6 +152,26 @@ export const useShardStore = create<ShardState>()((set) => ({
       shardToriiGrpcUrl: null,
       mainUrl: null,
       mainGameReturnUrl: null,
+      mainShardRequestPhase: "idle",
+      mainShardTargetShardId: null,
+      mainShardRequestErrorCode: null,
+      mainShardRequestError: null,
     }));
+  },
+  setMainShardRequestState: ({ phase, targetShardId = null, errorCode = null, error = null }) => {
+    set({
+      mainShardRequestPhase: phase,
+      mainShardTargetShardId: targetShardId,
+      mainShardRequestErrorCode: errorCode,
+      mainShardRequestError: error,
+    });
+  },
+  clearMainShardRequestState: () => {
+    set({
+      mainShardRequestPhase: "idle",
+      mainShardTargetShardId: null,
+      mainShardRequestErrorCode: null,
+      mainShardRequestError: null,
+    });
   },
 }));
