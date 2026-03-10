@@ -179,6 +179,10 @@ const fetchPlayerRegistration = async (toriiBaseUrl: string, playerAddress: stri
 };
 
 const fetchPrizeDistributionAddress = async (worldName: string, chain: Chain): Promise<string | null> => {
+  if (chain === "local") {
+    return null;
+  }
+
   try {
     const factorySqlBaseUrl = getFactorySqlBaseUrl(chain);
     if (!factorySqlBaseUrl) return null;

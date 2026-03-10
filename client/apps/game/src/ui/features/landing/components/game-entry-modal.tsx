@@ -811,6 +811,17 @@ export const GameEntryModal = ({
       debugLog(worldName, "Running hyperstructure status check...");
       try {
         const { components } = setupResult;
+        const playerAddress = account?.address;
+
+        if (!playerAddress) {
+          debugLog(worldName, "Skipping hyperstructure check - missing player address");
+          setHyperstructures([]);
+          setNeedsHyperstructureInit(false);
+          setHyperstructureCheckComplete(true);
+          return;
+        }
+
+        const playerAddressBigInt = BigInt(playerAddress);
 
         // Import Dojo utilities
         const { getHyperstructureProgress, getHyperstructureName } = await import("@bibliothecadao/eternum");
@@ -825,6 +836,7 @@ export const GameEntryModal = ({
         for (const entity of hyperstructureEntities) {
           const structure = getComponentValue(components.Structure, entity);
           if (!structure) continue;
+          if (structure.owner !== playerAddressBigInt) continue;
 
           const entityId = Number(structure.entity_id);
           const progress = getHyperstructureProgress(entityId, components);
@@ -866,7 +878,7 @@ export const GameEntryModal = ({
     };
 
     checkHyperstructures();
-  }, [bootstrapStatus, setupResult, isSpectateMode, isForgeMode, worldName]);
+  }, [bootstrapStatus, setupResult, account, isSpectateMode, isForgeMode, worldName]);
 
   // Start bootstrap when modal opens
   useEffect(() => {
