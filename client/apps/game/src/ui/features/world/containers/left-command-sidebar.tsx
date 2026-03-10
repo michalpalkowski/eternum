@@ -2,6 +2,7 @@ import type { VillageIconKey } from "@/config/game-modes";
 import { useGameModeConfig } from "@/config/game-modes/use-game-mode-config";
 import { useBlockTimestamp } from "@/hooks/helpers/use-block-timestamp";
 import { useGoToStructure } from "@/hooks/helpers/use-navigate";
+import { useResolvedStructureEntityKey } from "@/hooks/helpers/use-resolved-structure-entity-key";
 import { useAccountStore } from "@/hooks/store/use-account-store";
 import { useUIStore } from "@/hooks/store/use-ui-store";
 import { LeftView } from "@/types";
@@ -52,8 +53,8 @@ import {
   Structure,
   StructureType,
 } from "@bibliothecadao/types";
-import { useComponentValue, useEntityQuery } from "@dojoengine/react";
-import { ComponentValue, Entity, getComponentValue, Has } from "@dojoengine/recs";
+import { useComponentValue } from "@dojoengine/react";
+import { ComponentValue, getComponentValue } from "@dojoengine/recs";
 import { getEntityIdFromKeys } from "@dojoengine/utils";
 import clsx from "clsx";
 import type { LucideIcon } from "lucide-react";
@@ -1087,7 +1088,6 @@ export const LeftCommandSidebar = memo(() => {
   const { favorites, toggleFavorite } = useFavoriteStructures();
   const goToStructure = useGoToStructure(setup);
   const mode = useGameModeConfig();
-  const knownStructureEntities = useEntityQuery([Has(components.Structure)]);
 
   const [structureNameChange, setStructureNameChange] = useState<ComponentValue<
     ClientComponents["Structure"]["schema"]
@@ -1146,46 +1146,10 @@ export const LeftCommandSidebar = memo(() => {
     prevChatOpen.current = isChatOpen;
   }, [isChatOpen, setView, view]);
 
-  const selectedStructureEntityKey = useMemo(() => {
-    const numericStructureEntityId = Number(structureEntityId);
-    if (!Number.isFinite(numericStructureEntityId)) {
-      return undefined;
-    }
-
-    const selected = structuresWithKeys.find((item) => Number(item.entityId) === numericStructureEntityId);
-    if (selected?.recsEntityKey) {
-      const selectedStructure = getComponentValue(components.Structure, selected.recsEntityKey as Entity);
-      const selectedStructureEntityId = Number((selectedStructure as { entity_id?: unknown } | null)?.entity_id);
-      if (Number.isFinite(selectedStructureEntityId) && selectedStructureEntityId === numericStructureEntityId) {
-        return selected.recsEntityKey;
-      }
-    }
-
-    try {
-      const directEntityKey = getEntityIdFromKeys([BigInt(numericStructureEntityId)]);
-      const directStructure = getComponentValue(components.Structure, directEntityKey as Entity);
-      const directStructureEntityId = Number((directStructure as { entity_id?: unknown } | null)?.entity_id);
-      if (Number.isFinite(directStructureEntityId) && directStructureEntityId === numericStructureEntityId) {
-        return directEntityKey;
-      }
-    } catch {
-      // fall through to query scan
-    }
-
-    for (const candidate of knownStructureEntities) {
-      const candidateStructure = getComponentValue(components.Structure, candidate);
-      if (!candidateStructure) continue;
-      const candidateEntityId = Number((candidateStructure as { entity_id?: unknown }).entity_id);
-      if (Number.isFinite(candidateEntityId) && candidateEntityId === numericStructureEntityId) {
-        return candidate;
-      }
-    }
-
-    return undefined;
-  }, [components.Structure, knownStructureEntities, structureEntityId, structuresWithKeys]);
+  const selectedStructureEntityKey = useResolvedStructureEntityKey(structureEntityId, structuresWithKeys);
 
   // listen to structure updates
-  const structure = useComponentValue(components.Structure, selectedStructureEntityKey as Entity | undefined);
+  const structure = useComponentValue(components.Structure, selectedStructureEntityKey);
 
   const structureInfo = useMemo(() => {
     // Include structureNameVersion to refresh cached info when renames happen locally.

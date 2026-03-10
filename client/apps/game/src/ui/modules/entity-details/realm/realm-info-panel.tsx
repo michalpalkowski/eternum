@@ -1,5 +1,6 @@
 import { useBlockTimestamp } from "@/hooks/helpers/use-block-timestamp";
 import { useGoToStructure } from "@/hooks/helpers/use-navigate";
+import { useResolvedStructureEntityKey } from "@/hooks/helpers/use-resolved-structure-entity-key";
 import type { RealmAutomationConfig } from "@/hooks/store/use-automation-store";
 import { useAutomationStore } from "@/hooks/store/use-automation-store";
 import { useUIStore } from "@/hooks/store/use-ui-store";
@@ -24,8 +25,8 @@ import {
   RelicRecipientType,
   StructureType,
 } from "@bibliothecadao/types";
-import { useComponentValue, useEntityQuery } from "@dojoengine/react";
-import { ComponentValue, Entity, getComponentValue, Has } from "@dojoengine/recs";
+import { useComponentValue } from "@dojoengine/react";
+import { ComponentValue } from "@dojoengine/recs";
 import ArrowLeftRight from "lucide-react/dist/esm/icons/arrow-left-right";
 import Shield from "lucide-react/dist/esm/icons/shield";
 import Sword from "lucide-react/dist/esm/icons/sword";
@@ -119,35 +120,7 @@ export const RealmInfoPanel = memo(({ className }: { className?: string }) => {
   const components = setup.components as ClientComponents;
   const { isMapView } = useQuery();
   const goToStructure = useGoToStructure(setup);
-  const knownStructureEntities = useEntityQuery([Has(components.Structure)]);
-  const selectedStructureEntityKey = useMemo(() => {
-    const numericStructureEntityId = Number(structureEntityId);
-    if (!Number.isFinite(numericStructureEntityId)) {
-      return undefined;
-    }
-
-    const selected = playerStructures.find((structure) => Number(structure.entityId) === Number(structureEntityId));
-    if (selected?.recsEntityKey) {
-      const selectedStructure = getComponentValue(components.Structure, selected.recsEntityKey as Entity);
-      const selectedStructureEntityId = Number((selectedStructure as { entity_id?: unknown } | null)?.entity_id);
-      if (Number.isFinite(selectedStructureEntityId) && selectedStructureEntityId === numericStructureEntityId) {
-        return selected.recsEntityKey;
-      }
-    }
-
-    for (const candidate of knownStructureEntities) {
-      const structure = getComponentValue(components.Structure, candidate);
-      if (!structure) continue;
-
-      const candidateEntityId = Number((structure as { entity_id?: unknown }).entity_id);
-      if (Number.isFinite(candidateEntityId) && candidateEntityId === numericStructureEntityId) {
-        return candidate;
-      }
-    }
-
-    return undefined;
-  }, [playerStructures, structureEntityId, knownStructureEntities, components.Structure]);
-  const selectedStructureEntity = selectedStructureEntityKey as Entity | undefined;
+  const selectedStructureEntity = useResolvedStructureEntityKey(structureEntityId, playerStructures);
 
   const structure = useComponentValue(
     components.Structure,

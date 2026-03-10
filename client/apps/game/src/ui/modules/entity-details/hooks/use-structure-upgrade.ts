@@ -1,11 +1,11 @@
 import { useCallback, useMemo } from "react";
 
 import { useBlockTimestamp } from "@/hooks/helpers/use-block-timestamp";
+import { useResolvedStructureEntityKey } from "@/hooks/helpers/use-resolved-structure-entity-key";
 import {
   configManager,
   divideByPrecision,
   getBalance,
-  getEntityIdFromKeys,
   getRealmInfo,
 } from "@bibliothecadao/eternum";
 import { useDojo } from "@bibliothecadao/react";
@@ -41,11 +41,7 @@ interface StructureUpgradeResult {
 export const useStructureUpgrade = (structureEntityId: number | null): StructureUpgradeResult | null => {
   const dojo = useDojo();
   const { currentDefaultTick } = useBlockTimestamp();
-
-  const realmEntity = useMemo(
-    () => (structureEntityId ? getEntityIdFromKeys([BigInt(structureEntityId)]) : null),
-    [structureEntityId],
-  );
+  const realmEntity = useResolvedStructureEntityKey(structureEntityId);
 
   const liveStructure = useComponentValue(dojo.setup.components.Structure, realmEntity as any);
   const liveStructureBuildings = useComponentValue(dojo.setup.components.StructureBuildings, realmEntity as any);

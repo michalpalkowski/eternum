@@ -1,5 +1,6 @@
 import { usePlayResourceSound } from "@/audio";
 import { useGameModeConfig } from "@/config/game-modes/use-game-mode-config";
+import { useResolvedStructureEntityKey } from "@/hooks/helpers/use-resolved-structure-entity-key";
 import { useUIStore } from "@/hooks/store/use-ui-store";
 import { BUILDING_IMAGES_PATH } from "@/ui/config";
 import { formatTimeRemaining } from "@/ui/features/economy/resources/entity-resource-table/utils";
@@ -44,8 +45,8 @@ import {
   ResourcesIds,
   TroopType,
 } from "@bibliothecadao/types";
-import { useComponentValue, useEntityQuery } from "@dojoengine/react";
-import { Entity, getComponentValue, Has } from "@dojoengine/recs";
+import { useComponentValue } from "@dojoengine/react";
+import { getComponentValue } from "@dojoengine/recs";
 import clsx from "clsx";
 import InfoIcon from "lucide-react/dist/esm/icons/info";
 import Pause from "lucide-react/dist/esm/icons/pause";
@@ -126,36 +127,7 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
     entityId: number | string;
     recsEntityKey?: string;
   }>;
-  const knownStructureEntities = useEntityQuery([Has(dojo.setup.components.Structure)]);
-
-  const selectedStructureEntityKey = useMemo(() => {
-    const numericEntityId = Number(entityId);
-    if (!Number.isFinite(numericEntityId)) {
-      return undefined;
-    }
-
-    const selected = playerStructures.find((structure) => Number(structure.entityId) === Number(entityId));
-    if (selected?.recsEntityKey) {
-      const selectedStructure = getComponentValue(dojo.setup.components.Structure, selected.recsEntityKey as Entity);
-      const selectedStructureEntityId = Number((selectedStructure as { entity_id?: unknown } | null)?.entity_id);
-      if (Number.isFinite(selectedStructureEntityId) && selectedStructureEntityId === numericEntityId) {
-        return selected.recsEntityKey;
-      }
-    }
-
-    for (const candidate of knownStructureEntities) {
-      const structure = getComponentValue(dojo.setup.components.Structure, candidate);
-      if (!structure) continue;
-
-      const candidateEntityId = Number((structure as { entity_id?: unknown }).entity_id);
-      if (Number.isFinite(candidateEntityId) && candidateEntityId === numericEntityId) {
-        return candidate;
-      }
-    }
-
-    return undefined;
-  }, [playerStructures, entityId, knownStructureEntities, dojo.setup.components.Structure]);
-  const selectedStructureEntity = selectedStructureEntityKey as Entity | undefined;
+  const selectedStructureEntity = useResolvedStructureEntityKey(entityId, playerStructures);
 
   const realm = selectedStructureEntity ? getRealmInfo(selectedStructureEntity, dojo.setup.components) : undefined;
   const structureBuildings = useComponentValue(
