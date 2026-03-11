@@ -31,6 +31,8 @@ use crate::alias::ID;
 use crate::constants::{DEFAULT_NS, DEFAULT_NS_STR};
 use crate::models::resource::resource::{Resource, ResourceImpl, Resource_fields};
 use crate::models::resource::production::building::{Building, Population, StructureBuildings};
+use crate::models::trade::Trade;
+use crate::models::hyperstructure::HyperstructureRequirements;
 use crate::models::position::Coord;
 use crate::models::structure::{
     Structure, StructureCategory, Structure_fields,
@@ -111,6 +113,13 @@ fn resource_balance_slot(ref world: WorldStorage, entity_id: ID, resource_type: 
     let model_selector = Model::<Resource>::selector(ns_hash());
     let field_selector = ResourceImpl::balance_selector(resource_type.into());
     let dojo_entity_id = entity_id_from_keys(@entity_id);
+    compute_dojo_field_slot(model_selector, dojo_entity_id, field_selector)
+}
+
+fn hyperstructure_needed_total_slot(hyperstructure_id: ID) -> felt252 {
+    let model_selector = Model::<HyperstructureRequirements>::selector(ns_hash());
+    let field_selector = selector!("needed_resource_total");
+    let dojo_entity_id = entity_id_from_keys(@hyperstructure_id);
     compute_dojo_field_slot(model_selector, dojo_entity_id, field_selector)
 }
 
@@ -366,6 +375,130 @@ fn test_request_shard_all() {
     assert!(stone == 100, "STONE should be 100 after shard_all init");
 }
 
+/// request_shard_all_with_related_ids must register models keyed by related ids
+/// (hyperstructure_id), not only realm entity_id.
+#[test]
+fn test_request_shard_all_with_related_ids_registers_hyperstructure_requirements() {
+    let mut world = setup_world();
+    let world_address = world.dispatcher.contract_address;
+    let realm_entity_id: ID = 42;
+    let hyperstructure_id: ID = 9001;
+
+    let mut requirements: HyperstructureRequirements = Default::default();
+    requirements.hyperstructure_id = hyperstructure_id;
+    requirements.needed_resource_total = 1;
+    world.write_model(@requirements);
+
+    let proxy_address = deploy_mock_proxy();
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+
+    start_cheat_caller_address(system_addr, caller());
+    dispatcher
+        .request_shard_all_with_related_ids(
+            proxy_address,
+            array![realm_entity_id].span(),
+            array![].span(),
+            array![].span(),
+            array![hyperstructure_id].span(),
+        );
+    stop_cheat_caller_address(system_addr);
+
+    let hyper_slot = hyperstructure_needed_total_slot(hyperstructure_id);
+    let sharding = IContractComponentDispatcher { contract_address: world_address };
+
+    start_cheat_caller_address(world_address, proxy_address);
+    sharding.update_shard_state(array![(hyper_slot, 555)]);
+    stop_cheat_caller_address(world_address);
+
+    let updated_requirements: HyperstructureRequirements = world.read_model(hyperstructure_id);
+    assert!(
+        updated_requirements.needed_resource_total == 555, "needed_resource_total should be updated via shard state",
+    );
+}
+
+/// request_shard_all_with_related_ids registers Trade by trade_id without locking
+/// main-chain writes (Set CRDT behavior).
+#[test]
+fn test_request_shard_all_with_related_ids_allows_trade_write() {
+    let mut world = setup_world();
+    let realm_entity_id: ID = 42;
+    let trade_id: ID = 7001;
+
+    world.write_model(
+        @Trade {
+            trade_id,
+            maker_id: realm_entity_id,
+            taker_id: 0,
+            expires_at: 123,
+            maker_gives_resource_type: 1,
+            taker_pays_resource_type: 3,
+            maker_gives_min_resource_amount: 10,
+            taker_pays_min_resource_amount: 20,
+            maker_gives_max_count: 3,
+        },
+    );
+
+    let proxy_address = deploy_mock_proxy();
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+
+    start_cheat_caller_address(system_addr, caller());
+    dispatcher
+        .request_shard_all_with_related_ids(
+            proxy_address, array![realm_entity_id].span(), array![].span(), array![trade_id].span(), array![].span(),
+        );
+    stop_cheat_caller_address(system_addr);
+
+    world.write_model(
+        @Trade {
+            trade_id,
+            maker_id: 777,
+            taker_id: 0,
+            expires_at: 123,
+            maker_gives_resource_type: 1,
+            taker_pays_resource_type: 3,
+            maker_gives_min_resource_amount: 10,
+            taker_pays_min_resource_amount: 20,
+            maker_gives_max_count: 3,
+        },
+    );
+
+    let updated_trade: Trade = world.read_model(trade_id);
+    assert!(updated_trade.maker_id == 777, "trade write should stay allowed for Set CRDT");
+}
+
+/// request_shard_all_with_related_ids registers HyperstructureRequirements by hyperstructure_id
+/// without locking main-chain writes (Set CRDT behavior).
+#[test]
+fn test_request_shard_all_with_related_ids_allows_hyperstructure_requirements_write() {
+    let mut world = setup_world();
+    let realm_entity_id: ID = 42;
+    let hyperstructure_id: ID = 9001;
+
+    let mut requirements: HyperstructureRequirements = Default::default();
+    requirements.hyperstructure_id = hyperstructure_id;
+    requirements.needed_resource_total = 1;
+    world.write_model(@requirements);
+
+    let proxy_address = deploy_mock_proxy();
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+
+    start_cheat_caller_address(system_addr, caller());
+    dispatcher
+        .request_shard_all_with_related_ids(
+            proxy_address, array![realm_entity_id].span(), array![].span(), array![].span(), array![hyperstructure_id].span(),
+        );
+    stop_cheat_caller_address(system_addr);
+
+    requirements.needed_resource_total = 2;
+    world.write_model(@requirements);
+
+    let updated_requirements: HyperstructureRequirements = world.read_model(hyperstructure_id);
+    assert!(
+        updated_requirements.needed_resource_total == 2,
+        "hyperstructure requirements write should stay allowed for Set CRDT",
+    );
+}
+
 /// request_shard_all must block writes to the per-structure building summary model.
 #[test]
 #[should_panic]
@@ -480,6 +613,31 @@ fn test_request_shard_all_rejects_entity_ids_over_limit() {
 
     start_cheat_caller_address(system_addr, caller());
     dispatcher.request_shard_all(proxy_address, array![42, 43].span());
+    stop_cheat_caller_address(system_addr);
+}
+
+#[test]
+#[should_panic(expected: "trade_ids exceeds limit")]
+fn test_request_shard_all_with_related_ids_rejects_trade_ids_over_limit() {
+    let mut world = setup_world();
+    let proxy_address = deploy_mock_proxy();
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+
+    let mut trade_ids: Array<ID> = ArrayTrait::new();
+    let mut i: u32 = 0;
+    loop {
+        if i > 512 {
+            break;
+        }
+        trade_ids.append(1000 + i);
+        i += 1;
+    };
+
+    start_cheat_caller_address(system_addr, caller());
+    dispatcher
+        .request_shard_all_with_related_ids(
+            proxy_address, array![42].span(), array![].span(), trade_ids.span(), array![].span(),
+        );
     stop_cheat_caller_address(system_addr);
 }
 

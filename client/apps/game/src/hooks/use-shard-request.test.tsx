@@ -113,6 +113,111 @@ describe("useShardRequest", () => {
     expect(current.error).toContain("shard_contract_address");
   });
 
+  it("uses request_shard_all_with_related_ids when related ids are provided", async () => {
+    const execute = vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" });
+    const account: ExecutableAccount = {
+      execute,
+      waitForTransaction: vi
+        .fn<NonNullable<ExecutableAccount["waitForTransaction"]>>()
+        .mockResolvedValue(buildReceipt({
+          gameAddress: "0xabc123",
+          shardContractAddress: "0x1234abcd",
+          onchainShardId: "0x9",
+        })),
+    };
+
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ shard_contract_address: "0x1234abcd" }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            shards: [
+              {
+                phase: "gameplay_active",
+                katana_url: "http://localhost:5050",
+                torii_url: "http://localhost:8080",
+                torii_grpc_url: "http://localhost:18090",
+                game_contract_address: "0xabc123",
+                shard_id: "0xabc123@0x9",
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            transport: {
+              status: "healthy",
+              torii_http_reachable: true,
+              torii_sql_reachable: true,
+              torii_grpc_reachable: true,
+              bootstrap_snapshot_present: true,
+              error_code: null,
+              error_message: null,
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+
+    await act(async () => {
+      root.render(<HookHarness account={account} operatorUrl="http://localhost:3001" />);
+    });
+
+    await act(async () => {
+      await getHookState(latestState).requestShard([42], {
+        explorerIds: [7, 7],
+        tradeIds: [8],
+        hyperstructureIds: [9],
+      });
+    });
+    await act(async () => Promise.resolve());
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledWith([
+      {
+        contractAddress: "0x1234abcd",
+        entrypoint: "request_shard_all_with_related_ids",
+        calldata: ["0x1234abcd", "1", "42", "1", "7", "1", "8", "1", "9"],
+      },
+    ]);
+  });
+
+  it("fails fast when related ids exceed on-chain limit", async () => {
+    const execute = vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" });
+    const account: ExecutableAccount = { execute };
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ shard_contract_address: "0x1234abcd" }), {
+        status: 200,
+      }),
+    );
+
+    const tooManyTradeIds = Array.from({ length: 513 }, (_, idx) => idx + 1);
+
+    await act(async () => {
+      root.render(<HookHarness account={account} operatorUrl="http://localhost:3001" />);
+    });
+
+    await act(async () => {
+      await getHookState(latestState).requestShard([42], {
+        tradeIds: tooManyTradeIds,
+      });
+    });
+
+    const current = getHookState(latestState);
+    expect(current.phase).toBe("error");
+    expect(current.errorCode).toBe("INVALID_ENTITY_IDS");
+    expect(current.error).toContain("tradeIds exceeds max 512 ids");
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("fails fast when account cannot resolve tx receipt", async () => {
     const account: ExecutableAccount = {
       execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x1" }),

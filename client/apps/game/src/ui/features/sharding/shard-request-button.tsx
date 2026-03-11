@@ -1,4 +1,5 @@
 import { useDojo } from "@bibliothecadao/react";
+import { getComponentValue, getEntityString } from "@dojoengine/recs";
 import { useCallback, useEffect, useRef } from "react";
 import { env } from "../../../../env";
 import { useShardSettlement } from "@/hooks/use-shard-settlement";
@@ -39,6 +40,7 @@ const normalizeAddress = (value: unknown): string | null => {
 export const ShardRequestButton = ({ entityId }: { entityId: number }) => {
   const isShardMode = useShardStore((state) => state.isShardMode);
   const {
+    setup: { components },
     account: { account },
   } = useDojo();
   const worldConfig = useWorldConfigValue();
@@ -55,16 +57,87 @@ export const ShardRequestButton = ({ entityId }: { entityId: number }) => {
     return <SettleButton account={account} />;
   }
 
-  return <ShardButton entityId={entityId} account={account} />;
+  return <ShardButton entityId={entityId} account={account} components={components} />;
 };
 
-const ShardButton = ({ entityId, account }: { entityId: number; account: ExecutableAccount | null }) => {
+const toPositiveId = (value: unknown): number | null => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
+    return null;
+  }
+  return parsed;
+};
+
+const ShardButton = ({
+  entityId,
+  account,
+  components,
+}: {
+  entityId: number;
+  account: ExecutableAccount | null;
+  components: any;
+}) => {
   const operatorUrl = env.VITE_PUBLIC_SHARD_OPERATOR_URL;
   const { phase, error, errorCode, targetShardId, requestShard, recoverShard, openShardTab, reset } = useShardRequest(
     account,
     operatorUrl ?? "",
   );
   const autoOpenRecoveredShardRef = useRef(false);
+  const collectRelatedIds = useCallback(() => {
+    const explorerIds = new Set<number>();
+    const tradeIds = new Set<number>();
+
+    const explorerOwners = components?.ExplorerTroops?.values?.owner;
+    if (explorerOwners?.entries) {
+      for (const [entitySymbol, ownerId] of explorerOwners.entries()) {
+        if (toPositiveId(ownerId) !== entityId) {
+          continue;
+        }
+
+        const explorer = getComponentValue(components.ExplorerTroops, getEntityString(entitySymbol));
+        const explorerId = toPositiveId(explorer?.explorer_id);
+        if (explorerId !== null) {
+          explorerIds.add(explorerId);
+        }
+      }
+    }
+
+    const tradeMakers = components?.Trade?.values?.maker_id;
+    if (tradeMakers?.entries) {
+      for (const [entitySymbol, makerId] of tradeMakers.entries()) {
+        if (toPositiveId(makerId) !== entityId) {
+          continue;
+        }
+
+        const trade = getComponentValue(components.Trade, getEntityString(entitySymbol));
+        const tradeId = toPositiveId(trade?.trade_id);
+        if (tradeId !== null) {
+          tradeIds.add(tradeId);
+        }
+      }
+    }
+
+    const tradeTakers = components?.Trade?.values?.taker_id;
+    if (tradeTakers?.entries) {
+      for (const [entitySymbol, takerId] of tradeTakers.entries()) {
+        if (toPositiveId(takerId) !== entityId) {
+          continue;
+        }
+
+        const trade = getComponentValue(components.Trade, getEntityString(entitySymbol));
+        const tradeId = toPositiveId(trade?.trade_id);
+        if (tradeId !== null) {
+          tradeIds.add(tradeId);
+        }
+      }
+    }
+
+    return {
+      explorerIds: Array.from(explorerIds),
+      tradeIds: Array.from(tradeIds),
+      hyperstructureIds: [] as number[],
+    };
+  }, [components, entityId]);
 
   useEffect(() => {
     if (phase !== "ready" || !autoOpenRecoveredShardRef.current) {
@@ -80,7 +153,7 @@ const ShardButton = ({ entityId, account }: { entityId: number; account: Executa
     }
     if (phase === "idle") {
       autoOpenRecoveredShardRef.current = false;
-      void requestShard([entityId]);
+      void requestShard([entityId], collectRelatedIds());
       return;
     }
     if (phase === "ready") {

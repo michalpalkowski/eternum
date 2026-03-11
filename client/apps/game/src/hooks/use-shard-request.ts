@@ -42,15 +42,47 @@ interface UseShardRequestOptions {
   worldAddress?: string | null;
 }
 
+export interface ShardRequestRelatedIds {
+  explorerIds?: number[];
+  tradeIds?: number[];
+  hyperstructureIds?: number[];
+}
+
 const SHARDING_REQUESTED_SELECTOR = hash.getSelectorFromName("ShardingRequested").toLowerCase();
 const SHARD_REQUEST_POLL_INTERVAL_MS = 2000;
 const SHARD_REQUEST_TIMEOUT_MS = 120_000;
 const SHARD_REQUEST_RECEIPT_CAPTURE_KEY = "__eternum_last_shard_request_receipt__";
 const RECEIPT_RECOVERY_TIMEOUT_MS = 10_000;
 const RECEIPT_RECOVERY_POLL_INTERVAL_MS = 500;
+const MAX_RELATED_IDS_PER_LIST = 512;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
+
+const normalizePositiveIdList = (values: number[] | undefined, fieldName: string): number[] => {
+  if (values === undefined || values.length === 0) {
+    return [];
+  }
+
+  const normalized: number[] = [];
+  const seen = new Set<number>();
+  for (const value of values) {
+    if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) {
+      throw new Error(`${fieldName} must contain positive integer IDs`);
+    }
+    if (seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    normalized.push(value);
+  }
+
+  if (normalized.length > MAX_RELATED_IDS_PER_LIST) {
+    throw new Error(`${fieldName} exceeds max ${MAX_RELATED_IDS_PER_LIST} ids`);
+  }
+
+  return normalized;
+};
 
 const normalizeFeltToHex = (value: unknown, fieldName: string): string => {
   if (typeof value === "bigint") {
@@ -657,7 +689,7 @@ export const useShardRequest = (
   ]);
 
   const requestShard = useCallback(
-    async (entityIds: number[]) => {
+    async (entityIds: number[], relatedIds?: ShardRequestRelatedIds) => {
       if (phase !== "idle") {
         return;
       }
@@ -693,20 +725,49 @@ export const useShardRequest = (
         const normalizedWorldAddress = normalizeFeltToHex(worldAddress, "world_address");
         const normalizedShardContractAddress = normalizeFeltToHex(operatorConfig.shardContractAddress, "shard_contract_address");
 
+        let explorerIds: number[];
+        let tradeIds: number[];
+        let hyperstructureIds: number[];
+        try {
+          explorerIds = normalizePositiveIdList(relatedIds?.explorerIds, "explorerIds");
+          tradeIds = normalizePositiveIdList(relatedIds?.tradeIds, "tradeIds");
+          hyperstructureIds = normalizePositiveIdList(relatedIds?.hyperstructureIds, "hyperstructureIds");
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Invalid related IDs";
+          failRequest("INVALID_ENTITY_IDS", message);
+          return;
+        }
+
+        const hasRelatedIds = explorerIds.length > 0 || tradeIds.length > 0 || hyperstructureIds.length > 0;
+        const entrypoint = hasRelatedIds ? "request_shard_all_with_related_ids" : "request_shard_all";
+        const calldata = hasRelatedIds
+          ? [
+              operatorConfig.shardContractAddress,
+              entityIds.length.toString(),
+              ...entityIds.map((entityId) => entityId.toString()),
+              explorerIds.length.toString(),
+              ...explorerIds.map((id) => id.toString()),
+              tradeIds.length.toString(),
+              ...tradeIds.map((id) => id.toString()),
+              hyperstructureIds.length.toString(),
+              ...hyperstructureIds.map((id) => id.toString()),
+            ]
+          : [
+              operatorConfig.shardContractAddress,
+              entityIds.length.toString(),
+              ...entityIds.map((entityId) => entityId.toString()),
+            ];
+
         const requestShardCall: Call = {
           contractAddress: shardingContractAddress,
-          entrypoint: "request_shard_all",
-          calldata: [
-            operatorConfig.shardContractAddress,
-            entityIds.length.toString(),
-            ...entityIds.map((entityId) => entityId.toString()),
-          ],
+          entrypoint,
+          calldata,
         };
         let executeResult: unknown;
         try {
           executeResult = await account.execute([requestShardCall]);
         } catch (error) {
-          const message = error instanceof Error ? error.message : "request_shard_all transaction failed";
+          const message = error instanceof Error ? error.message : `${entrypoint} transaction failed`;
           if (isShardAlreadyLockedError(message)) {
             try {
               const requestedContext = await resolveRequestedShardContextFromOperatorStatus({
