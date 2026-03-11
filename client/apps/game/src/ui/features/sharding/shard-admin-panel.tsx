@@ -1,6 +1,7 @@
 import { getContractByName } from "@dojoengine/core";
 import { useDojo } from "@bibliothecadao/react";
-import { getComponentValue, getEntityString } from "@dojoengine/recs";
+import { useEntityQuery } from "@dojoengine/react";
+import { getComponentValue, Has } from "@dojoengine/recs";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAccountStore } from "@/hooks/store/use-account-store";
@@ -44,6 +45,8 @@ export const ShardAdminPanel = () => {
       shardingContractAddress,
     },
   );
+  const explorerEntities = useEntityQuery([Has(components.ExplorerTroops)]);
+  const tradeEntities = useEntityQuery([Has(components.Trade)]);
   const autoOpenRecoveredShardRef = useRef(false);
 
   useEffect(() => {
@@ -67,39 +70,29 @@ export const ShardAdminPanel = () => {
       return parsed;
     };
 
-    const explorerOwners = components?.ExplorerTroops?.values?.owner;
-    if (explorerOwners?.entries) {
-      for (const [entitySymbol, ownerId] of explorerOwners.entries()) {
-        if (toPositiveId(ownerId) !== entityId) continue;
-        const explorer = getComponentValue(components.ExplorerTroops, getEntityString(entitySymbol));
-        const explorerId = toPositiveId(explorer?.explorer_id);
-        if (explorerId !== null) {
-          explorerIds.add(explorerId);
-        }
+    for (const explorerEntity of explorerEntities) {
+      const explorer = getComponentValue(components.ExplorerTroops, explorerEntity);
+      if (!explorer || toPositiveId(explorer.owner) !== entityId) {
+        continue;
+      }
+      const explorerId = toPositiveId(explorer.explorer_id);
+      if (explorerId !== null) {
+        explorerIds.add(explorerId);
       }
     }
 
-    const tradeMakers = components?.Trade?.values?.maker_id;
-    if (tradeMakers?.entries) {
-      for (const [entitySymbol, makerId] of tradeMakers.entries()) {
-        if (toPositiveId(makerId) !== entityId) continue;
-        const trade = getComponentValue(components.Trade, getEntityString(entitySymbol));
-        const tradeId = toPositiveId(trade?.trade_id);
-        if (tradeId !== null) {
-          tradeIds.add(tradeId);
-        }
+    for (const tradeEntity of tradeEntities) {
+      const trade = getComponentValue(components.Trade, tradeEntity);
+      if (!trade) {
+        continue;
       }
-    }
-
-    const tradeTakers = components?.Trade?.values?.taker_id;
-    if (tradeTakers?.entries) {
-      for (const [entitySymbol, takerId] of tradeTakers.entries()) {
-        if (toPositiveId(takerId) !== entityId) continue;
-        const trade = getComponentValue(components.Trade, getEntityString(entitySymbol));
-        const tradeId = toPositiveId(trade?.trade_id);
-        if (tradeId !== null) {
-          tradeIds.add(tradeId);
-        }
+      const isRelated = toPositiveId(trade.maker_id) === entityId || toPositiveId(trade.taker_id) === entityId;
+      if (!isRelated) {
+        continue;
+      }
+      const tradeId = toPositiveId(trade.trade_id);
+      if (tradeId !== null) {
+        tradeIds.add(tradeId);
       }
     }
 
