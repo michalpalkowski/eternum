@@ -9,12 +9,10 @@ sierra-replace-ids = true
 
 [dependencies]
 starknet = "2.13.1"
-# dojo = { path = "/home/michal/Repos/dojo/crates/dojo/core" }
 # Keep source aligned with arcade@9ff33eab, which still references Dojo via `branch=feature/sharding`.
 dojo = { git = "https://github.com/michalpalkowski/dojo", branch = "feature/sharding" }
 alexandria_math = { git = "https://github.com/keep-starknet-strange/alexandria.git", tag = "v0.5.2" }
 alexandria_data_structures = { git = "https://github.com/keep-starknet-strange/alexandria.git", tag = "v0.5.2" }
-# achievement = { path = "/home/michal/Repos/arcade/packages/achievement" }
 achievement = { git = "https://github.com/michalpalkowski/arcade.git", rev = "9ff33eab63995d276db0079f1acde4a9c38efd61" }
 cubit = { git = "https://github.com/credence0x/cubit.git", branch = "feat/cairo-2.9.2" }
 #budokan = { git = "https://github.com/credence0x/tournaments.git", rev="0e58edb" }
@@ -22,7 +20,6 @@ cubit = { git = "https://github.com/credence0x/cubit.git", branch = "feat/cairo-
 [dev-dependencies]
 snforge_std = "0.51.2"
 assert_macros = "2.13"
-# dojo_snf_test = { path = "/home/michal/Repos/dojo/crates/dojo/dojo-snf-test" }
 dojo_snf_test = { git = "https://github.com/michalpalkowski/dojo", branch = "feature/sharding" }
 openzeppelin_token = "2.0.0"
 openzeppelin = "2.0.0"
