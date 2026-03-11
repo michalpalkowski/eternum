@@ -217,9 +217,10 @@ pub mod shard_helpers {
         models
     }
 
-    /// Models keyed by entity_id only. Models with composite keys
-    /// (Building, Trade, ResourceArrival, Market, Liquidity, etc.)
-    /// must be registered separately via their individual helpers.
+    /// Models keyed by the same `entity_id` passed to `request_shard_all`.
+    /// Models keyed by other ids (e.g. explorer_id, trade_id, hyperstructure_id)
+    /// and models with composite keys (Building, ResourceArrival, Market, Liquidity, etc.)
+    /// must be registered separately via dedicated helpers.
     pub fn entity_id_models(ns_hash: felt252, entity_id: ID) -> Array<ShardModel> {
         array![
             resource_all_balances_set_lock(ns_hash, entity_id),
@@ -290,8 +291,6 @@ pub mod sharding_systems {
             append_shard_model(
                 ref shard_models, super::shard_helpers::quantity_tracker_all(ns_hash, (*entity_id).into()),
             );
-            append_shard_model(ref shard_models, super::shard_helpers::explorer_troops_all(ns_hash, *entity_id));
-            append_shard_model(ref shard_models, super::shard_helpers::trade_all(ns_hash, *entity_id));
             if register_arrivals {
                 append_shard_model(
                     ref shard_models, super::shard_helpers::resource_arrival_all(ns_hash, *entity_id, arrival_day),
@@ -307,10 +306,6 @@ pub mod sharding_systems {
                     super::shard_helpers::resource_arrival_all(ns_hash, *entity_id, arrival_day + 1),
                 );
             }
-            append_shard_model(
-                ref shard_models, super::shard_helpers::hyperstructure_requirements_all(ns_hash, *entity_id),
-            );
-
             let base = StructureBaseStoreImpl::retrieve(ref world, *entity_id);
             if base.exists() {
                 let owner = StructureOwnerStoreImpl::retrieve(ref world, *entity_id);
