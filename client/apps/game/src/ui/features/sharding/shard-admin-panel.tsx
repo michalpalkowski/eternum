@@ -1,4 +1,6 @@
 import { getContractByName } from "@dojoengine/core";
+import { useDojo } from "@bibliothecadao/react";
+import { getComponentValue, getEntityString } from "@dojoengine/recs";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAccountStore } from "@/hooks/store/use-account-store";
@@ -20,6 +22,9 @@ const parseEntityId = (raw: string): number | null => {
 };
 
 export const ShardAdminPanel = () => {
+  const {
+    setup: { components },
+  } = useDojo();
   const account = useAccountStore((state) => state.account);
   const operatorUrl = env.VITE_PUBLIC_SHARD_OPERATOR_URL ?? "";
   const defaultShardingContractAddress = useMemo(
@@ -51,13 +56,67 @@ export const ShardAdminPanel = () => {
 
   const parsedEntityId = parseEntityId(entityIdInput);
 
+  const collectRelatedIds = (entityId: number) => {
+    const explorerIds = new Set<number>();
+    const tradeIds = new Set<number>();
+    const toPositiveId = (value: unknown): number | null => {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
+        return null;
+      }
+      return parsed;
+    };
+
+    const explorerOwners = components?.ExplorerTroops?.values?.owner;
+    if (explorerOwners?.entries) {
+      for (const [entitySymbol, ownerId] of explorerOwners.entries()) {
+        if (toPositiveId(ownerId) !== entityId) continue;
+        const explorer = getComponentValue(components.ExplorerTroops, getEntityString(entitySymbol));
+        const explorerId = toPositiveId(explorer?.explorer_id);
+        if (explorerId !== null) {
+          explorerIds.add(explorerId);
+        }
+      }
+    }
+
+    const tradeMakers = components?.Trade?.values?.maker_id;
+    if (tradeMakers?.entries) {
+      for (const [entitySymbol, makerId] of tradeMakers.entries()) {
+        if (toPositiveId(makerId) !== entityId) continue;
+        const trade = getComponentValue(components.Trade, getEntityString(entitySymbol));
+        const tradeId = toPositiveId(trade?.trade_id);
+        if (tradeId !== null) {
+          tradeIds.add(tradeId);
+        }
+      }
+    }
+
+    const tradeTakers = components?.Trade?.values?.taker_id;
+    if (tradeTakers?.entries) {
+      for (const [entitySymbol, takerId] of tradeTakers.entries()) {
+        if (toPositiveId(takerId) !== entityId) continue;
+        const trade = getComponentValue(components.Trade, getEntityString(entitySymbol));
+        const tradeId = toPositiveId(trade?.trade_id);
+        if (tradeId !== null) {
+          tradeIds.add(tradeId);
+        }
+      }
+    }
+
+    return {
+      explorerIds: Array.from(explorerIds),
+      tradeIds: Array.from(tradeIds),
+      hyperstructureIds: [] as number[],
+    };
+  };
+
   const handleClick = () => {
     if (operatorUrl.length === 0) {
       return;
     }
     if (phase === "idle" && parsedEntityId !== null) {
       autoOpenRecoveredShardRef.current = false;
-      void requestShard([parsedEntityId]);
+      void requestShard([parsedEntityId], collectRelatedIds(parsedEntityId));
       return;
     }
     if (phase === "ready") {
