@@ -5,6 +5,14 @@ use dojo::sharding::request::ShardModel;
 pub trait IShardingSystems<T> {
     fn request_shard(ref self: T, proxy: starknet::ContractAddress, models: Span<ShardModel>);
     fn request_shard_all(ref self: T, proxy: starknet::ContractAddress, entity_ids: Span<ID>);
+    fn request_shard_all_with_related_ids(
+        ref self: T,
+        proxy: starknet::ContractAddress,
+        entity_ids: Span<ID>,
+        explorer_ids: Span<ID>,
+        trade_ids: Span<ID>,
+        hyperstructure_ids: Span<ID>,
+    );
     fn finish_shard(ref self: T);
 }
 
@@ -254,6 +262,7 @@ pub mod sharding_systems {
     use crate::systems::config::contracts::config_systems::assert_caller_is_admin;
 
     const MAX_REQUEST_ENTITY_IDS: usize = 1;
+    const MAX_REQUEST_RELATED_IDS: usize = 512;
     const MAX_SHARD_MODELS_PER_REQUEST: usize = 4096;
 
     fn assert_valid_proxy(proxy: starknet::ContractAddress) {
@@ -357,6 +366,35 @@ pub mod sharding_systems {
         shard_models
     }
 
+    fn append_related_shard_models(
+        ns_hash: felt252,
+        ref shard_models: Array<ShardModel>,
+        explorer_ids: Span<ID>,
+        trade_ids: Span<ID>,
+        hyperstructure_ids: Span<ID>,
+    ) {
+        assert!(explorer_ids.len() <= MAX_REQUEST_RELATED_IDS, "explorer_ids exceeds limit");
+        assert!(trade_ids.len() <= MAX_REQUEST_RELATED_IDS, "trade_ids exceeds limit");
+        assert!(hyperstructure_ids.len() <= MAX_REQUEST_RELATED_IDS, "hyperstructure_ids exceeds limit");
+
+        for explorer_id in explorer_ids {
+            append_shard_model(
+                ref shard_models, super::shard_helpers::explorer_troops_all(ns_hash, *explorer_id),
+            );
+        };
+
+        for trade_id in trade_ids {
+            append_shard_model(ref shard_models, super::shard_helpers::trade_all(ns_hash, *trade_id));
+        };
+
+        for hyperstructure_id in hyperstructure_ids {
+            append_shard_model(
+                ref shard_models,
+                super::shard_helpers::hyperstructure_requirements_all(ns_hash, *hyperstructure_id),
+            );
+        };
+    }
+
     #[abi(embed_v0)]
     impl ShardingSystemsImpl of super::IShardingSystems<ContractState> {
         fn request_shard(
@@ -377,6 +415,26 @@ pub mod sharding_systems {
             let mut world = self.world(DEFAULT_NS());
             assert_caller_is_admin(world);
             let mut shard_models = build_shard_models_for_entities(ref world, entity_ids);
+            world.dispatcher.request_sharding(proxy, shard_models.span());
+        }
+
+        fn request_shard_all_with_related_ids(
+            ref self: ContractState,
+            proxy: starknet::ContractAddress,
+            entity_ids: Span<ID>,
+            explorer_ids: Span<ID>,
+            trade_ids: Span<ID>,
+            hyperstructure_ids: Span<ID>,
+        ) {
+            assert_valid_proxy(proxy);
+
+            let mut world = self.world(DEFAULT_NS());
+            assert_caller_is_admin(world);
+            let ns_hash = dojo::utils::bytearray_hash(DEFAULT_NS());
+            let mut shard_models = build_shard_models_for_entities(ref world, entity_ids);
+            append_related_shard_models(
+                ns_hash, ref shard_models, explorer_ids, trade_ids, hyperstructure_ids,
+            );
             world.dispatcher.request_sharding(proxy, shard_models.span());
         }
 
