@@ -14,6 +14,7 @@ import wasm from "vite-plugin-wasm";
 export default defineConfig(({ command }: ConfigEnv): UserConfig => {
   const isServe = command === "serve";
   const isBuild = command === "build";
+  const devServerHttps = process.env.VITE_DEV_SERVER_HTTPS !== "false";
   const enableAnalyzer = process.env.ANALYZE === "true";
   const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN;
   const sentryOrg = process.env.SENTRY_ORG;
@@ -27,7 +28,7 @@ export default defineConfig(({ command }: ConfigEnv): UserConfig => {
 
   const plugins = [svgr({ dimensions: false, svgo: false, typescript: true }), react()];
 
-  if (isServe) {
+  if (isServe && devServerHttps) {
     plugins.unshift(mkcert() as any);
   }
 
@@ -98,6 +99,11 @@ export default defineConfig(({ command }: ConfigEnv): UserConfig => {
 
   return {
     plugins: plugins as unknown as PluginOption[],
+    server: isServe
+      ? {
+          https: devServerHttps,
+        }
+      : undefined,
     resolve: {
       alias: {
         "@/assets": path.resolve(__dirname, "../../public/assets"),

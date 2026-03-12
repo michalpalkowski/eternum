@@ -17,8 +17,11 @@ pub trait IShardingSystems<T> {
 }
 
 pub mod shard_helpers {
+    use dojo::meta::Layout;
     use dojo::model::Model;
-    use dojo::sharding::request::{CRDVariant, IntoShardField, IntoShardModel, ShardField, ShardModel};
+    use dojo::sharding::request::{
+        CRDVariant, IntoShardField, IntoShardModel, ShardCoverage, ShardField, ShardFieldSelection, ShardModel,
+    };
     use crate::alias::ID;
     use crate::models::resource::resource::{Resource, ResourceImpl};
     use crate::models::structure::{
@@ -38,6 +41,10 @@ pub mod shard_helpers {
 
     const RESOURCE_TYPE_COUNT: u32 = 56;
 
+    fn shard_set_lock_deterministic(selector: felt252, layout: Layout, keys: Span<felt252>) -> ShardModel {
+        (selector, layout).shard_with(keys, CRDVariant::SetLock, ShardFieldSelection::AutoDeterministic)
+    }
+
     pub fn resource_with_set_lock(ns_hash: felt252, entity_id: ID, resource_types: Span<u32>) -> ShardModel {
         assert!(resource_types.len() > 0, "resource_types must not be empty");
         let keys = array![entity_id.into()].span();
@@ -52,7 +59,12 @@ pub mod shard_helpers {
                 crdt: CRDVariant::SetLock,
             });
         };
-        ShardModel { selector: Model::<Resource>::selector(ns_hash), keys, fields: fields.span() }
+        ShardModel {
+            selector: Model::<Resource>::selector(ns_hash),
+            keys,
+            fields: fields.span(),
+            coverage: ShardCoverage::DeterministicSubset,
+        }
     }
 
     pub fn resource_all(ns_hash: felt252, entity_id: ID) -> ShardModel {
@@ -85,6 +97,7 @@ pub mod shard_helpers {
                 Structure_fields::BASE.as_set_lock(),
                 Structure_fields::METADATA.as_set_lock(),
             ].span(),
+            coverage: ShardCoverage::DeterministicSubset,
         }
     }
 
@@ -95,7 +108,9 @@ pub mod shard_helpers {
 
     pub fn structure_buildings_all(ns_hash: felt252, entity_id: ID) -> ShardModel {
         let keys = array![entity_id.into()].span();
-        (Model::<StructureBuildings>::selector(ns_hash), Model::<StructureBuildings>::layout()).shard_set_lock(keys)
+        shard_set_lock_deterministic(
+            Model::<StructureBuildings>::selector(ns_hash), Model::<StructureBuildings>::layout(), keys,
+        )
     }
 
     pub fn production_boost_bonus_all(ns_hash: felt252, structure_id: ID) -> ShardModel {
@@ -120,7 +135,7 @@ pub mod shard_helpers {
 
     pub fn quantity_all(ns_hash: felt252, entity_id: ID) -> ShardModel {
         let keys = array![entity_id.into()].span();
-        (Model::<Quantity>::selector(ns_hash), Model::<Quantity>::layout()).shard_set_lock(keys)
+        shard_set_lock_deterministic(Model::<Quantity>::selector(ns_hash), Model::<Quantity>::layout(), keys)
     }
 
     pub fn wonder_all(ns_hash: felt252, structure_id: ID) -> ShardModel {
@@ -135,7 +150,9 @@ pub mod shard_helpers {
 
     pub fn quantity_tracker_all(ns_hash: felt252, entity_id: felt252) -> ShardModel {
         let keys = array![entity_id].span();
-        (Model::<QuantityTracker>::selector(ns_hash), Model::<QuantityTracker>::layout()).shard_set_lock(keys)
+        shard_set_lock_deterministic(
+            Model::<QuantityTracker>::selector(ns_hash), Model::<QuantityTracker>::layout(), keys,
+        )
     }
 
     pub fn resource_allowance_all(
@@ -167,7 +184,7 @@ pub mod shard_helpers {
         ns_hash: felt252, outer_col: u32, outer_row: u32, inner_col: u32, inner_row: u32,
     ) -> ShardModel {
         let keys = array![outer_col.into(), outer_row.into(), inner_col.into(), inner_row.into()].span();
-        (Model::<Building>::selector(ns_hash), Model::<Building>::layout()).shard_set_lock(keys)
+        shard_set_lock_deterministic(Model::<Building>::selector(ns_hash), Model::<Building>::layout(), keys)
     }
 
     pub fn explorer_troops_all(ns_hash: felt252, explorer_id: ID) -> ShardModel {
