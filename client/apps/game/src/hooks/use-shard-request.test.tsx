@@ -65,6 +65,7 @@ describe("useShardRequest", () => {
     useShardStore.getState().clearMainShardRequestState();
     sessionStorage.clear();
     delete (window as Window & { __ETERNUM_LAST_SHARD_REQUEST_RECEIPT__?: unknown }).__ETERNUM_LAST_SHARD_REQUEST_RECEIPT__;
+    delete (window as Window & { __ETERNUM_LAST_SHARD_REQUEST_DIAGNOSTIC__?: unknown }).__ETERNUM_LAST_SHARD_REQUEST_DIAGNOSTIC__;
 
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -110,7 +111,11 @@ describe("useShardRequest", () => {
     const current = getHookState(latestState);
     expect(current.phase).toBe("error");
     expect(current.errorCode).toBe("OPERATOR_CONFIG_FAILED");
-    expect(current.error).toContain("shard_contract_address");
+    expect(current.error).toContain("invalid shape");
+    expect(current.errorDiagnostic?.stage).toBe("operator_config");
+    expect(current.errorDiagnostic?.kind).toBe("operator_response_invalid");
+    expect(current.errorDiagnostic?.hint).toContain("/config");
+    expect(current.errorDiagnostic?.details).toContain("shard_contract_address");
   });
 
   it("uses request_shard_all_with_related_ids when related ids are provided", async () => {
@@ -214,7 +219,10 @@ describe("useShardRequest", () => {
     const current = getHookState(latestState);
     expect(current.phase).toBe("error");
     expect(current.errorCode).toBe("INVALID_ENTITY_IDS");
-    expect(current.error).toContain("tradeIds exceeds max 512 ids");
+    expect(current.error).toContain("Related entity IDs are invalid");
+    expect(current.errorDiagnostic?.stage).toBe("validation");
+    expect(current.errorDiagnostic?.kind).toBe("invalid_entity_ids");
+    expect(current.errorDiagnostic?.details).toContain("tradeIds exceeds max 512 ids");
     expect(execute).not.toHaveBeenCalled();
   });
 
@@ -279,7 +287,8 @@ describe("useShardRequest", () => {
     const current = getHookState(latestState);
     expect(current.phase).toBe("error");
     expect(current.errorCode).toBe("POLL_FAILED");
-    expect(current.error).toContain("shards array");
+    expect(current.error).toContain("invalid shape");
+    expect(current.errorDiagnostic?.details).toContain("shards array");
   });
 
   it("recovers shard id from operator status when receipt does not expose ShardingRequested event", async () => {
@@ -361,7 +370,9 @@ describe("useShardRequest", () => {
       "[ShardRequest] Failed to resolve ShardingRequested event from receipt",
       expect.objectContaining({
         txHash: "0x111",
-        reason: "ShardingRequested event not found in transaction receipt",
+        reason: "Transaction receipt does not contain a ShardingRequested event",
+        stage: "receipt_parse",
+        kind: "receipt_event_missing",
         extractedEventCount: 0,
       }),
     );
@@ -448,6 +459,78 @@ describe("useShardRequest", () => {
     expect(getHookState(latestState).targetShardId).toBe("0xabc123@0x9");
   });
 
+  it("uses the game contract from receipt when the expected world address is stale", async () => {
+    dojoConfigMock.manifest = {
+      world: { address: "0xabc123" },
+    };
+
+    const account: ExecutableAccount = {
+      execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" }),
+      waitForTransaction: vi
+        .fn<NonNullable<ExecutableAccount["waitForTransaction"]>>()
+        .mockResolvedValue(
+          buildReceipt({
+            gameAddress: "0xdef456",
+            shardContractAddress: "0x1234abcd",
+            onchainShardId: "0x9",
+          }),
+        ),
+    };
+
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ shard_contract_address: "0x1234abcd" }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            shards: [
+              {
+                phase: "gameplay_active",
+                katana_url: "http://localhost:5050",
+                torii_url: "http://localhost:8080",
+                torii_grpc_url: "http://localhost:18090",
+                game_contract_address: "0xdef456",
+                shard_id: "0xdef456@0x9",
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            transport: {
+              status: "healthy",
+              torii_http_reachable: true,
+              torii_sql_reachable: true,
+              torii_grpc_reachable: true,
+              bootstrap_snapshot_present: true,
+              error_code: null,
+              error_message: null,
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+
+    await act(async () => {
+      root.render(<HookHarness account={account} operatorUrl="http://localhost:3001" />);
+    });
+
+    await act(async () => {
+      await getHookState(latestState).requestShard([42]);
+    });
+    await act(async () => Promise.resolve());
+
+    expect(getHookState(latestState).phase).toBe("ready");
+    expect(getHookState(latestState).targetShardId).toBe("0xdef456@0x9");
+    expect(getHookState(latestState).shardUrls?.gameContractAddress).toBe("0xdef456");
+  });
+
   it("recovers an existing shard when request_shard_all fails with slot locked by shard", async () => {
     const account: ExecutableAccount = {
       execute: vi.fn<ExecutableAccount["execute"]>().mockRejectedValue(new Error("Component: Slot locked by shard")),
@@ -521,6 +604,36 @@ describe("useShardRequest", () => {
 
     expect(getHookState(latestState).phase).toBe("ready");
     expect(getHookState(latestState).targetShardId).toBe("0xabc123@0x9");
+  });
+
+  it("reports a typed diagnostic when slot-locked recovery from operator also fails", async () => {
+    const account: ExecutableAccount = {
+      execute: vi.fn<ExecutableAccount["execute"]>().mockRejectedValue(new Error("Component: Slot locked by shard")),
+    };
+
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ shard_contract_address: "0x1234abcd" }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(new Response("missing", { status: 404 }));
+
+    await act(async () => {
+      root.render(<HookHarness account={account} operatorUrl="http://localhost:3001" />);
+    });
+
+    await act(async () => {
+      await getHookState(latestState).requestShard([42]);
+    });
+    await act(async () => Promise.resolve());
+
+    const current = getHookState(latestState);
+    expect(current.phase).toBe("error");
+    expect(current.errorCode).toBe("EXECUTE_FAILED");
+    expect(current.errorDiagnostic?.stage).toBe("operator_recovery");
+    expect(current.errorDiagnostic?.kind).toBe("contract_slot_locked");
+    expect(current.errorDiagnostic?.hint).toContain("previous shard");
   });
 
   it("waits for healthy transport of the requested shard id", async () => {
@@ -784,5 +897,52 @@ describe("useShardRequest", () => {
     expect(getHookState(latestState).phase).toBe("ready");
     expect(getHookState(latestState).targetShardId).toBe("0xabc123@0x9");
     expect(getHookState(latestState).shardUrls?.shardId).toBe("0xabc123@0x9");
+  });
+
+  it("fails recovery when operator reports multiple recoverable shards for the same world", async () => {
+    const account: ExecutableAccount = {
+      execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" }),
+    };
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          shards: [
+            {
+              phase: "gameplay_active",
+              katana_url: "http://localhost:5050",
+              torii_url: "http://localhost:8080",
+              torii_grpc_url: "http://localhost:18090",
+              game_contract_address: "0xabc123",
+              shard_id: "0xabc123@0x9",
+            },
+            {
+              phase: "torii_ready",
+              katana_url: "http://localhost:5051",
+              torii_url: "http://localhost:8081",
+              torii_grpc_url: "http://localhost:18091",
+              game_contract_address: "0xabc123",
+              shard_id: "0xabc123@0xa",
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await act(async () => {
+      root.render(<HookHarness account={account} operatorUrl="http://localhost:3001" />);
+    });
+
+    await act(async () => {
+      await getHookState(latestState).recoverShard();
+    });
+    await act(async () => Promise.resolve());
+
+    const current = getHookState(latestState);
+    expect(current.phase).toBe("error");
+    expect(current.errorCode).toBe("SHARD_ID_RESOLUTION_FAILED");
+    expect(current.errorDiagnostic?.summary).toContain("Failed to recover an active shard");
+    expect(current.errorDiagnostic?.hint).toContain("world address");
   });
 });

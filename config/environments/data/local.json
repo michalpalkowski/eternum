@@ -1566,7 +1566,7 @@
     "startSettlingAfterSeconds": 5,
     "startSettlingAt": 0,
     "startMainAfterSeconds": 15,
-    "startMainAt": 1773334378,
+    "startMainAt": 1773573972,
     "durationSeconds": 2592000,
     "bridgeCloseAfterEndSeconds": 604800,
     "pointRegistrationCloseAfterEndSeconds": 600
@@ -2116,6 +2116,16 @@
           "members": [
             {
               "name": "snapshot",
+              "type": "@core::array::Array::<(core::felt252, core::felt252)>"
+            }
+          ],
+          "name": "core::array::Span::<(core::felt252, core::felt252)>",
+          "type": "struct"
+        },
+        {
+          "members": [
+            {
+              "name": "snapshot",
               "type": "@core::array::Array::<(core::felt252, dojo::meta::introspect::Ty)>"
             }
           ],
@@ -2300,6 +2310,26 @@
             }
           ],
           "name": "core::array::Span::<dojo::sharding::request::ShardModel>",
+          "type": "struct"
+        },
+        {
+          "members": [
+            {
+              "name": "snapshot",
+              "type": "@core::array::Array::<dojo::world::world_sharding::ShardDynamicMemberChanges>"
+            }
+          ],
+          "name": "core::array::Span::<dojo::world::world_sharding::ShardDynamicMemberChanges>",
+          "type": "struct"
+        },
+        {
+          "members": [
+            {
+              "name": "snapshot",
+              "type": "@core::array::Array::<dojo::world::world_sharding::ShardSlotDescriptor>"
+            }
+          ],
+          "name": "core::array::Span::<dojo::world::world_sharding::ShardSlotDescriptor>",
           "type": "struct"
         },
         {
@@ -2892,6 +2922,20 @@
           ]
         },
         {
+          "name": "dojo::sharding::request::ShardCoverage",
+          "type": "enum",
+          "variants": [
+            {
+              "name": "Full",
+              "type": "()"
+            },
+            {
+              "name": "DeterministicSubset",
+              "type": "()"
+            }
+          ]
+        },
+        {
           "members": [
             {
               "name": "selector",
@@ -2918,6 +2962,10 @@
             {
               "name": "fields",
               "type": "core::array::Span::<dojo::sharding::request::ShardField>"
+            },
+            {
+              "name": "coverage",
+              "type": "dojo::sharding::request::ShardCoverage"
             }
           ],
           "name": "dojo::sharding::request::ShardModel",
@@ -3611,36 +3659,6 @@
           "type": "struct"
         },
         {
-          "items": [
-            {
-              "inputs": [
-                {
-                  "name": "storage_changes",
-                  "type": "core::array::Array::<(core::felt252, core::felt252)>"
-                }
-              ],
-              "name": "update_shard_state",
-              "outputs": [],
-              "state_mutability": "external",
-              "type": "function"
-            },
-            {
-              "inputs": [
-                {
-                  "name": "slots",
-                  "type": "core::array::Span::<core::felt252>"
-                }
-              ],
-              "name": "cancel_shard_state",
-              "outputs": [],
-              "state_mutability": "external",
-              "type": "function"
-            }
-          ],
-          "name": "dojo::world::world_contract::IShardingProxy",
-          "type": "interface"
-        },
-        {
           "kind": "struct",
           "members": [
             {
@@ -4263,6 +4281,202 @@
           ],
           "name": "dojo::world::world_contract::world::WriterUpdated",
           "type": "event"
+        },
+        {
+          "items": [
+            {
+              "inputs": [
+                {
+                  "name": "slots",
+                  "type": "core::array::Span::<core::felt252>"
+                }
+              ],
+              "name": "describe_shard_slots",
+              "outputs": [
+                {
+                  "type": "core::array::Span::<dojo::world::world_sharding::ShardSlotDescriptor>"
+                }
+              ],
+              "state_mutability": "view",
+              "type": "function"
+            },
+            {
+              "inputs": [
+                {
+                  "name": "model_selector",
+                  "type": "core::felt252"
+                },
+                {
+                  "name": "entity_id",
+                  "type": "core::felt252"
+                },
+                {
+                  "name": "member_selector",
+                  "type": "core::felt252"
+                }
+              ],
+              "name": "dynamic_member_storage_slots",
+              "outputs": [
+                {
+                  "type": "core::array::Span::<core::felt252>"
+                }
+              ],
+              "state_mutability": "view",
+              "type": "function"
+            },
+            {
+              "inputs": [
+                {
+                  "name": "model_selector",
+                  "type": "core::felt252"
+                },
+                {
+                  "name": "entity_id",
+                  "type": "core::felt252"
+                },
+                {
+                  "name": "member_selector",
+                  "type": "core::felt252"
+                }
+              ],
+              "name": "dynamic_member_changed_slots",
+              "outputs": [
+                {
+                  "type": "core::array::Span::<core::felt252>"
+                }
+              ],
+              "state_mutability": "view",
+              "type": "function"
+            },
+            {
+              "inputs": [
+                {
+                  "name": "model_selector",
+                  "type": "core::felt252"
+                },
+                {
+                  "name": "entity_id",
+                  "type": "core::felt252"
+                },
+                {
+                  "name": "member_selector",
+                  "type": "core::felt252"
+                }
+              ],
+              "name": "dynamic_member_tracking_proof_slots",
+              "outputs": [
+                {
+                  "type": "core::array::Span::<core::felt252>"
+                }
+              ],
+              "state_mutability": "view",
+              "type": "function"
+            }
+          ],
+          "name": "dojo::world::world_sharding::IShardingMetadata",
+          "type": "interface"
+        },
+        {
+          "items": [
+            {
+              "inputs": [
+                {
+                  "name": "shard_id",
+                  "type": "core::felt252"
+                },
+                {
+                  "name": "slot_changes",
+                  "type": "core::array::Array::<(core::felt252, core::felt252)>"
+                },
+                {
+                  "name": "dynamic_members",
+                  "type": "core::array::Span::<dojo::world::world_sharding::ShardDynamicMemberChanges>"
+                },
+                {
+                  "name": "dynamic_changes",
+                  "type": "core::array::Span::<(core::felt252, core::felt252)>"
+                },
+                {
+                  "name": "dynamic_tracking_proofs",
+                  "type": "core::array::Span::<(core::felt252, core::felt252)>"
+                }
+              ],
+              "name": "settle_shard_changes",
+              "outputs": [],
+              "state_mutability": "external",
+              "type": "function"
+            },
+            {
+              "inputs": [
+                {
+                  "name": "shard_id",
+                  "type": "core::felt252"
+                },
+                {
+                  "name": "slots",
+                  "type": "core::array::Span::<core::felt252>"
+                }
+              ],
+              "name": "cancel_shard_state",
+              "outputs": [],
+              "state_mutability": "external",
+              "type": "function"
+            }
+          ],
+          "name": "dojo::world::world_sharding::IShardingProxy",
+          "type": "interface"
+        },
+        {
+          "members": [
+            {
+              "name": "model_selector",
+              "type": "core::felt252"
+            },
+            {
+              "name": "entity_id",
+              "type": "core::felt252"
+            },
+            {
+              "name": "member_selector",
+              "type": "core::felt252"
+            },
+            {
+              "name": "changes_offset",
+              "type": "core::integer::u32"
+            },
+            {
+              "name": "changes_len",
+              "type": "core::integer::u32"
+            }
+          ],
+          "name": "dojo::world::world_sharding::ShardDynamicMemberChanges",
+          "type": "struct"
+        },
+        {
+          "members": [
+            {
+              "name": "slot",
+              "type": "core::felt252"
+            },
+            {
+              "name": "model_selector",
+              "type": "core::felt252"
+            },
+            {
+              "name": "entity_id",
+              "type": "core::felt252"
+            },
+            {
+              "name": "member_selector",
+              "type": "core::felt252"
+            },
+            {
+              "name": "is_dynamic_lock",
+              "type": "core::bool"
+            }
+          ],
+          "name": "dojo::world::world_sharding::ShardSlotDescriptor",
+          "type": "struct"
         },
         {
           "inputs": [],
@@ -16731,8 +16945,8 @@
               ]
             }
           ],
-          "address": "0x39e31721181cb6f42219d77db7354761a029b6d91be7590d3a7c823fd5a743c",
-          "class_hash": "0x754a8901be042be543786f2038eec4d833a5c069f865357be860a0ffc5521c2",
+          "address": "0x25f1d7ed3a6254fabf46faa4c7d9fc45ffaccaa5742bf9126c6a5a34339e75a",
+          "class_hash": "0x71290c18f0080c193881d29cf36bb45054a3e97fef3c7468cda35c01f1ec9f",
           "init_calldata": [],
           "selector": "0x39779154845217b9230e347a39ab6e47e8f2d46c1fd80c6996d13988857d770",
           "systems": [
@@ -17000,8 +17214,8 @@
               ]
             }
           ],
-          "address": "0x4f44bd69f37e52d0904491ec9e9413e59af3fb9693320f94a78aac6ca760469",
-          "class_hash": "0x5332970c189cf4f9050cdb1f731578f883a36cce0aed23ea7e0daf2739e7bad",
+          "address": "0x57fb3acebd87b80f439a1e0a89fe692b90c55e28ee9edaddd278e4f9c53f546",
+          "class_hash": "0x21de4d7f3de62c9591207d194e05b639f010a79a1864c1138432c3bd730e302",
           "init_calldata": [],
           "selector": "0x44475a775d79049bbe99567b7c00a1e4d8d582cade61a8aec07ca3bb234f6e6",
           "systems": [
@@ -17271,8 +17485,8 @@
               ]
             }
           ],
-          "address": "0x44726ec8a6b7bd27cb0ee08645acba1926b3631e3b2b5e20d66cf0195a5fb99",
-          "class_hash": "0x68960eb6338282a127ef20a949c3e39064b1d9856414918a62290b71a7a8801",
+          "address": "0x3e8d92fa4ba70066e88589378853b2b38f53f131b5d783953b1eeeca941fe15",
+          "class_hash": "0x6a92d2d7ec44ab29fc002be1c77616811c46b604ec69f5326b6aa1ccbc52f6",
           "init_calldata": [],
           "selector": "0x3414be5ba2c90784f15eb572e9222b5c83a6865ec0e475a57d7dc18af9b3742",
           "systems": [
@@ -19110,8 +19324,8 @@
               ]
             }
           ],
-          "address": "0x160cf2186acb5e6123766992317a220016651af405b4399bcf3ef475ce81b65",
-          "class_hash": "0x2b03a8889720a3f8bdde688e111bcb07d653fd6551fccb33f66383a53bea699",
+          "address": "0x5b9705c0f8f44b4f86f5071e2168cfd216d6b9f86b6ca0cb174c7a7f72d3d24",
+          "class_hash": "0xe3855d40d98df8093d35c4839e7c3ac37de35933e6981081c5a32a3426e933",
           "init_calldata": [],
           "selector": "0x1cb4608b18b40cb6420be7cf67ff21abe727a2bf599f2727d8eed5e36099fc2",
           "systems": [
@@ -19343,8 +19557,8 @@
               ]
             }
           ],
-          "address": "0x9ba17d60e8923427f4587d8488bad436bdba8a778ff5e5002a9f0cf41d881b",
-          "class_hash": "0x53c1dd2f91c570dd588792bed179cae57a801c5daf68426cfec3f3fa130962d",
+          "address": "0x726fe1b97635e95faa833e56ac024bd099ea6b9306ae1dc2e945ab5e476ef8a",
+          "class_hash": "0x284af3afd168f34f28dcaf379602dd95fe09b1d9b8cf1cb8aeaf76083b69e1b",
           "init_calldata": [],
           "selector": "0x11f834f0265a2bcc31088ba6f8cf52a2a160b55c3fcf102a6056ed2e0b9066a",
           "systems": [
@@ -19555,8 +19769,8 @@
               ]
             }
           ],
-          "address": "0x3db8ac7464b891f50b89905223b4daa1a493f55b49939d1134e77d88a1b1788",
-          "class_hash": "0x60f483463c261d91cefdd9ea97178eda4609b6eb6c2585e54daba3b31fca888",
+          "address": "0x4540be552bdf8b2713043771ba2f7b6064282a32d4b3cb2835a58dd65faf554",
+          "class_hash": "0x21886821582238db178afdbccbbcb8a8420547bcfb39b0a9cc7e26c78cf3684",
           "init_calldata": [],
           "selector": "0x32279d1c73c6356f5f15ff0e59adc6bfc45ffcde796c785452f6944b9b36ef1",
           "systems": [
@@ -19769,8 +19983,8 @@
               ]
             }
           ],
-          "address": "0x65579e46d37a1142d8976932238e74303356b35e97aca6d6609376cc69ed7db",
-          "class_hash": "0x68c470e3ba353871c52ae3b059d18ed1b53f9af37e093210a71d8b43ac1d6de",
+          "address": "0x9b6f71378c2f65c7e06ba999304da7877e3e0fffdcad5bd7b216713c8194e2",
+          "class_hash": "0x3e551834892c210d8895ee212b2be65b7ae062227b59f028ed2aa089163f8b7",
           "init_calldata": [],
           "selector": "0x4d5cfcb90997c42faaec636a440b73118f54d7e5321a8e6e134bdb0ac946333",
           "systems": [
@@ -20034,8 +20248,8 @@
               ]
             }
           ],
-          "address": "0x2d73e192ac2c2ef0c53768e07798e5c77a8a5fed2e6bcad16a7a25065763696",
-          "class_hash": "0x578558cc71c5a71fc2c7ce097e5a67d6d85ccb50b48aae654abc5ac525fdcb3",
+          "address": "0xaa705e18353dd232e81d078d58bd4abb01393198814893699f6508441fb338",
+          "class_hash": "0x22f7524507fa211d33c3599432e6ad97e02980eddf814d5034ef647a2514d23",
           "init_calldata": [],
           "selector": "0x15516acac71fbb80f953b9a8fac7d65ceff957f7f2d568fecbccba36bec6263",
           "systems": [
@@ -20556,8 +20770,8 @@
               ]
             }
           ],
-          "address": "0x7ec3faf8b7572f9c94adcf74d1a846118d80dca9d1b2ed124e31b9cc495e9ff",
-          "class_hash": "0x30088055d9a9b11c6b35b4ef0f93ba964b0cf1da57f53f316dcb4278de97f5e",
+          "address": "0x7a5478d0cd078f0565fb0129ca7cf9f8bf446c1974da9236736c35cf756e846",
+          "class_hash": "0x85455c0a312ad3be3135813ec7bd5d01930e373c004882a9976488e682cc1b",
           "init_calldata": [],
           "selector": "0x4de7ee78f9f01b8f7b98c172552cc0f7b81c8706ffc85e7b831021e820420d1",
           "systems": [
@@ -20867,8 +21081,8 @@
               ]
             }
           ],
-          "address": "0x42cefaf8416fb236c85ccbab7bc27593335e25f5c4b4c9555869f0a6ce0753b",
-          "class_hash": "0x611fa3a9e78b047001136ca90f3a0a5a2f04f79feb4d793b49ea54f9c96bbde",
+          "address": "0x90dd83d41da7d0022a1869728bde0538e7eba760c66ce9f8f7de22eb7f71dd",
+          "class_hash": "0x52f3b2e37c25ef38880f4d20b08c0aa3ca07e20da60cd6614934e7a0f95b438",
           "init_calldata": [],
           "selector": "0x4bdd8bcbb935577aba3b974bd7e906698504fcb75e0c3aa34913c21342b4498",
           "systems": [
@@ -21111,8 +21325,8 @@
               ]
             }
           ],
-          "address": "0x4cc446d1d4bede8732c5fa02fea3bcf7951da07ef23b83b1bae710a5583a09d",
-          "class_hash": "0x36fdd3aca7b29f354469e52dbd6737b3ddd3b39f989f983aa38dc8d1361128f",
+          "address": "0x12d7f0dae9f7975e6b91aa0abf64ceb3ad8ed9f10cba355ffb4eaf885347e80",
+          "class_hash": "0x72167c0846ed633ca80dc344f8545314b361f0f67a54cb97744a3c10df8b918",
           "init_calldata": [],
           "selector": "0xf480ba1a0c3e5b85a74ba14244a1653f886654d67c71b4dd0804d9eecf1cd9",
           "systems": [
@@ -21630,8 +21844,8 @@
               ]
             }
           ],
-          "address": "0x3c70a417cfbebeb596b8309d3ebf7e802944f56556ba5d6ae2e8bd34f7a1d30",
-          "class_hash": "0x6927cf9da26d61b03b1ab638c6c9513887c42867e226673631d6fe8ae094a3c",
+          "address": "0xcae3334fd3d8a3e6413b7a14a6fd1ad8079a4daab82d0713097eb0a171b635",
+          "class_hash": "0x2c58188c003f00510370f6e49dc6de8c73ba260a3b34e83a4c14647305d2eec",
           "init_calldata": [],
           "selector": "0x567d970e2796f641f9a9c23fa16378ddaee5c8a7d27ac4e3edbd4dfa25a1743",
           "systems": [
@@ -21841,8 +22055,8 @@
               ]
             }
           ],
-          "address": "0x30ceefff4d8c9884f380c091991d91da8c1691ab55c6db97443402437b3b676",
-          "class_hash": "0x633a939859e99d5670a6c32fa5c198ddb9d32e61fe884a855d2540313cc7f1e",
+          "address": "0x3b631afad6afa7a86032f68103709587de482d2a3c69de5182ef4eb629e7df9",
+          "class_hash": "0x621ec9cf8626b1977c6b42fc8772cc7656534b7a6d099f9fd20674266910d0a",
           "init_calldata": [],
           "selector": "0x628d6becd2c6fa1835109109b92cc642dfe69ab9194ca331cf7c510d9e2b5ce",
           "systems": [
@@ -22042,7 +22256,7 @@
               ]
             }
           ],
-          "address": "0x2e8ee3354b31fe8734f73a925e56e1bc6c8b4d37b5c828981c8b73503a18918",
+          "address": "0x4950e2c8c59c10df98ceca2af59905f0ac03b61cbe4903e21f0c553db44e19b",
           "class_hash": "0x68efc734b937fbfd29559e06d2abd71a8dfbce2e860cbf17d0ded265dc67626",
           "init_calldata": [],
           "selector": "0x45b86c7ee3f36393c4d14a0da3c58fdf406677137f1d840c53f01e8544e3b80",
@@ -22262,8 +22476,8 @@
               ]
             }
           ],
-          "address": "0x31d6735e45741eb5e32999ab08bf561b6ccad358094841b56962ca5e22bdafd",
-          "class_hash": "0x4d63129a76088f9f2092286d4814822ed9d56ddf9e7125d81d05d4cc4956bb6",
+          "address": "0x60162e728a9ba2bf6f0fce284f495c02bf492d288f77d08ec8baca00375ee1e",
+          "class_hash": "0x38b6d5a210039092af134f93e8016319a75ff02a1b5c54a9ccd775c66e2e3fa",
           "init_calldata": [],
           "selector": "0x5045fbdb3ad9b695ea6f218e57a3ca2ce575a2964f30e15f2e710f691aa0622",
           "systems": [
@@ -22467,7 +22681,7 @@
               ]
             }
           ],
-          "address": "0x1f5833459202e594343408331c577a037ecff561fecbaef0f67b5a3b4da5bf9",
+          "address": "0x484ed9f23af169cb22d6c7ac04b31675f342de0e87f3a9e58454ae1ef92a56c",
           "class_hash": "0x708c67ca62c1305467a1917eca69cca87d00d6e48518a3e5c0b9bb2b2631fef",
           "init_calldata": [],
           "selector": "0x583f59a664c37a0eb068b8a2fea20d6652fb22e8cbc1b1ffe936ebd26c545bf",
@@ -22858,8 +23072,8 @@
               ]
             }
           ],
-          "address": "0x18770308880c0a8a3d34948ab5f3a1d61dfe4ec3b9372bb1490cfec959d3fe5",
-          "class_hash": "0x1b7cdcbfa4ea34add96295b2ee4917757bada0fcbcebc111a053a613bcbdfb",
+          "address": "0x54dad8e623d10e99b585d6b4bb198f08f68d2f9c2eacae7439c4d9e4474553d",
+          "class_hash": "0x478fd8753a23604ec68761b1d6e26bdf62bb99a930d47331fbbb18639dfaed4",
           "init_calldata": [],
           "selector": "0x42230b5f7ccc6ce02a4ecb99c31d92ddd0f24ab472896afd617a2a763cf4179",
           "systems": [
@@ -23441,8 +23655,8 @@
               ]
             }
           ],
-          "address": "0x228c9ec2522a488504bedc1e027a642480fb8c82be39d6aaa02cce4453de193",
-          "class_hash": "0x6ef9414bfbc38a950993e3e76b41bf2d6eae7b3330d0e818a319e7cda6b08f4",
+          "address": "0x21e3efaf90a3848479ad60423538540753e37288f06d8b599203986bb3c8a3",
+          "class_hash": "0x10bc7bb3bfb93c8c68d2fbd062a91504d00e8c0367ea30bbb6109e138b47661",
           "init_calldata": [],
           "selector": "0x6d70095d0a6ca6efc41633bafa4ac5202f1f83c75afbba78987b58f495a4c0",
           "systems": [
@@ -23707,8 +23921,8 @@
               ]
             }
           ],
-          "address": "0x31b5cb65363249d92919aa13b82d884c554a797f4b9df0de3df02933e52229d",
-          "class_hash": "0x6a52a228cd97c90eada0b752ae98d2b26bdf46b8b80cb6c3352a30052c5452",
+          "address": "0x3b7135c5ac46f8aa4a702d84cae16c4408c759d6f8340c85a72528346bc3c9b",
+          "class_hash": "0x59322a95ff17652eff8f004537723df0bb4334ef16e256223807d13279a5936",
           "init_calldata": [],
           "selector": "0x4bb1850a95a41d6b0c7992a0c75bb1212f0ea054dc04866d6a6392cccec58b3",
           "systems": [
@@ -23941,8 +24155,8 @@
               ]
             }
           ],
-          "address": "0x7a1c174ff7b15bb808febaf3679baa3e8678522038046673f7aa2724297784d",
-          "class_hash": "0x11ee020704f431dacd83037be23c418c4283f1e5863b6ef7721f466e2fb55e7",
+          "address": "0x2cf279f48adb4e7e5dd5c6fea1a7adc32573bed16e1b4b06a99851fdafb50f2",
+          "class_hash": "0xabc074070ab604b743af81ead7f2450c0aca26c1db286c7364d74fda7f11db",
           "init_calldata": [],
           "selector": "0x3b4cc14cbb49692c85e1b132ac8536fe7d0d1361cd2fb5ba8df29f726ca02d2",
           "systems": [
@@ -24459,8 +24673,8 @@
               ]
             }
           ],
-          "address": "0x4c33021f29f7de47b58aea32a4588c08bcc18512c05987981943895368126b7",
-          "class_hash": "0x3eb87078276da1bad6e508d689fd29655fc7712d78f6271c596e882c6f226a8",
+          "address": "0x6dac1323e5669f2d73013fd1ca5553431136f05f9c20a8d151ca0b95a2c4e8",
+          "class_hash": "0x75ff3c2dacdc224dcd8c121fb5723648d6a68b34d8d2c09db2f36b445481d3a",
           "init_calldata": [],
           "selector": "0x6c7d7c49c05a128b5ef90b795f638288b11b478ce950a706f6c1db5356ef6a6",
           "systems": [
@@ -24732,8 +24946,8 @@
               ]
             }
           ],
-          "address": "0x1a8b4a4b1865a48becebf661506d5ca746e5a471812df41ba922ac94b0a109f",
-          "class_hash": "0x3f66b6f8e807011926a94b7219ab8f5521c8c83c5f3cc5b8fe475165912c031",
+          "address": "0x59fc2a6d227a39afd274b6ace7b24c16dca5374c999a74c7f5c5aa429721c12",
+          "class_hash": "0x8acbe029215acdc303fdfceff15268d1ad1ab0eb084bb189d9a1cf3cf8d12f",
           "init_calldata": [],
           "selector": "0x632480e29dba9c95a8b4e4ba0c7ad48bd5abdd3906211ec6f8a5350249b9d0",
           "systems": [
@@ -25018,8 +25232,8 @@
               ]
             }
           ],
-          "address": "0x477d1dc9791a1e31270943b66fab9c7dde7307dae640a101d60680f8dc35e00",
-          "class_hash": "0x7ca16a0a08f6b972001ea2f109c44d6259bc0438508e9aea14231351ae9c22d",
+          "address": "0x3f47ca349084ac7d4e98d6d04d5a407a25d674b7cec02026500499904d59061",
+          "class_hash": "0x2aa46dc77a52f6d247d6f7f12ceb4e9e438a7fc16497255dd84412db06e12e4",
           "init_calldata": [],
           "selector": "0x4f94ba58902810acb653eeeb2a36e5f8f5a7096ceac7a2705c52732281e3cd2",
           "systems": [
@@ -25407,8 +25621,8 @@
               ]
             }
           ],
-          "address": "0x7b98c0a5c59451ecc800a464dba15b4605228fc445fa99624ee2aeb827bc700",
-          "class_hash": "0x7644abd4b0dafc089f3ca3aa650b95556742595eb00a81ceeb7cf89960d1cda",
+          "address": "0x655e7e4fc39c85a00dca84f335797a12ce2d4c6fb8344acd575344bc1729753",
+          "class_hash": "0x119d36ed1a6a0b916952b863a902ffa22fa1b3ccc640f8c29f22007866965c0",
           "init_calldata": [],
           "selector": "0x626970a749fd6b8230875061236c1a9446ae65287beb6107d5b88e5ca078019",
           "systems": [
@@ -25611,8 +25825,8 @@
               ]
             }
           ],
-          "address": "0x4e0ff48659c3b6aa4ab4d39a24c6aea8a262c6e0bdaf31a44507292db2485a8",
-          "class_hash": "0x37379b5a9dc17a20c3d50fb8ef5089a28a9329f4c569fd9bb391bc3ab341c92",
+          "address": "0x3fce4aea036a1c74e27dd5dccf0b8c70b31a38e4ee3b5c701ebd7d0288b130d",
+          "class_hash": "0x14beadcf08541a3ee5fb6df4b80e2040d2deed697455157132ebde5465f9e99",
           "init_calldata": [],
           "selector": "0x44e1edf9ca51b11a8c1d6ffc341d3248fdbeebc7e7d3ee6314fee33174860c4",
           "systems": [
@@ -25735,6 +25949,20 @@
               "type": "struct"
             },
             {
+              "name": "dojo::sharding::request::ShardCoverage",
+              "type": "enum",
+              "variants": [
+                {
+                  "name": "Full",
+                  "type": "()"
+                },
+                {
+                  "name": "DeterministicSubset",
+                  "type": "()"
+                }
+              ]
+            },
+            {
               "members": [
                 {
                   "name": "selector",
@@ -25747,6 +25975,10 @@
                 {
                   "name": "fields",
                   "type": "core::array::Span::<dojo::sharding::request::ShardField>"
+                },
+                {
+                  "name": "coverage",
+                  "type": "dojo::sharding::request::ShardCoverage"
                 }
               ],
               "name": "dojo::sharding::request::ShardModel",
@@ -25960,8 +26192,8 @@
               ]
             }
           ],
-          "address": "0x41bdeee6b3b39ac167379ffc7eac102fd52ec497af86e06a554b2eaf6d9dd02",
-          "class_hash": "0x3501ccd47fe6997eebfb9ae35e12d96f5d5b2901e81727d8ea1c4a84dcce568",
+          "address": "0x54a9fccdbb7cf1aa06be72f630ff4d887a9e204353926100ea8d54deef09c52",
+          "class_hash": "0x68467bfda155031fad5b9060a48d0a73009a6cd3a57b69eb4d5f405f31ee23a",
           "init_calldata": [],
           "selector": "0x9afc8a5def42a92120c6b38ad4c2027903ee56147bf6f2d5dfd10335c97298",
           "systems": [
@@ -26163,8 +26395,8 @@
               ]
             }
           ],
-          "address": "0x6f5d8c4364ce3e93e76be11e82c63704e0921c3d296e2b9e47c9bce2f7ac77f",
-          "class_hash": "0x31b9a9634ee53ed0397639acea0d3947b52953a6325e23cc2eb292ec0392d20",
+          "address": "0x11c9a51a8c9f26c9ba0aaf2f1b86032a3c2d70be7c4db087616107007415565",
+          "class_hash": "0x484af8bbb6958e3b0a641a413e79e75c74e6db0199eebbf2c16d37c952531de",
           "init_calldata": [],
           "selector": "0x15f0efd5ca9fd9dc6685e7555bc35ed59422d97e19589d4b218b5f7a36096fd",
           "systems": [
@@ -26399,8 +26631,8 @@
               ]
             }
           ],
-          "address": "0x1507f52fbd2a3e26aa19d460a1597a70b4202cb4ccb59bf4f7d9338809fa1f2",
-          "class_hash": "0xc18b24816646847f9f5061c06ffd42a80bb5ed001616f1862f2393bf735f40",
+          "address": "0x7030b55369e60df096af969bf9c5a62b57b4ab43d3f7102dc85b304c5f9e3b6",
+          "class_hash": "0x1936d55e8b75da08a39cbd2ddc25722e80975b7e670a87e8486edb2649ce3d9",
           "init_calldata": [],
           "selector": "0x187f170f62cb2f89334e291ddc0d0f388a855abcdd2b911425fed8304d3fdc3",
           "systems": [
@@ -26664,8 +26896,8 @@
               ]
             }
           ],
-          "address": "0x22e260e6d23c66575ac3cc093837371de2932502d53798cf600f15d3c782b2a",
-          "class_hash": "0x63395002fa5fe043e1ddb9c1081a04ef4687b3810a5b1726491ed2a11a575e0",
+          "address": "0x2515e7068e93835db1bbf3a87523b0a9fea374e2cd44f897b6080cccf25665f",
+          "class_hash": "0x6deb48297af8c037d7d3d2b70c47f958e5d976249a9cd309e6b5b79f86e748c",
           "init_calldata": [],
           "selector": "0x25205919a9c1be9b6b4c75d8435d21e748b4144575e3ed50d453ebd586f1467",
           "systems": [
@@ -26984,8 +27216,8 @@
               ]
             }
           ],
-          "address": "0x971e40bc6e1063cb5b2aceb68744ce4d9d3638aad9b675b62d7086f10d6ad0",
-          "class_hash": "0x572053045dbf42b0363ae487960733000733dc52559b91bdeb59d1170c47be2",
+          "address": "0x7c88603984bb192da6db6fe7c4fe7badddccb06b7bcb47da3cab033789a098e",
+          "class_hash": "0x4e0c90a8e2d2e4ba4d0cd70aa2e5d0ccb8f71e090a4ae815eb049b21fc5dab2",
           "init_calldata": [],
           "selector": "0x473dc1d8bca81e2a2d92011b4171ffe608d47dcde63f7d112f03bb767b57aea",
           "systems": [
@@ -27450,8 +27682,8 @@
               ]
             }
           ],
-          "address": "0x905a71c306399461e81f8a219fbf0eb6183a9e54632cc5c2ada057dd51540f",
-          "class_hash": "0x19df6e33272e9c612496b2e831661a5bff4e558450b93033fdd26a43f5ad65",
+          "address": "0x1e05f66a08c2e560a81515893cb4b893c9aac435cca7938567469162d5ee96",
+          "class_hash": "0x7f41639186271ddaae75e7d5d0aad70d9a0e7e29bd32d01dc3010442cf2a41f",
           "init_calldata": [],
           "selector": "0x49b9809fc3839b4eb765c5d1db1d1a835678574e42bf24bf70235cecf2f8437",
           "systems": [
@@ -27783,8 +28015,8 @@
               ]
             }
           ],
-          "address": "0x75b1ffcc567129c7339f40bb403ef9ee642ec93e69491868543466ddc8aab6c",
-          "class_hash": "0x60730d9fb643e7fafcaf0107630d38ca6619d786af9988b1ecccaf94a782935",
+          "address": "0x195036e0e832cd3d068ffcc6e14d6374c9735ac636ac03837d6a139f1894720",
+          "class_hash": "0x2b9e03836337c79a32d05168213ace2918ddba261d385021938161381e1e6f7",
           "init_calldata": [],
           "selector": "0x522c38540c126c2f193f496d4eb1882a63cdc02997f64c298d41622b26ded2b",
           "systems": [
@@ -28302,7 +28534,7 @@
               ]
             }
           ],
-          "address": "0x754a1fe985b1a1b7c359b6f38c975de2eacf08c4c29506d0d8c0c8d643d95fd",
+          "address": "0x7bc3a76f264b1b21076da7ebc81181ce609abcacac2a80810d508411d1191f4",
           "class_hash": "0x73968fb044c09b98d295ddc1a5f429e6c5dc41cc4f29c6cab8dd77db76784e3",
           "init_calldata": [],
           "selector": "0x1a8cd271b73203df04608c15bc7be031b756ed2ffc25bab756cf9ff6c8731d0",
@@ -28553,8 +28785,8 @@
               ]
             }
           ],
-          "address": "0x7e19c5cae83728b3357ba20dd6269f5a7b7edd5caed2e9638b367bababa5ebe",
-          "class_hash": "0x7ab3f548d6b864f60c7e84775cb2c6efb98277ad43430fd325d119aea168365",
+          "address": "0x2a29f9f3be0e756d1f3c4dd7b6f1d555be5cac79e746a8e35e25e08fb66857e",
+          "class_hash": "0x49203e98fc9d16484d722f88a6e353bf2b5eaae663248b8f849a36ea862aca",
           "init_calldata": [],
           "selector": "0x2cba999742f3b0dad2f036c7ea44826e236555cf5d82930faadcf43260524",
           "systems": [
@@ -29071,8 +29303,8 @@
               ]
             }
           ],
-          "address": "0xfad5b52db95c29fc8871e8463fbf2c7678ba4c2f60be1777b235799dce1eb9",
-          "class_hash": "0x1095138cc527bb45a8d8f593d79cea3ede49486f6d7c3ea00828a125c90f08f",
+          "address": "0x11fbb99c89cc2bccbf1f57cb64298f6b46eaee1f5b1a8b2207b60a9c3543e1",
+          "class_hash": "0x56d54b52e6e94e8b5d49f98cd75a7f1da97f35bc817cfcbe69a57dafde4831e",
           "init_calldata": [],
           "selector": "0x52ecb1dffcd93e8b7f1379f426b123cc1de850735306874424bf8fe817f3862",
           "systems": [
@@ -29324,8 +29556,8 @@
               ]
             }
           ],
-          "address": "0x78a28c0e4ee5790705f6b52bffc768a07d304ca7ebdb0e8d044cdbc6cea4c6d",
-          "class_hash": "0x5c23ef57b5e2dedf2238a3221f46222e4d824350b0fe2042675e0e628a767aa",
+          "address": "0x55c2c94044a70c0893a9f38863cfc14e578a7fa7de0f04a077b093e6a41dd25",
+          "class_hash": "0x1b0087db1fcfbd2d6677fdb4b4b1552a8f4007dd3338da2bbd573c90b523040",
           "init_calldata": [],
           "selector": "0x7626c7e3f63dbae9658ee764d453a8dbdbc0df9797ba797fa6564759c444771",
           "systems": [
@@ -30114,14 +30346,14 @@
           "version": "0_1_12"
         },
         {
-          "class_hash": "0x68a992d4795e776425b8051e9f64574c829642ec9e22585c7acf39ecf3eaf1b",
+          "class_hash": "0x12ac1e840849844af231fe5e4bc35ae8ffb8459feed18c99b6fa77f8f3f75e6",
           "selector": "0x706baa7e13795e75b18774b3068f4bfbf16c3c22692cd8ac1e329255380ab03",
           "systems": [],
           "tag": "s1_eternum-rng_library_v0_1_13",
           "version": "0_1_13"
         },
         {
-          "class_hash": "0x373afd67044e23b09cd969cf357f1405551855014596b92752c76ac11999062",
+          "class_hash": "0x433bb4917a795cbe9ff677a105eef755ed33305a242a0b8d5dd0b63477a2d64",
           "selector": "0x639c98a812a97151f1cc210d9e844c0c962ca760f2a13f63a6ff3b9b6ca58f3",
           "systems": [],
           "tag": "s1_eternum-structure_creation_library_v0_1_12",
@@ -33247,6 +33479,20 @@
             "type": "struct"
           },
           {
+            "name": "dojo::sharding::request::ShardCoverage",
+            "type": "enum",
+            "variants": [
+              {
+                "name": "Full",
+                "type": "()"
+              },
+              {
+                "name": "DeterministicSubset",
+                "type": "()"
+              }
+            ]
+          },
+          {
             "members": [
               {
                 "name": "selector",
@@ -33259,6 +33505,10 @@
               {
                 "name": "fields",
                 "type": "core::array::Span::<dojo::sharding::request::ShardField>"
+              },
+              {
+                "name": "coverage",
+                "type": "dojo::sharding::request::ShardCoverage"
               }
             ],
             "name": "dojo::sharding::request::ShardModel",
@@ -33905,26 +34155,92 @@
             "type": "interface"
           },
           {
-            "interface_name": "dojo::world::world_contract::IShardingProxy",
+            "interface_name": "dojo::world::world_sharding::IShardingProxy",
             "name": "ShardingProxyImpl",
             "type": "impl"
+          },
+          {
+            "members": [
+              {
+                "name": "model_selector",
+                "type": "core::felt252"
+              },
+              {
+                "name": "entity_id",
+                "type": "core::felt252"
+              },
+              {
+                "name": "member_selector",
+                "type": "core::felt252"
+              },
+              {
+                "name": "changes_offset",
+                "type": "core::integer::u32"
+              },
+              {
+                "name": "changes_len",
+                "type": "core::integer::u32"
+              }
+            ],
+            "name": "dojo::world::world_sharding::ShardDynamicMemberChanges",
+            "type": "struct"
+          },
+          {
+            "members": [
+              {
+                "name": "snapshot",
+                "type": "@core::array::Array::<dojo::world::world_sharding::ShardDynamicMemberChanges>"
+              }
+            ],
+            "name": "core::array::Span::<dojo::world::world_sharding::ShardDynamicMemberChanges>",
+            "type": "struct"
+          },
+          {
+            "members": [
+              {
+                "name": "snapshot",
+                "type": "@core::array::Array::<(core::felt252, core::felt252)>"
+              }
+            ],
+            "name": "core::array::Span::<(core::felt252, core::felt252)>",
+            "type": "struct"
           },
           {
             "items": [
               {
                 "inputs": [
                   {
-                    "name": "storage_changes",
+                    "name": "shard_id",
+                    "type": "core::felt252"
+                  },
+                  {
+                    "name": "slot_changes",
                     "type": "core::array::Array::<(core::felt252, core::felt252)>"
+                  },
+                  {
+                    "name": "dynamic_members",
+                    "type": "core::array::Span::<dojo::world::world_sharding::ShardDynamicMemberChanges>"
+                  },
+                  {
+                    "name": "dynamic_changes",
+                    "type": "core::array::Span::<(core::felt252, core::felt252)>"
+                  },
+                  {
+                    "name": "dynamic_tracking_proofs",
+                    "type": "core::array::Span::<(core::felt252, core::felt252)>"
                   }
                 ],
-                "name": "update_shard_state",
+                "name": "settle_shard_changes",
                 "outputs": [],
                 "state_mutability": "external",
                 "type": "function"
               },
               {
                 "inputs": [
+                  {
+                    "name": "shard_id",
+                    "type": "core::felt252"
+                  },
                   {
                     "name": "slots",
                     "type": "core::array::Span::<core::felt252>"
@@ -33936,7 +34252,142 @@
                 "type": "function"
               }
             ],
-            "name": "dojo::world::world_contract::IShardingProxy",
+            "name": "dojo::world::world_sharding::IShardingProxy",
+            "type": "interface"
+          },
+          {
+            "interface_name": "dojo::world::world_sharding::IShardingMetadata",
+            "name": "ShardingMetadataViewImpl",
+            "type": "impl"
+          },
+          {
+            "members": [
+              {
+                "name": "slot",
+                "type": "core::felt252"
+              },
+              {
+                "name": "model_selector",
+                "type": "core::felt252"
+              },
+              {
+                "name": "entity_id",
+                "type": "core::felt252"
+              },
+              {
+                "name": "member_selector",
+                "type": "core::felt252"
+              },
+              {
+                "name": "is_dynamic_lock",
+                "type": "core::bool"
+              }
+            ],
+            "name": "dojo::world::world_sharding::ShardSlotDescriptor",
+            "type": "struct"
+          },
+          {
+            "members": [
+              {
+                "name": "snapshot",
+                "type": "@core::array::Array::<dojo::world::world_sharding::ShardSlotDescriptor>"
+              }
+            ],
+            "name": "core::array::Span::<dojo::world::world_sharding::ShardSlotDescriptor>",
+            "type": "struct"
+          },
+          {
+            "items": [
+              {
+                "inputs": [
+                  {
+                    "name": "slots",
+                    "type": "core::array::Span::<core::felt252>"
+                  }
+                ],
+                "name": "describe_shard_slots",
+                "outputs": [
+                  {
+                    "type": "core::array::Span::<dojo::world::world_sharding::ShardSlotDescriptor>"
+                  }
+                ],
+                "state_mutability": "view",
+                "type": "function"
+              },
+              {
+                "inputs": [
+                  {
+                    "name": "model_selector",
+                    "type": "core::felt252"
+                  },
+                  {
+                    "name": "entity_id",
+                    "type": "core::felt252"
+                  },
+                  {
+                    "name": "member_selector",
+                    "type": "core::felt252"
+                  }
+                ],
+                "name": "dynamic_member_storage_slots",
+                "outputs": [
+                  {
+                    "type": "core::array::Span::<core::felt252>"
+                  }
+                ],
+                "state_mutability": "view",
+                "type": "function"
+              },
+              {
+                "inputs": [
+                  {
+                    "name": "model_selector",
+                    "type": "core::felt252"
+                  },
+                  {
+                    "name": "entity_id",
+                    "type": "core::felt252"
+                  },
+                  {
+                    "name": "member_selector",
+                    "type": "core::felt252"
+                  }
+                ],
+                "name": "dynamic_member_changed_slots",
+                "outputs": [
+                  {
+                    "type": "core::array::Span::<core::felt252>"
+                  }
+                ],
+                "state_mutability": "view",
+                "type": "function"
+              },
+              {
+                "inputs": [
+                  {
+                    "name": "model_selector",
+                    "type": "core::felt252"
+                  },
+                  {
+                    "name": "entity_id",
+                    "type": "core::felt252"
+                  },
+                  {
+                    "name": "member_selector",
+                    "type": "core::felt252"
+                  }
+                ],
+                "name": "dynamic_member_tracking_proof_slots",
+                "outputs": [
+                  {
+                    "type": "core::array::Span::<core::felt252>"
+                  }
+                ],
+                "state_mutability": "view",
+                "type": "function"
+              }
+            ],
+            "name": "dojo::world::world_sharding::IShardingMetadata",
             "type": "interface"
           },
           {
@@ -34575,8 +35026,8 @@
             ]
           }
         ],
-        "address": "0x23ac1ef59b123c35261f9a1ef9e91024f7f0045bfe30eacccea0cfbbf40b4e2",
-        "class_hash": "0x1d5b7348260a451fab146f39dc43befff6b0aa69180ade1290ea2822734dc",
+        "address": "0x1314d1ec1037ded7ec370890139aac66d838be88f7706360ee56b368c7d359",
+        "class_hash": "0x37231adce047d000830fb39da47d00edc75d9b931028a64c62b05d0ce4624f2",
         "entrypoints": [
           "uuid",
           "set_metadata",
@@ -34604,7 +35055,7 @@
           "request_sharding",
           "end_shard",
           "upgrade",
-          "update_shard_state",
+          "settle_shard_changes",
           "cancel_shard_state"
         ],
         "name": "Realms: Eternum",
@@ -34612,6 +35063,6 @@
       }
     }
   },
-  "prev_prize_distribution_address": "0x64395c463b28f517222a17c1e476ff216a45d60fb452c550e753cc1f11ceb55"
+  "prev_prize_distribution_address": "0x74683ecb2ccdc144bc06bad313a1aa6cf45aae8d17b6c010a9b3a8828809560"
 }
     }

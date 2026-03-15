@@ -35,6 +35,7 @@ import { useUIStore } from "../hooks/store/use-ui-store";
 import { NoAccountModal } from "../ui/layouts/no-account-modal";
 import { ETERNUM_CONFIG } from "../utils/config";
 import { initializeGameRenderer } from "./game-renderer";
+import { resolveProfileForShardSession } from "./shard-world-profile";
 
 export type SetupResult = Awaited<ReturnType<typeof setup>>;
 
@@ -143,6 +144,7 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
   // 0) Resolve world profile: prefer URL, then active selection, then prompt
   const chain = resolveChain(env.VITE_PUBLIC_CHAIN! as Chain);
   const pathWorld = deriveWorldFromPath();
+  const shardSession = parseShardUrlParams(window.location.search);
 
   let profile: any = null;
   if (pathWorld) {
@@ -197,6 +199,13 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
     console.log("[bootstrap] World profile refreshed, continuing bootstrap without page reload");
   }
   if (!profile) profile = await ensureActiveWorldProfileWithUI(chain);
+  if (shardSession !== null) {
+    profile = await resolveProfileForShardSession({
+      chain,
+      profile,
+      shardId: shardSession.shardId,
+    });
+  }
 
   // 1) Patch manifest with factory-provided addresses and world address
   const baseManifest = getGameManifest(chain);
@@ -209,7 +218,6 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
   const shardStore = useShardStore.getState();
   // Read shard context from URL only.
   // This prevents stale sessionStorage in the main tab from forcing shard mode.
-  const shardSession = parseShardUrlParams(window.location.search);
   const runtimeContext = resolveRuntimeContext(window.location.href, shardSession);
   shardStore.setRuntimeContext(runtimeContext);
 

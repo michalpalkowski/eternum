@@ -15,4 +15,9 @@ describe("bootstrap shard context validation", () => {
     expect(source).not.toContain("shardParams?.torii");
     expect(source).not.toContain("shardStore.shardToriiUrl");
   });
+
+  it("aligns the world profile with shard session world before patching the manifest", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/init/bootstrap.tsx"), "utf8");
+    expect(source).toContain("resolveProfileForShardSession");
+  });
 });

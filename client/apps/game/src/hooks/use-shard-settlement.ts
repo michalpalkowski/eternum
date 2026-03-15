@@ -2,6 +2,7 @@ import { getContractByName } from "@dojoengine/core";
 import { useCallback, useEffect, useState } from "react";
 import type { Call } from "starknet";
 import { dojoConfig } from "../../dojo-config";
+import { normalizeHexAddress } from "@/sharding/addresses";
 import {
   extractGameContractFromShardId,
   parseSettlementStreamEvent,
@@ -13,6 +14,7 @@ export type ShardSettlementErrorCode =
   | "MISSING_ACCOUNT"
   | "MISSING_OPERATOR_URL"
   | "MISSING_SHARD_ID"
+  | "SHARD_WORLD_MISMATCH"
   | "STREAM_PAYLOAD_INVALID"
   | "STREAM_DISCONNECTED"
   | "SETTLEMENT_TX_FAILED";
@@ -61,8 +63,12 @@ export const useShardSettlement = ({ account, shardId, operatorUrl }: UseShardSe
     };
 
     try {
-      const gameContractAddress = extractGameContractFromShardId(shardId);
-      eventSource = new EventSource(`${operatorUrl}/shard/${gameContractAddress}/events`);
+      const shardWorldAddress = normalizeHexAddress(extractGameContractFromShardId(shardId));
+      if (shardWorldAddress === null) {
+        failAndClose("Shard session world address is invalid; reload the shard tab and try again");
+        return;
+      }
+      eventSource = new EventSource(`${operatorUrl}/shard/${shardWorldAddress}/events`);
 
       eventSource.addEventListener("settling", (event) => {
         if (!(event instanceof MessageEvent) || typeof event.data !== "string") {
@@ -153,6 +159,22 @@ export const useShardSettlement = ({ account, shardId, operatorUrl }: UseShardSe
     }
     if (shardId === null) {
       failSettlement("MISSING_SHARD_ID", "Missing shard ID");
+      return;
+    }
+    const shardWorldAddress = normalizeHexAddress(extractGameContractFromShardId(shardId));
+    const manifestWorldAddress = normalizeHexAddress(dojoConfig.manifest.world.address);
+    if (shardWorldAddress === null || manifestWorldAddress === null) {
+      failSettlement(
+        "SHARD_WORLD_MISMATCH",
+        "Shard session or frontend manifest world address is invalid; reload the shard tab so bootstrap can align it with the shard session",
+      );
+      return;
+    }
+    if (manifestWorldAddress !== shardWorldAddress) {
+      failSettlement(
+        "SHARD_WORLD_MISMATCH",
+        `Shard session targets world ${shardWorldAddress}, but frontend manifest is bootstrapped for ${manifestWorldAddress}. Reload the shard tab or re-open the shard from the latest request.`,
+      );
       return;
     }
 

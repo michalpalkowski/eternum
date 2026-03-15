@@ -1,3 +1,4 @@
+import { shortString } from "starknet";
 import { normalizeSelector, nameToPaddedFelt } from "./normalize";
 import { FACTORY_QUERIES, buildApiUrl, fetchWithErrorHandling } from "@bibliothecadao/torii";
 import type { FactoryContractRow } from "./types";
@@ -6,6 +7,8 @@ interface WorldDeployment {
   worldAddress: string | null;
   rpcUrl: string | null;
 }
+
+const WORLD_DEPLOYED_LIST_QUERY = "SELECT name, address FROM [wf-WorldDeployed] LIMIT 1000;";
 
 // Use shared SQL utils from @bibliothecadao/torii
 
@@ -55,6 +58,43 @@ const normalizeString = (value: unknown): string | null => {
   return trimmed ? trimmed : null;
 };
 
+const decodePaddedFeltAscii = (hex: string): string | null => {
+  const normalizedHex = normalizeString(hex);
+  if (!normalizedHex) return null;
+
+  const feltHex = normalizedHex.startsWith("0x") || normalizedHex.startsWith("0X") ? normalizedHex.slice(2) : normalizedHex;
+  if (feltHex.length === 0 || feltHex === "0") {
+    return null;
+  }
+
+  try {
+    const asDecimal = BigInt(`0x${feltHex}`).toString();
+    const decoded = shortString.decodeShortString(asDecimal);
+    if (decoded.trim().length > 0) {
+      return decoded;
+    }
+  } catch {
+    // Fall back to manual ASCII decoding below.
+  }
+
+  let index = 0;
+  while (index + 1 < feltHex.length && feltHex.slice(index, index + 2) === "00") {
+    index += 2;
+  }
+
+  let out = "";
+  for (; index + 1 < feltHex.length; index += 2) {
+    const byte = parseInt(feltHex.slice(index, index + 2), 16);
+    if (byte === 0) {
+      continue;
+    }
+    out += String.fromCharCode(byte);
+  }
+
+  const decoded = out.trim();
+  return decoded.length > 0 ? decoded : null;
+};
+
 const asRecord = (value: unknown): Record<string, unknown> | null => {
   if (!value) return null;
   if (typeof value === "string") {
@@ -71,6 +111,21 @@ const asRecord = (value: unknown): Record<string, unknown> | null => {
     return value as Record<string, unknown>;
   }
   return null;
+};
+
+const extractWorldNameFromRow = (row: Record<string, unknown>): string | null => {
+  const direct = normalizeString(row.name) ?? normalizeString(row["data.name"]);
+  if (direct) {
+    return decodePaddedFeltAscii(direct);
+  }
+
+  const dataRecord = asRecord(row.data);
+  if (!dataRecord) {
+    return null;
+  }
+
+  const nestedName = normalizeString(dataRecord.name);
+  return nestedName ? decodePaddedFeltAscii(nestedName) : null;
 };
 
 const extractFirstString = (record: Record<string, unknown>, keys: string[]): string | null => {
@@ -154,4 +209,34 @@ export const resolveWorldAddressFromFactory = async (
 ): Promise<string | null> => {
   const deployment = await resolveWorldDeploymentFromFactory(factorySqlBaseUrl, worldName);
   return deployment?.worldAddress ?? null;
+};
+
+export const resolveWorldNameFromFactory = async (
+  factorySqlBaseUrl: string,
+  worldAddress: string,
+): Promise<string | null> => {
+  if (!factorySqlBaseUrl) return null;
+
+  const normalizedTargetAddress = normalizeAddress(worldAddress);
+  if (!normalizedTargetAddress) {
+    return null;
+  }
+
+  const url = buildApiUrl(factorySqlBaseUrl, WORLD_DEPLOYED_LIST_QUERY);
+
+  try {
+    const rows = await fetchWithErrorHandling<Record<string, unknown>>(url, "Factory SQL failed");
+    for (const row of rows) {
+      const rowWorldAddress = extractWorldAddressFromRow(row);
+      if (!rowWorldAddress || rowWorldAddress.toLowerCase() !== normalizedTargetAddress.toLowerCase()) {
+        continue;
+      }
+
+      return extractWorldNameFromRow(row);
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 };

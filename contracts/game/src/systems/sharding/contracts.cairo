@@ -69,7 +69,7 @@ pub mod shard_helpers {
 
     pub fn resource_all(ns_hash: felt252, entity_id: ID) -> ShardModel {
         let keys = array![entity_id.into()].span();
-        (Model::<Resource>::selector(ns_hash), Model::<Resource>::layout()).shard(keys)
+        (Model::<Resource>::selector(ns_hash), Model::<Resource>::layout()).shard_deterministic(keys)
     }
 
     /// Lock all resource balances for a shard session.
@@ -103,7 +103,7 @@ pub mod shard_helpers {
 
     pub fn structure_all(ns_hash: felt252, entity_id: ID) -> ShardModel {
         let keys = array![entity_id.into()].span();
-        (Model::<Structure>::selector(ns_hash), Model::<Structure>::layout()).shard(keys)
+        (Model::<Structure>::selector(ns_hash), Model::<Structure>::layout()).shard_deterministic(keys)
     }
 
     pub fn structure_buildings_all(ns_hash: felt252, entity_id: ID) -> ShardModel {
@@ -115,22 +115,22 @@ pub mod shard_helpers {
 
     pub fn production_boost_bonus_all(ns_hash: felt252, structure_id: ID) -> ShardModel {
         let keys = array![structure_id.into()].span();
-        (Model::<ProductionBoostBonus>::selector(ns_hash), Model::<ProductionBoostBonus>::layout()).shard(keys)
+        (Model::<ProductionBoostBonus>::selector(ns_hash), Model::<ProductionBoostBonus>::layout()).shard_deterministic(keys)
     }
 
     pub fn village_troop_all(ns_hash: felt252, village_id: ID) -> ShardModel {
         let keys = array![village_id.into()].span();
-        (Model::<VillageTroop>::selector(ns_hash), Model::<VillageTroop>::layout()).shard(keys)
+        (Model::<VillageTroop>::selector(ns_hash), Model::<VillageTroop>::layout()).shard_deterministic(keys)
     }
 
     pub fn village_raid_immunity_all(ns_hash: felt252, village_id: ID) -> ShardModel {
         let keys = array![village_id.into()].span();
-        (Model::<VillageRaidImmunity>::selector(ns_hash), Model::<VillageRaidImmunity>::layout()).shard(keys)
+        (Model::<VillageRaidImmunity>::selector(ns_hash), Model::<VillageRaidImmunity>::layout()).shard_deterministic(keys)
     }
 
     pub fn trade_count_all(ns_hash: felt252, structure_id: ID) -> ShardModel {
         let keys = array![structure_id.into()].span();
-        (Model::<TradeCount>::selector(ns_hash), Model::<TradeCount>::layout()).shard(keys)
+        (Model::<TradeCount>::selector(ns_hash), Model::<TradeCount>::layout()).shard_deterministic(keys)
     }
 
     pub fn quantity_all(ns_hash: felt252, entity_id: ID) -> ShardModel {
@@ -140,12 +140,12 @@ pub mod shard_helpers {
 
     pub fn wonder_all(ns_hash: felt252, structure_id: ID) -> ShardModel {
         let keys = array![structure_id.into()].span();
-        (Model::<Wonder>::selector(ns_hash), Model::<Wonder>::layout()).shard(keys)
+        (Model::<Wonder>::selector(ns_hash), Model::<Wonder>::layout()).shard_deterministic(keys)
     }
 
     pub fn structure_village_slots_all(ns_hash: felt252, realm_entity_id: ID) -> ShardModel {
         let keys = array![realm_entity_id.into()].span();
-        (Model::<StructureVillageSlots>::selector(ns_hash), Model::<StructureVillageSlots>::layout()).shard(keys)
+        (Model::<StructureVillageSlots>::selector(ns_hash), Model::<StructureVillageSlots>::layout()).shard_dynamic(keys)
     }
 
     pub fn quantity_tracker_all(ns_hash: felt252, entity_id: felt252) -> ShardModel {
@@ -159,25 +159,25 @@ pub mod shard_helpers {
         ns_hash: felt252, owner_entity_id: ID, approved_entity_id: ID, resource_type: u8,
     ) -> ShardModel {
         let keys = array![owner_entity_id.into(), approved_entity_id.into(), resource_type.into()].span();
-        (Model::<ResourceAllowance>::selector(ns_hash), Model::<ResourceAllowance>::layout()).shard(keys)
+        (Model::<ResourceAllowance>::selector(ns_hash), Model::<ResourceAllowance>::layout()).shard_deterministic(keys)
     }
 
     pub fn resource_list_all(ns_hash: felt252, entity_id: ID, index: u32) -> ShardModel {
         let keys = array![entity_id.into(), index.into()].span();
-        (Model::<ResourceList>::selector(ns_hash), Model::<ResourceList>::layout()).shard(keys)
+        (Model::<ResourceList>::selector(ns_hash), Model::<ResourceList>::layout()).shard_deterministic(keys)
     }
 
     pub fn hyperstructure_requirements_all(ns_hash: felt252, hyperstructure_id: ID) -> ShardModel {
         let keys = array![hyperstructure_id.into()].span();
         (Model::<HyperstructureRequirements>::selector(ns_hash), Model::<HyperstructureRequirements>::layout())
-            .shard(keys)
+            .shard_deterministic(keys)
     }
 
     pub fn player_construction_points_all(
         ns_hash: felt252, address: starknet::ContractAddress, hyperstructure_id: ID,
     ) -> ShardModel {
         let keys = array![address.into(), hyperstructure_id.into()].span();
-        (Model::<PlayerConstructionPoints>::selector(ns_hash), Model::<PlayerConstructionPoints>::layout()).shard(keys)
+        (Model::<PlayerConstructionPoints>::selector(ns_hash), Model::<PlayerConstructionPoints>::layout()).shard_deterministic(keys)
     }
 
     pub fn building_all(
@@ -189,29 +189,29 @@ pub mod shard_helpers {
 
     pub fn explorer_troops_all(ns_hash: felt252, explorer_id: ID) -> ShardModel {
         let keys = array![explorer_id.into()].span();
-        (Model::<ExplorerTroops>::selector(ns_hash), Model::<ExplorerTroops>::layout()).shard(keys)
+        (Model::<ExplorerTroops>::selector(ns_hash), Model::<ExplorerTroops>::layout()).shard_deterministic(keys)
     }
 
     pub fn trade_all(ns_hash: felt252, trade_id: ID) -> ShardModel {
         let keys = array![trade_id.into()].span();
-        (Model::<Trade>::selector(ns_hash), Model::<Trade>::layout()).shard(keys)
+        (Model::<Trade>::selector(ns_hash), Model::<Trade>::layout()).shard_deterministic(keys)
     }
 
     pub fn resource_arrival_all(ns_hash: felt252, structure_id: ID, day: u64) -> ShardModel {
         let keys = array![structure_id.into(), day.into()].span();
-        (Model::<ResourceArrival>::selector(ns_hash), Model::<ResourceArrival>::layout()).shard(keys)
+        (Model::<ResourceArrival>::selector(ns_hash), Model::<ResourceArrival>::layout()).shard_dynamic(keys)
     }
 
     pub fn market_all(ns_hash: felt252, resource_type: u8) -> ShardModel {
         let keys = array![resource_type.into()].span();
-        (Model::<Market>::selector(ns_hash), Model::<Market>::layout()).shard(keys)
+        (Model::<Market>::selector(ns_hash), Model::<Market>::layout()).shard_deterministic(keys)
     }
 
     pub fn liquidity_all(
         ns_hash: felt252, player: starknet::ContractAddress, resource_type: u8,
     ) -> ShardModel {
         let keys = array![player.into(), resource_type.into()].span();
-        (Model::<Liquidity>::selector(ns_hash), Model::<Liquidity>::layout()).shard(keys)
+        (Model::<Liquidity>::selector(ns_hash), Model::<Liquidity>::layout()).shard_deterministic(keys)
     }
 
     /// Register all possible building slots from ring-1 up to `max_distance`

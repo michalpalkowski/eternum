@@ -1,13 +1,24 @@
 #[starknet::contract]
 pub mod mock_sharding_proxy {
     use dojo::sharding::crdt::CRDType;
+    use starknet::storage::{Map, StorageMapReadAccess, StorageMapWriteAccess};
+    use starknet::{ContractAddress, get_caller_address};
 
     #[storage]
-    struct Storage {}
+    struct Storage {
+        shard_id: Map<ContractAddress, felt252>,
+    }
 
     #[abi(embed_v0)]
     impl IShardingImpl of dojo::sharding::interface::ISharding<ContractState> {
-        fn initialize_sharding(ref self: ContractState, storage_slots: Span<CRDType>) {}
+        fn initialize_sharding(ref self: ContractState, storage_slots: Span<CRDType>) {
+            let caller = get_caller_address();
+            let current = self.shard_id.read(caller);
+            self.shard_id.write(caller, current + 1);
+        }
+        fn get_shard_id(self: @ContractState, contract_address: ContractAddress) -> felt252 {
+            self.shard_id.read(contract_address)
+        }
         fn end_shard(ref self: ContractState) {}
     }
 }
@@ -250,7 +261,7 @@ fn test_shard_spend_no_underflow() {
     let sharding = IContractComponentDispatcher { contract_address: world_address };
 
     start_cheat_caller_address(world_address, proxy_address);
-    sharding.update_shard_state(array![(slot, 250)]);
+    sharding.update_shard_state(1, array![(slot, 250)]);
     stop_cheat_caller_address(world_address);
 
     let stone = ResourceImpl::read_balance(ref world, entity_id, 1);
@@ -280,7 +291,7 @@ fn test_shard_selective_fields_only() {
     let sharding = IContractComponentDispatcher { contract_address: world_address };
 
     start_cheat_caller_address(world_address, proxy_address);
-    sharding.update_shard_state(array![(stone_slot, 150)]);
+    sharding.update_shard_state(1, array![(stone_slot, 150)]);
     stop_cheat_caller_address(world_address);
 
     let stone = ResourceImpl::read_balance(ref world, entity_id, 1);
@@ -333,7 +344,7 @@ fn test_cancel_shard_preserves_balance() {
 
     // Proxy cancels the shard (e.g. settlement failed).
     start_cheat_caller_address(world_address, proxy_address);
-    sharding.cancel_shard_state(array![stone_slot].span());
+    sharding.cancel_shard_state(1, array![stone_slot].span());
     stop_cheat_caller_address(world_address);
 
     // Balance must remain unchanged after cancel.
@@ -407,7 +418,7 @@ fn test_request_shard_all_with_related_ids_registers_hyperstructure_requirements
     let sharding = IContractComponentDispatcher { contract_address: world_address };
 
     start_cheat_caller_address(world_address, proxy_address);
-    sharding.update_shard_state(array![(hyper_slot, 555)]);
+    sharding.update_shard_state(1, array![(hyper_slot, 555)]);
     stop_cheat_caller_address(world_address);
 
     let updated_requirements: HyperstructureRequirements = world.read_model(hyperstructure_id);
