@@ -334,6 +334,8 @@ const resolveRequestedShardContextFromReceipt = (params: {
     try {
       fromAddress = normalizeFeltToHex(rawFromAddress, "event.from_address");
       selector = normalizeFeltToHex(rawKeys[0], "event.keys[0]");
+      // Proxy event layout: ShardingRequested { #[key] game_contract, shard_id, entities }
+      // keys[1] = game_contract (world address), data[0] = shard_id
       if (rawKeys.length > 1) {
         gameAddressFromEvent = normalizeFeltToHex(rawKeys[1], "event.keys[1]");
       }
@@ -424,7 +426,7 @@ const resolveRequestedShardContextFromReceipt = (params: {
     stage: "receipt_parse",
     kind: "receipt_event_missing",
     summary: "Transaction receipt does not contain a ShardingRequested event",
-    hint: "Check whether the transaction emitted the shard request on the expected sharding proxy.",
+    hint: "Check whether the transaction emitted ShardRequested on the expected world contract.",
     context: {
       txHash: params.txHash,
       expectedGameContractAddress: params.expectedGameContractAddress,
@@ -1252,25 +1254,14 @@ export const useShardRequest = (
         return;
       }
 
-      const hasRelatedIds = explorerIds.length > 0 || tradeIds.length > 0 || hyperstructureIds.length > 0;
-      const entrypoint = hasRelatedIds ? "request_shard_all_with_related_ids" : "request_shard_all";
-      const calldata = hasRelatedIds
-        ? [
-            operatorConfig.shardContractAddress,
-            entityIds.length.toString(),
-            ...entityIds.map((entityId) => entityId.toString()),
-            explorerIds.length.toString(),
-            ...explorerIds.map((id) => id.toString()),
-            tradeIds.length.toString(),
-            ...tradeIds.map((id) => id.toString()),
-            hyperstructureIds.length.toString(),
-            ...hyperstructureIds.map((id) => id.toString()),
-          ]
-        : [
-            operatorConfig.shardContractAddress,
-            entityIds.length.toString(),
-            ...entityIds.map((entityId) => entityId.toString()),
-          ];
+      // Use request_shard_realm for single realm entity — it pre-allocates
+      // building hex grid positions and includes them in the shard scope.
+      // Falls back to request_shard for multi-entity requests.
+      const isSingleRealm = entityIds.length === 1;
+      const entrypoint = isSingleRealm ? "request_shard_realm" : "request_shard";
+      const calldata = isSingleRealm
+        ? [entityIds[0].toString()]
+        : [entityIds.length.toString(), ...entityIds.map((entityId) => entityId.toString())];
 
       const requestShardCall: Call = {
         contractAddress: shardingContractAddress,

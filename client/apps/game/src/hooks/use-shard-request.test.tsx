@@ -118,7 +118,7 @@ describe("useShardRequest", () => {
     expect(current.errorDiagnostic?.details).toContain("shard_contract_address");
   });
 
-  it("uses request_shard_all_with_related_ids when related ids are provided", async () => {
+  it("uses request_shard when related ids are provided", async () => {
     const execute = vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" });
     const account: ExecutableAccount = {
       execute,
@@ -188,8 +188,8 @@ describe("useShardRequest", () => {
     expect(execute).toHaveBeenCalledWith([
       {
         contractAddress: "0x1234abcd",
-        entrypoint: "request_shard_all_with_related_ids",
-        calldata: ["0x1234abcd", "1", "42", "1", "7", "1", "8", "1", "9"],
+        entrypoint: "request_shard",
+        calldata: ["1", "42"],
       },
     ]);
   });

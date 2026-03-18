@@ -5,6 +5,7 @@ import { dojoConfig } from "../../dojo-config";
 import { normalizeHexAddress } from "@/sharding/addresses";
 import {
   extractGameContractFromShardId,
+  parseShardIdParts,
   parseSettlementStreamEvent,
 } from "@/sharding/protocol";
 import type { ExecutableAccount } from "@/sharding/types";
@@ -185,10 +186,11 @@ export const useShardSettlement = ({ account, shardId, operatorUrl }: UseShardSe
 
     try {
       const shardingContract = getContractByName(dojoConfig.manifest, "s1_eternum", "sharding_systems");
+      const { onchainShardId } = parseShardIdParts(shardId);
       const finishShardCall: Call = {
         contractAddress: shardingContract.address,
         entrypoint: "finish_shard",
-        calldata: [],
+        calldata: [onchainShardId],
       };
       await account.execute([finishShardCall]);
       setPhase("waiting");
