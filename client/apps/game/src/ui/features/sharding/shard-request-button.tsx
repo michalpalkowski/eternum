@@ -79,10 +79,8 @@ const ShardButton = ({
   components: any;
 }) => {
   const operatorUrl = env.VITE_PUBLIC_SHARD_OPERATOR_URL;
-  const { phase, error, errorCode, targetShardId, requestShard, recoverShard, openShardTab, reset } = useShardRequest(
-    account,
-    operatorUrl ?? "",
-  );
+  const { phase, error, errorCode, errorDiagnostic, targetShardId, requestShard, recoverShard, openShardTab, reset } =
+    useShardRequest(account, operatorUrl ?? "");
   const explorerEntities = useEntityQuery([Has(components.ExplorerTroops)]);
   const tradeEntities = useEntityQuery([Has(components.Trade)]);
   const autoOpenRecoveredShardRef = useRef(false);
@@ -179,10 +177,24 @@ const ShardButton = ({
       </button>
       {operatorUrl === undefined && <span className="text-red-400 text-xs">Missing VITE_PUBLIC_SHARD_OPERATOR_URL</span>}
       {error !== null && (
-        <span className="text-red-400 text-xs">
-          {errorCode !== null ? `[${errorCode}] ` : ""}
-          {error}
-        </span>
+        <div className="text-red-400 text-xs leading-relaxed">
+          <div>
+            {errorCode !== null ? `[${errorCode}] ` : ""}
+            {error}
+          </div>
+          {errorDiagnostic !== null && (
+            <>
+              <div className="text-red-300/80">
+                Stage: <span className="font-mono">{errorDiagnostic.stage}</span> | Kind:{" "}
+                <span className="font-mono">{errorDiagnostic.kind}</span>
+              </div>
+              {errorDiagnostic.details !== null && (
+                <div className="text-red-200/80">Details: {errorDiagnostic.details}</div>
+              )}
+              <div className="text-amber-300/80">Hint: {errorDiagnostic.hint}</div>
+            </>
+          )}
+        </div>
       )}
       {phase === "error" && (
         <button

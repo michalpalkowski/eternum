@@ -3,6 +3,7 @@ import {
   ShardProtocolError,
   buildShardPlayUrl,
   extractGameContractFromShardId,
+  isRecoverableProtocolPhase,
   parseShardIdParts,
   parseActiveShardFromStatusResponse,
   parseShardStatusEntriesFromStatusResponse,
@@ -12,7 +13,18 @@ import {
   parseShardUrlParams,
   parseStoredShardSession,
   resolveShardSession,
+  type ShardProtocolStatus,
 } from "./protocol";
+
+const protocol = (
+  phase: string,
+  overrides?: Partial<Omit<ShardProtocolStatus, "phase">>,
+): Record<string, unknown> => ({
+  phase,
+  ready: false,
+  retriable: false,
+  ...overrides,
+});
 
 describe("sharding protocol", () => {
   it("parses valid shard query params", () => {
@@ -105,6 +117,7 @@ describe("sharding protocol", () => {
           phase: "initializing",
           game_contract_address: "0x1234abcd",
           shard_id: "0x1234abcd@41",
+          protocol: protocol("provisioning"),
         },
         {
           phase: "gameplay_active",
@@ -113,6 +126,7 @@ describe("sharding protocol", () => {
           torii_grpc_url: "http://localhost:8081",
           game_contract_address: "0x1234abcd",
           shard_id: "0x1234abcd@42",
+          protocol: protocol("gameplay_active", { ready: true }),
         },
       ],
     });
@@ -136,20 +150,26 @@ describe("sharding protocol", () => {
           katana_url: null,
           torii_url: null,
           torii_grpc_url: null,
+          protocol: protocol("provisioning"),
         },
       ],
     });
 
-    expect(entries).toEqual([
-      {
-        phase: "initializing",
-        gameContractAddress: "0x1234abcd",
-        shardId: "0x1234abcd@41",
-        katanaUrl: null,
-        toriiUrl: null,
-        toriiGrpcUrl: null,
-      },
-    ]);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].displayPhase).toBe("initializing");
+    expect(entries[0].protocol.phase).toBe("provisioning");
+    expect(entries[0].gameContractAddress).toBe("0x1234abcd");
+    expect(entries[0].katanaUrl).toBeNull();
+  });
+
+  it("identifies terminal vs recoverable protocol phases", () => {
+    expect(isRecoverableProtocolPhase({ phase: "provisioning", ready: false, retriable: false, errorCode: null, errorMessage: null })).toBe(true);
+    expect(isRecoverableProtocolPhase({ phase: "gameplay_active", ready: true, retriable: false, errorCode: null, errorMessage: null })).toBe(true);
+    expect(isRecoverableProtocolPhase({ phase: "retry_pending", ready: false, retriable: true, errorCode: null, errorMessage: null })).toBe(true);
+    expect(isRecoverableProtocolPhase({ phase: "failed", ready: false, retriable: false, errorCode: null, errorMessage: null })).toBe(false);
+    expect(isRecoverableProtocolPhase({ phase: "rejected", ready: false, retriable: false, errorCode: null, errorMessage: null })).toBe(false);
+    expect(isRecoverableProtocolPhase({ phase: "suspended", ready: false, retriable: false, errorCode: null, errorMessage: null })).toBe(false);
+    expect(isRecoverableProtocolPhase({ phase: "completed", ready: false, retriable: false, errorCode: null, errorMessage: null })).toBe(false);
   });
 
   it("parses transport health payload", () => {

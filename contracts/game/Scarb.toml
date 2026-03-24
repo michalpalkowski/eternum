@@ -10,7 +10,7 @@ sierra-replace-ids = true
 [dependencies]
 starknet = "2.13.1"
 # Keep source aligned with arcade@9ff33eab, which still references Dojo via `branch=feature/sharding`.
-dojo = { git = "https://github.com/michalpalkowski/dojo", branch = "feature/sharding" }
+dojo = { git = "https://github.com/michalpalkowski/dojo", branch = "feature/sharding", features = ["sharding", "dev"] }
 alexandria_math = { git = "https://github.com/keep-starknet-strange/alexandria.git", tag = "v0.5.2" }
 alexandria_data_structures = { git = "https://github.com/keep-starknet-strange/alexandria.git", tag = "v0.5.2" }
 achievement = { git = "https://github.com/michalpalkowski/arcade.git", rev = "9ff33eab63995d276db0079f1acde4a9c38efd61" }
@@ -23,6 +23,11 @@ assert_macros = "2.13"
 dojo_snf_test = { git = "https://github.com/michalpalkowski/dojo", branch = "feature/sharding" }
 openzeppelin_token = "2.0.0"
 openzeppelin = "2.0.0"
+
+[patch."https://github.com/michalpalkowski/dojo"]
+dojo = { path = "../../../dojo/crates/dojo/core" }
+dojo_cairo_macros = { path = "../../../dojo/crates/dojo/macros" }
+dojo_snf_test = { path = "../../../dojo/crates/dojo/dojo-snf-test" }
 
 [[target.starknet-contract]]
 casm = true

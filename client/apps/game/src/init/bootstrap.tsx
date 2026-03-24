@@ -16,15 +16,11 @@ import {
 } from "@/runtime/world";
 import { buildWorldProfile } from "@/runtime/world/profile-builder";
 import { fetchWorldConfigMapCenterOffset, setSqlApiBaseUrl } from "@/services/api";
-import {
-  parseShardIdParts,
-  parseShardUrlParams,
-  parseTransportHealthFromStatusResponse,
-} from "@/sharding/protocol";
+import { parseShardIdParts, parseShardUrlParams, parseTransportHealthFromStatusResponse } from "@/sharding/protocol";
 import { resolveMainGameReturnUrl, resolveRuntimeContext } from "@/sharding/runtime-context";
 import { Chain, getGameManifest } from "@contracts";
 import { dojoConfig } from "../../dojo-config";
-import { env, hasPublicNodeUrl } from "../../env";
+import { env, hasExplicitNodeUrl, hasExplicitToriiUrl, hasPublicNodeUrl } from "../../env";
 import { clearSubscriptionQueue } from "../dojo/debounced-queries";
 import { cancelEntityStreamSubscription, initialSync } from "../dojo/sync";
 import { usePlayerStore } from "../hooks/store/use-player-store";
@@ -35,6 +31,7 @@ import { useUIStore } from "../hooks/store/use-ui-store";
 import { NoAccountModal } from "../ui/layouts/no-account-modal";
 import { ETERNUM_CONFIG } from "../utils/config";
 import { initializeGameRenderer } from "./game-renderer";
+import { resolveProfileForShardSession } from "./shard-world-profile";
 
 export type SetupResult = Awaited<ReturnType<typeof setup>>;
 
@@ -143,6 +140,7 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
   // 0) Resolve world profile: prefer URL, then active selection, then prompt
   const chain = resolveChain(env.VITE_PUBLIC_CHAIN! as Chain);
   const pathWorld = deriveWorldFromPath();
+  const shardSession = parseShardUrlParams(window.location.search);
 
   let profile: any = null;
   if (pathWorld) {
@@ -197,6 +195,13 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
     console.log("[bootstrap] World profile refreshed, continuing bootstrap without page reload");
   }
   if (!profile) profile = await ensureActiveWorldProfileWithUI(chain);
+  if (shardSession !== null) {
+    profile = await resolveProfileForShardSession({
+      chain,
+      profile,
+      shardId: shardSession.shardId,
+    });
+  }
 
   // 1) Patch manifest with factory-provided addresses and world address
   const baseManifest = getGameManifest(chain);
@@ -209,7 +214,6 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
   const shardStore = useShardStore.getState();
   // Read shard context from URL only.
   // This prevents stale sessionStorage in the main tab from forcing shard mode.
-  const shardSession = parseShardUrlParams(window.location.search);
   const runtimeContext = resolveRuntimeContext(window.location.href, shardSession);
   shardStore.setRuntimeContext(runtimeContext);
 
@@ -232,7 +236,9 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
         const mainGameReturnUrl = resolveMainGameReturnUrl(runtimeContext);
         shardStore.clearShardMode();
         window.location.assign(mainGameReturnUrl);
-        throw new Error("[bootstrap] stale shard session detected; redirecting to main game view: " + mainGameReturnUrl);
+        throw new Error(
+          "[bootstrap] stale shard session detected; redirecting to main game view: " + mainGameReturnUrl,
+        );
       }
       throw error;
     }
@@ -244,13 +250,12 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
   // 2) Update global dojoConfig in place (shared object reference)
   //    - Torii base URL and manifest are used by setup() downstream
   //    - For local chain, use environment variables directly
-  if (chain === "local") {
-    (dojoConfig as any).toriiUrl = env.VITE_PUBLIC_TORII;
-    (dojoConfig as any).rpcUrl = env.VITE_PUBLIC_NODE_URL;
-  } else {
-    (dojoConfig as any).toriiUrl = profile.toriiBaseUrl;
-    (dojoConfig as any).rpcUrl = profile.rpcUrl ?? env.VITE_PUBLIC_NODE_URL;
-  }
+  const preferredToriiUrl = chain === "local" || hasExplicitToriiUrl ? env.VITE_PUBLIC_TORII : profile.toriiBaseUrl;
+  const preferredRpcUrl =
+    chain === "local" || hasExplicitNodeUrl ? env.VITE_PUBLIC_NODE_URL : (profile.rpcUrl ?? env.VITE_PUBLIC_NODE_URL);
+
+  (dojoConfig as any).toriiUrl = preferredToriiUrl;
+  (dojoConfig as any).rpcUrl = preferredRpcUrl;
   (dojoConfig as any).manifest = patchedManifest;
 
   // 2b) Shard mode override, validated by sharding protocol parser.
@@ -260,7 +265,7 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
   }
 
   // 3) Point SQL API to the active world's Torii
-  const toriiUrl = shardSessionParams !== null ? shardSessionParams.toriiUrl : chain === "local" ? env.VITE_PUBLIC_TORII : profile.toriiBaseUrl;
+  const toriiUrl = shardSessionParams !== null ? shardSessionParams.toriiUrl : preferredToriiUrl;
   setSqlApiBaseUrl(`${toriiUrl}/sql`);
 
   const setupResult = await setup(
@@ -322,7 +327,11 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
 
     let appliedMapCenter = Number(manager.getMapCenter?.());
     let forcedFallback = false;
-    if (Number.isFinite(appliedMapCenter) && appliedMapCenter !== expectedMapCenter && typeof manager.setMapCenter === "function") {
+    if (
+      Number.isFinite(appliedMapCenter) &&
+      appliedMapCenter !== expectedMapCenter &&
+      typeof manager.setMapCenter === "function"
+    ) {
       manager.setMapCenter(expectedMapCenter);
       appliedMapCenter = Number(manager.getMapCenter?.());
       forcedFallback = true;

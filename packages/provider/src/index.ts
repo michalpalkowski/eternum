@@ -28,7 +28,7 @@ export const NAMESPACE = "s1_eternum";
 export { TransactionType, BatchedTransactionDetail } from "./types";
 export { TransactionCostCategory, CATEGORY_BATCH_LIMITS, getTransactionCategory } from "./batch-config";
 
-const MIN_V3_L2_GAS_MAX_AMOUNT = 1_500_000_000n;
+const MIN_V3_L2_GAS_MAX_AMOUNT = 1_100_000_000n;
 const V3_L2_GAS_OVERHEAD_PERCENT = 50n;
 const HUNDRED_PERCENT = 100n;
 

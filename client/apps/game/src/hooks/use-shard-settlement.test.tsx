@@ -5,16 +5,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExecutableAccount } from "@/sharding/types";
 import { useShardSettlement } from "./use-shard-settlement";
 
-vi.mock("../../dojo-config", () => ({
+const mocks = vi.hoisted(() => ({
   dojoConfig: {
     manifest: {
       world: { address: "0xabc123" },
     },
   },
+  getContractByName: vi.fn(() => ({ address: "0x1234abcd" })),
+}));
+
+vi.mock("../../dojo-config", () => ({
+  dojoConfig: mocks.dojoConfig,
 }));
 
 vi.mock("@dojoengine/core", () => ({
-  getContractByName: vi.fn(() => ({ address: "0x1234abcd" })),
+  getContractByName: mocks.getContractByName,
 }));
 
 type HookState = ReturnType<typeof useShardSettlement>;
@@ -87,6 +92,7 @@ describe("useShardSettlement", () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     latestState = null;
     MockEventSource.instances.length = 0;
+    mocks.dojoConfig.manifest.world.address = "0xabc123";
     (globalThis as { EventSource: typeof EventSource }).EventSource = MockEventSource as unknown as typeof EventSource;
 
     container = document.createElement("div");
@@ -180,5 +186,27 @@ describe("useShardSettlement", () => {
       MockEventSource.instances[0].emit("completed", { shard_id: "0xabc123@9" });
     });
     expect(getHookState().phase).toBe("complete");
+  });
+
+  it("fails fast when the shard session world differs from the bootstrapped manifest world", async () => {
+    mocks.dojoConfig.manifest.world.address = "0xdeadbeef";
+    const account: ExecutableAccount = {
+      execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue(undefined),
+    };
+
+    await act(async () => {
+      root.render(<HookHarness account={account} shardId="0xabc123@9" operatorUrl="http://localhost:3001" />);
+    });
+
+    await act(async () => {
+      await getHookState().startSettlement();
+    });
+
+    expect(getHookState().phase).toBe("error");
+    expect(getHookState().errorCode).toBe("SHARD_WORLD_MISMATCH");
+    expect(getHookState().error).toContain("0xabc123");
+    expect(getHookState().error).toContain("0xdeadbeef");
+    expect(account.execute).not.toHaveBeenCalled();
+    expect(mocks.getContractByName).not.toHaveBeenCalled();
   });
 });

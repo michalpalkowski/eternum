@@ -107,11 +107,8 @@ export class GameConfigDeployer {
     await setBlitzRegistrationConfig(config);
     await this.sleepNonLocal();
 
-    await grantCollectibleLootChestMinterRole(config);
-    await this.sleepNonLocal();
-
-    await grantCollectibleEliteNftMinterRole(config);
-    await this.sleepNonLocal();
+    // Collectible minter roles are skipped — collectible contracts are separately deployed
+    // and have their own admin. See grantCollectibleLootChestMinterRole / grantCollectibleEliteNftMinterRole.
 
     await setAgentConfig(config);
     await this.sleepNonLocal();

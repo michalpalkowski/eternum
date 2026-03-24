@@ -2,7 +2,7 @@ import { TORII_SETTING } from "@/utils/config";
 import { getActiveWorld, patchManifestWithFactory, normalizeRpcUrl, resolveChain } from "@/runtime/world";
 import { Chain, getGameManifest } from "@contracts";
 import { createDojoConfig } from "@dojoengine/core";
-import { env } from "./env";
+import { env, hasExplicitNodeUrl, hasExplicitToriiUrl } from "./env";
 
 const {
   VITE_PUBLIC_NODE_URL,
@@ -25,8 +25,8 @@ if (activeWorld && activeWorld.contractsBySelector && activeWorld.worldAddress) 
 }
 
 export const dojoConfig = createDojoConfig({
-  rpcUrl: normalizeRpcUrl(rpcFromWorld ?? VITE_PUBLIC_NODE_URL),
-  toriiUrl: toriiFromWorld ?? (await TORII_SETTING()),
+  rpcUrl: normalizeRpcUrl(hasExplicitNodeUrl ? VITE_PUBLIC_NODE_URL : (rpcFromWorld ?? VITE_PUBLIC_NODE_URL)),
+  toriiUrl: hasExplicitToriiUrl ? env.VITE_PUBLIC_TORII : (toriiFromWorld ?? (await TORII_SETTING())),
   masterAddress: VITE_PUBLIC_MASTER_ADDRESS,
   masterPrivateKey: VITE_PUBLIC_MASTER_PRIVATE_KEY,
   accountClassHash:

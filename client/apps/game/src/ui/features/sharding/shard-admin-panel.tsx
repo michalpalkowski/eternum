@@ -28,23 +28,37 @@ export const ShardAdminPanel = () => {
   } = useDojo();
   const account = useAccountStore((state) => state.account);
   const operatorUrl = env.VITE_PUBLIC_SHARD_OPERATOR_URL ?? "";
-  const defaultShardingContractAddress = useMemo(
+  const resolvedWorldAddress = dojoConfig.manifest.world.address;
+  const resolvedShardingContractAddress = useMemo(
     () => getContractByName(dojoConfig.manifest, "s1_eternum", "sharding_systems").address,
-    [],
+    [dojoConfig.manifest],
   );
 
   const [entityIdInput, setEntityIdInput] = useState("");
-  const [worldAddress, setWorldAddress] = useState(dojoConfig.manifest.world.address);
-  const [shardingContractAddress, setShardingContractAddress] = useState(defaultShardingContractAddress);
+  const [worldAddress, setWorldAddress] = useState(resolvedWorldAddress);
+  const [shardingContractAddress, setShardingContractAddress] = useState(resolvedShardingContractAddress);
+  const previousResolvedWorldAddressRef = useRef(resolvedWorldAddress);
+  const previousResolvedShardingContractAddressRef = useRef(resolvedShardingContractAddress);
 
-  const { phase, error, errorCode, requestShard, recoverShard, openShardTab, reset, targetShardId } = useShardRequest(
-    (account as ExecutableAccount | null) ?? null,
-    operatorUrl,
-    {
+  useEffect(() => {
+    setWorldAddress((current: string) =>
+      current === previousResolvedWorldAddressRef.current ? resolvedWorldAddress : current,
+    );
+    previousResolvedWorldAddressRef.current = resolvedWorldAddress;
+  }, [resolvedWorldAddress]);
+
+  useEffect(() => {
+    setShardingContractAddress((current: string) =>
+      current === previousResolvedShardingContractAddressRef.current ? resolvedShardingContractAddress : current,
+    );
+    previousResolvedShardingContractAddressRef.current = resolvedShardingContractAddress;
+  }, [resolvedShardingContractAddress]);
+
+  const { phase, error, errorCode, errorDiagnostic, requestShard, recoverShard, openShardTab, reset, targetShardId } =
+    useShardRequest((account as ExecutableAccount | null) ?? null, operatorUrl, {
       worldAddress,
       shardingContractAddress,
-    },
-  );
+    });
   const explorerEntities = useEntityQuery([Has(components.ExplorerTroops)]);
   const tradeEntities = useEntityQuery([Has(components.Trade)]);
   const autoOpenRecoveredShardRef = useRef(false);
@@ -123,7 +137,8 @@ export const ShardAdminPanel = () => {
     }
   };
 
-  const isRecoverableError = phase === "error" && (targetShardId !== null || error?.toLowerCase().includes("locked by shard"));
+  const isRecoverableError =
+    phase === "error" && (targetShardId !== null || error?.toLowerCase().includes("locked by shard"));
 
   const buttonLabel = (() => {
     switch (phase) {
@@ -198,14 +213,26 @@ export const ShardAdminPanel = () => {
         )}
       </div>
 
-      {operatorUrl.length === 0 && (
-        <p className="text-xs text-red-400">Missing VITE_PUBLIC_SHARD_OPERATOR_URL</p>
-      )}
+      {operatorUrl.length === 0 && <p className="text-xs text-red-400">Missing VITE_PUBLIC_SHARD_OPERATOR_URL</p>}
       {error !== null && (
-        <p className="text-xs text-red-400">
-          {errorCode !== null ? `[${errorCode}] ` : ""}
-          {error}
-        </p>
+        <div className="space-y-1 text-xs text-red-400">
+          <p>
+            {errorCode !== null ? `[${errorCode}] ` : ""}
+            {error}
+          </p>
+          {errorDiagnostic !== null && (
+            <>
+              <p className="text-red-300/80">
+                Stage: <span className="font-mono">{errorDiagnostic.stage}</span> | Kind:{" "}
+                <span className="font-mono">{errorDiagnostic.kind}</span>
+              </p>
+              {errorDiagnostic.details !== null && (
+                <p className="text-red-200/80">Details: {errorDiagnostic.details}</p>
+              )}
+              <p className="text-amber-300/80">Hint: {errorDiagnostic.hint}</p>
+            </>
+          )}
+        </div>
       )}
       <p className="text-xs text-gold/60">
         Manual shard request is admin-only on-chain (`request_shard_all` / `finish_shard` enforce admin permissions).

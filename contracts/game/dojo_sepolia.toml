@@ -2,8 +2,10 @@
 default = "s1_eternum"
 
 [env]
-account_address = "0x01BFC84464f990C09Cc0e5D64D18F54c3469fD5c467398BF31293051bAde1C39"
-private_key = "0x075362a844768f31c8058ce31aec3dd7751686440b4f220f410ae0c9bf042e60"
+# account_address and private_key are injected via DOJO_ACCOUNT_ADDRESS / DOJO_PRIVATE_KEY
+# env vars by the sharding operator. Do not hardcode them here.
+# account_address = "0x01BFC84464f990C09Cc0e5D64D18F54c3469fD5c467398BF31293051bAde1C39"
+# private_key = "0x075362a844768f31c8058ce31aec3dd7751686440b4f220f410ae0c9bf042e60"
 rpc_url = "https://api.cartridge.gg/x/starknet/sepolia/rpc/v0_9"
 
 [lib_versions]
@@ -14,7 +16,7 @@ rpc_url = "https://api.cartridge.gg/x/starknet/sepolia/rpc/v0_9"
 
 
 [world]
-seed = "sepoliaseed.123"
+seed = "sepoliaseed.sharding.1"
 name = "Eternum Sepolia"
 description = "Rule the Hex"
 cover_uri = "file://assets/bg.webp"

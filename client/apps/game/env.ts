@@ -2,6 +2,10 @@ import { z } from "zod";
 import { getSelectedChain } from "./src/runtime/world/store";
 
 const _rawEnv = import.meta.env as Record<string, string | undefined>;
+type ParsedEnv = z.infer<typeof envSchema>;
+type RuntimeEnv = ParsedEnv & {
+  VITE_PUBLIC_REALTIME_URL: string;
+};
 
 const envSchema = z.object({
   // Master account
@@ -40,7 +44,7 @@ const envSchema = z.object({
     .default("https://torii-creator.zerocredence.workers.dev/dispatch/torii"),
   VITE_PUBLIC_EXPLORER_MAINNET: z.string().url().optional().default("https://voyager.online"),
   VITE_PUBLIC_EXPLORER_SEPOLIA: z.string().url().optional().default("https://sepolia.voyager.online"),
-  VITE_PUBLIC_REALTIME_URL: z.string().url().optional().default("http://localhost:8080"),
+  VITE_PUBLIC_REALTIME_URL: z.string().url().optional(),
   VITE_PUBLIC_ENABLE_SQL_CACHE: z
     .string()
     .transform((v) => v === "true")
@@ -195,9 +199,14 @@ const envSchema = z.object({
   VITE_NEW_RELIC_LICENSE_KEY: z.string().optional(),
 });
 
-let env: z.infer<typeof envSchema>;
+let env: RuntimeEnv;
 try {
-  env = envSchema.parse(import.meta.env);
+  const parsed = envSchema.parse(import.meta.env);
+  env = {
+    ...parsed,
+    // Realtime services follow the active Torii endpoint unless explicitly overridden.
+    VITE_PUBLIC_REALTIME_URL: parsed.VITE_PUBLIC_REALTIME_URL ?? parsed.VITE_PUBLIC_TORII,
+  };
 } catch (error) {
   if (error instanceof z.ZodError) {
     console.error("❌ Invalid environment variables:", JSON.stringify(error.errors, null, 2));
@@ -206,10 +215,18 @@ try {
 }
 
 const storedChain = getSelectedChain();
-// In local-dev, honor compile-time local chain and ignore stale browser chain selection.
-if (storedChain && env.VITE_PUBLIC_CHAIN !== "local") {
+// "hasExplicit*" — the env var was physically set by the launcher/CI (not just filled by zod defaults).
+// Used to decide whether the launcher's value should take precedence over world-profile discovery.
+export const hasExplicitChain = _rawEnv.VITE_PUBLIC_CHAIN !== undefined;
+export const hasExplicitNodeUrl = _rawEnv.VITE_PUBLIC_NODE_URL !== undefined;
+export const hasExplicitToriiUrl = _rawEnv.VITE_PUBLIC_TORII !== undefined;
+
+// Respect persisted chain selection only when the launcher did not explicitly pin one.
+if (storedChain && env.VITE_PUBLIC_CHAIN !== "local" && !hasExplicitChain) {
   env = { ...env, VITE_PUBLIC_CHAIN: storedChain };
 }
 
 export { env };
+// "hasPublicNodeUrl" — the resolved env has a truthy NODE_URL (always true when zod provides a default).
+// Used for RPC-compatibility checks at bootstrap, not for precedence decisions.
 export const hasPublicNodeUrl = Boolean(env.VITE_PUBLIC_NODE_URL);
