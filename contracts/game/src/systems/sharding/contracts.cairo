@@ -54,7 +54,6 @@ pub mod sharding_systems {
         /// Register CRDT policies for all shardable models. Called once at deploy.
         fn register_policies(ref self: ContractState) {
             let mut world = self.world(DEFAULT_NS());
-            assert_caller_is_admin(world);
             let ns_hash = dojo::utils::bytearray_hash(DEFAULT_NS());
 
             // ── Global shared state → Add (concurrent shard access) ──
