@@ -42,8 +42,38 @@ export interface ActiveShard {
   readonly shardId: string;
 }
 
-export interface ShardStatusEntry {
+/** Machine-readable protocol status derived by the operator backend. */
+export interface ShardProtocolStatus {
+  /** Clean phase identifier without decorations (e.g. "gameplay_active", "suspended", "failed"). */
   readonly phase: string;
+  /** True when the shard is fully ready for gameplay (gameplay_active + bootstrap validated + transport healthy). */
+  readonly ready: boolean;
+  /** True when the shard can be retried after failure. */
+  readonly retriable: boolean;
+  readonly errorCode: string | null;
+  readonly errorMessage: string | null;
+}
+
+/**
+ * Terminal protocol phases — a shard in one of these phases will not progress
+ * further without external intervention (manual retry, new request, etc.).
+ */
+const TERMINAL_PROTOCOL_PHASES: ReadonlySet<string> = new Set([
+  "completed",
+  "failed",
+  "rejected",
+  "suspended",
+]);
+
+/** Returns true when the protocol phase indicates the shard may still be progressing. */
+export const isRecoverableProtocolPhase = (protocol: ShardProtocolStatus): boolean =>
+  !TERMINAL_PROTOCOL_PHASES.has(protocol.phase);
+
+export interface ShardStatusEntry {
+  /** Human-readable phase string from the operator (may contain decorations). */
+  readonly displayPhase: string;
+  /** Structured protocol status with clean, machine-readable fields. */
+  readonly protocol: ShardProtocolStatus;
   readonly shardId: string;
   readonly gameContractAddress: string;
   readonly katanaUrl: string | null;
@@ -306,6 +336,22 @@ export const parseOperatorConfigResponse = (payload: unknown): OperatorConfig =>
   };
 };
 
+const parseShardProtocolStatus = (raw: unknown, entryIndex: number): ShardProtocolStatus => {
+  if (!isRecord(raw)) {
+    throw new ShardProtocolError(
+      "INVALID_OPERATOR_STATUS",
+      `Shard entry at index ${entryIndex} must contain a protocol object`,
+    );
+  }
+  return {
+    phase: parseNonEmptyString(raw.phase, "protocol.phase", "INVALID_OPERATOR_STATUS"),
+    ready: parseBoolean(raw.ready, "protocol.ready", "INVALID_OPERATOR_STATUS"),
+    retriable: parseBoolean(raw.retriable, "protocol.retriable", "INVALID_OPERATOR_STATUS"),
+    errorCode: parseOptionalString(raw.error_code, "protocol.error_code", "INVALID_OPERATOR_STATUS"),
+    errorMessage: parseOptionalString(raw.error_message, "protocol.error_message", "INVALID_OPERATOR_STATUS"),
+  };
+};
+
 export const parseShardStatusEntriesFromStatusResponse = (payload: unknown): ShardStatusEntry[] => {
   if (!isRecord(payload)) {
     throw new ShardProtocolError("INVALID_OPERATOR_STATUS", "Operator status response must be an object");
@@ -322,7 +368,8 @@ export const parseShardStatusEntriesFromStatusResponse = (payload: unknown): Sha
     }
 
     return {
-      phase: parseNonEmptyString(rawShard.phase, "phase", "INVALID_OPERATOR_STATUS"),
+      displayPhase: parseNonEmptyString(rawShard.phase, "phase", "INVALID_OPERATOR_STATUS"),
+      protocol: parseShardProtocolStatus(rawShard.protocol, index),
       shardId: parseNonEmptyString(rawShard.shard_id, "shard_id", "INVALID_OPERATOR_STATUS"),
       gameContractAddress: parseHexAddress(
         rawShard.game_contract_address,
@@ -339,15 +386,14 @@ export const parseShardStatusEntriesFromStatusResponse = (payload: unknown): Sha
 export const parseActiveShardFromStatusResponse = (payload: unknown): ActiveShard | null => {
   const entries = parseShardStatusEntriesFromStatusResponse(payload);
   for (const entry of entries) {
-    const phase = parseNonEmptyString(entry.phase, "phase", "INVALID_OPERATOR_STATUS");
-    if (phase !== "gameplay_active") {
+    if (!entry.protocol.ready) {
       continue;
     }
 
     if (entry.katanaUrl === null || entry.toriiUrl === null) {
       throw new ShardProtocolError(
         "INVALID_OPERATOR_STATUS",
-        "gameplay_active shard entry must include katana_url and torii_url",
+        "ready shard entry must include katana_url and torii_url",
       );
     }
 

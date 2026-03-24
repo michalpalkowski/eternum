@@ -16,11 +16,15 @@ import {
 } from "@/sharding/request-diagnostics";
 import {
   buildShardPlayUrl,
+  isRecoverableProtocolPhase,
+  type OperatorConfig,
   parseShardIdParts,
   type RequestedShardContext,
   parseOperatorConfigResponse,
   parseShardStatusEntriesFromStatusResponse,
   parseTransportHealthFromStatusResponse,
+  type ShardStatusEntry,
+  type ShardTransportHealth,
 } from "@/sharding/protocol";
 import { resolveMainGameReturnUrl, resolveRuntimeContextFromWindow } from "@/sharding/runtime-context";
 import type { ExecutableAccount } from "@/sharding/types";
@@ -65,8 +69,7 @@ type ShardRequestPollObservation =
       errorMessage: string | null;
     };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
 
 const normalizePositiveIdList = (values: number[] | undefined, fieldName: string): number[] => {
   if (values === undefined || values.length === 0) {
@@ -278,7 +281,8 @@ const captureUnresolvedReceipt = (params: {
 
 const clearCapturedReceipt = () => {
   if (typeof window !== "undefined") {
-    delete (window as Window & { __ETERNUM_LAST_SHARD_REQUEST_RECEIPT__?: unknown }).__ETERNUM_LAST_SHARD_REQUEST_RECEIPT__;
+    delete (window as Window & { __ETERNUM_LAST_SHARD_REQUEST_RECEIPT__?: unknown })
+      .__ETERNUM_LAST_SHARD_REQUEST_RECEIPT__;
   }
 
   if (typeof sessionStorage !== "undefined") {
@@ -406,7 +410,7 @@ const resolveRequestedShardContextFromReceipt = (params: {
   }
 
   if (candidates.length > 1) {
-    throwShardRequestDiagnostic({
+    return throwShardRequestDiagnostic({
       code: "SHARD_ID_RESOLUTION_FAILED",
       stage: "receipt_parse",
       kind: "receipt_event_ambiguous",
@@ -421,7 +425,7 @@ const resolveRequestedShardContextFromReceipt = (params: {
     });
   }
 
-  throwShardRequestDiagnostic({
+  return throwShardRequestDiagnostic({
     code: "SHARD_ID_RESOLUTION_FAILED",
     stage: "receipt_parse",
     kind: "receipt_event_missing",
@@ -448,9 +452,9 @@ const parseOperatorRejection = (payload: unknown): string | null => {
   return code === null ? reason : `${reason} (${code})`;
 };
 
-const fetchOperatorConfig = async (operatorUrl: string) => {
-  const configResponse = await fetch(`${operatorUrl}/config`).catch((error) => {
-    rethrowShardRequestDiagnostic(error, {
+const fetchOperatorConfig = async (operatorUrl: string): Promise<OperatorConfig> => {
+  const configResponse = await fetch(`${operatorUrl}/config`).catch((error: unknown) => {
+    return rethrowShardRequestDiagnostic(error, {
       code: "OPERATOR_CONFIG_FAILED",
       stage: "operator_config",
       kind: "operator_http_error",
@@ -462,7 +466,7 @@ const fetchOperatorConfig = async (operatorUrl: string) => {
     });
   });
   if (!configResponse.ok) {
-    throwShardRequestDiagnostic({
+    return throwShardRequestDiagnostic({
       code: "OPERATOR_CONFIG_FAILED",
       stage: "operator_config",
       kind: "operator_http_error",
@@ -474,8 +478,8 @@ const fetchOperatorConfig = async (operatorUrl: string) => {
       },
     });
   }
-  const configPayload: unknown = await configResponse.json().catch((error) => {
-    rethrowShardRequestDiagnostic(error, {
+  const configPayload: unknown = await configResponse.json().catch((error: unknown) => {
+    return rethrowShardRequestDiagnostic(error, {
       code: "OPERATOR_CONFIG_FAILED",
       stage: "operator_config",
       kind: "operator_response_invalid",
@@ -489,7 +493,7 @@ const fetchOperatorConfig = async (operatorUrl: string) => {
   try {
     return parseOperatorConfigResponse(configPayload);
   } catch (error) {
-    rethrowShardRequestDiagnostic(error, {
+    return rethrowShardRequestDiagnostic(error, {
       code: "OPERATOR_CONFIG_FAILED",
       stage: "operator_config",
       kind: "operator_response_invalid",
@@ -502,7 +506,10 @@ const fetchOperatorConfig = async (operatorUrl: string) => {
   }
 };
 
-const fetchShardStatusEntries = async (operatorUrl: string, gameContractAddress: string) => {
+const fetchShardStatusEntries = async (
+  operatorUrl: string,
+  gameContractAddress: string,
+): Promise<ShardStatusEntry[]> => {
   const statusResponse = await fetch(`${operatorUrl}/shard/${gameContractAddress}`);
   if (!statusResponse.ok) {
     throw new Error(`Failed to fetch shard status: HTTP ${statusResponse.status}`);
@@ -526,16 +533,6 @@ const buildRequestedShardContextFromShardId = (shardId: string): RequestedShardC
   };
 };
 
-const isRecoverableShardPhase = (phase: string): boolean => {
-  const normalizedPhase = phase.trim().toLowerCase();
-  return (
-    normalizedPhase.length > 0 &&
-    !normalizedPhase.startsWith("failed") &&
-    !normalizedPhase.startsWith("completed") &&
-    !normalizedPhase.startsWith("settled")
-  );
-};
-
 const resolveRequestedShardContextFromOperatorStatus = async (params: {
   operatorUrl: string;
   expectedGameContractAddress: string;
@@ -543,7 +540,7 @@ const resolveRequestedShardContextFromOperatorStatus = async (params: {
   const shardEntries = await fetchShardStatusEntries(params.operatorUrl, params.expectedGameContractAddress);
   const candidates = shardEntries.filter(
     (entry) =>
-      entry.gameContractAddress === params.expectedGameContractAddress && isRecoverableShardPhase(entry.phase),
+      entry.gameContractAddress === params.expectedGameContractAddress && isRecoverableProtocolPhase(entry.protocol),
   );
 
   if (candidates.length === 0) {
@@ -748,20 +745,22 @@ export const useShardRequest = (
 
     pollLockRef.current = true;
     try {
-      const statusResponse = await fetch(`${operatorUrl}/shard/${target.gameContractAddress}`).catch((error) => {
-        rethrowShardRequestDiagnostic(error, {
-          code: "POLL_FAILED",
-          stage: "poll_status",
-          kind: "operator_http_error",
-          summary: "Failed to query shard status from the operator",
-          hint: "Check whether the operator status API is reachable and still running.",
-          context: {
-            operatorUrl,
-            gameContractAddress: target.gameContractAddress,
-            targetShardId: target.shardId,
-          },
-        });
-      });
+      const statusResponse = await fetch(`${operatorUrl}/shard/${target.gameContractAddress}`).catch(
+        (error: unknown) => {
+          return rethrowShardRequestDiagnostic(error, {
+            code: "POLL_FAILED",
+            stage: "poll_status",
+            kind: "operator_http_error",
+            summary: "Failed to query shard status from the operator",
+            hint: "Check whether the operator status API is reachable and still running.",
+            context: {
+              operatorUrl,
+              gameContractAddress: target.gameContractAddress,
+              targetShardId: target.shardId,
+            },
+          });
+        },
+      );
 
       if (statusResponse.status === 404) {
         lastPollObservationRef.current = { type: "status_not_found" };
@@ -789,7 +788,7 @@ export const useShardRequest = (
         return;
       }
       if (!statusResponse.ok) {
-        throwShardRequestDiagnostic({
+        return throwShardRequestDiagnostic({
           code: "POLL_FAILED",
           stage: "poll_status",
           kind: "operator_http_error",
@@ -804,8 +803,8 @@ export const useShardRequest = (
         });
       }
 
-      const statusPayload: unknown = await statusResponse.json().catch((error) => {
-        rethrowShardRequestDiagnostic(error, {
+      const statusPayload: unknown = await statusResponse.json().catch((error: unknown) => {
+        return rethrowShardRequestDiagnostic(error, {
           code: "POLL_FAILED",
           stage: "poll_status",
           kind: "operator_response_invalid",
@@ -818,11 +817,11 @@ export const useShardRequest = (
           },
         });
       });
-      const shardEntries = (() => {
+      const shardEntries: ShardStatusEntry[] = (() => {
         try {
           return parseShardStatusEntriesFromStatusResponse(statusPayload);
         } catch (error) {
-          rethrowShardRequestDiagnostic(error, {
+          return rethrowShardRequestDiagnostic(error, {
             code: "POLL_FAILED",
             stage: "poll_status",
             kind: "operator_response_invalid",
@@ -856,8 +855,8 @@ export const useShardRequest = (
 
       const transportResponse = await fetch(
         `${operatorUrl}/shard/${target.gameContractAddress}/${entryShardIdParts.onchainShardId}/transport-health`,
-      ).catch((error) => {
-        rethrowShardRequestDiagnostic(error, {
+      ).catch((error: unknown) => {
+        return rethrowShardRequestDiagnostic(error, {
           code: "POLL_FAILED",
           stage: "transport_health",
           kind: "transport_http_error",
@@ -872,7 +871,7 @@ export const useShardRequest = (
         });
       });
       if (!transportResponse.ok) {
-        throwShardRequestDiagnostic({
+        return throwShardRequestDiagnostic({
           code: "POLL_FAILED",
           stage: "transport_health",
           kind: "transport_http_error",
@@ -887,8 +886,8 @@ export const useShardRequest = (
           },
         });
       }
-      const transportPayload: unknown = await transportResponse.json().catch((error) => {
-        rethrowShardRequestDiagnostic(error, {
+      const transportPayload: unknown = await transportResponse.json().catch((error: unknown) => {
+        return rethrowShardRequestDiagnostic(error, {
           code: "POLL_FAILED",
           stage: "transport_health",
           kind: "operator_response_invalid",
@@ -902,11 +901,11 @@ export const useShardRequest = (
           },
         });
       });
-      const transport = (() => {
+      const transport: ShardTransportHealth = (() => {
         try {
           return parseTransportHealthFromStatusResponse(transportPayload);
         } catch (error) {
-          rethrowShardRequestDiagnostic(error, {
+          return rethrowShardRequestDiagnostic(error, {
             code: "POLL_FAILED",
             stage: "transport_health",
             kind: "operator_response_invalid",
@@ -1083,14 +1082,7 @@ export const useShardRequest = (
         }),
       );
     }
-  }, [
-    account,
-    beginTrackingRequestedShard,
-    failRequest,
-    operatorUrl,
-    options?.worldAddress,
-    targetShardId,
-  ]);
+  }, [account, beginTrackingRequestedShard, failRequest, operatorUrl, options?.worldAddress, targetShardId]);
 
   const requestShard = useCallback(
     async (entityIds: number[], relatedIds?: ShardRequestRelatedIds) => {
@@ -1213,7 +1205,10 @@ export const useShardRequest = (
 
       let normalizedShardContractAddress: string;
       try {
-        normalizedShardContractAddress = normalizeFeltToHex(operatorConfig.shardContractAddress, "shard_contract_address");
+        normalizedShardContractAddress = normalizeFeltToHex(
+          operatorConfig.shardContractAddress,
+          "shard_contract_address",
+        );
       } catch (error) {
         failRequest(
           toShardRequestDiagnostic(error, {
