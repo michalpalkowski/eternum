@@ -41,14 +41,14 @@ export const ShardAdminPanel = () => {
   const previousResolvedShardingContractAddressRef = useRef(resolvedShardingContractAddress);
 
   useEffect(() => {
-    setWorldAddress((current) =>
+    setWorldAddress((current: string) =>
       current === previousResolvedWorldAddressRef.current ? resolvedWorldAddress : current,
     );
     previousResolvedWorldAddressRef.current = resolvedWorldAddress;
   }, [resolvedWorldAddress]);
 
   useEffect(() => {
-    setShardingContractAddress((current) =>
+    setShardingContractAddress((current: string) =>
       current === previousResolvedShardingContractAddressRef.current ? resolvedShardingContractAddress : current,
     );
     previousResolvedShardingContractAddressRef.current = resolvedShardingContractAddress;
@@ -137,7 +137,8 @@ export const ShardAdminPanel = () => {
     }
   };
 
-  const isRecoverableError = phase === "error" && (targetShardId !== null || error?.toLowerCase().includes("locked by shard"));
+  const isRecoverableError =
+    phase === "error" && (targetShardId !== null || error?.toLowerCase().includes("locked by shard"));
 
   const buttonLabel = (() => {
     switch (phase) {
@@ -212,9 +213,7 @@ export const ShardAdminPanel = () => {
         )}
       </div>
 
-      {operatorUrl.length === 0 && (
-        <p className="text-xs text-red-400">Missing VITE_PUBLIC_SHARD_OPERATOR_URL</p>
-      )}
+      {operatorUrl.length === 0 && <p className="text-xs text-red-400">Missing VITE_PUBLIC_SHARD_OPERATOR_URL</p>}
       {error !== null && (
         <div className="space-y-1 text-xs text-red-400">
           <p>
