@@ -8,14 +8,12 @@ import { ReactComponent as RealmsWorld } from "@/assets/icons/rw-logo.svg";
 import { AudioCategory, ScrollingTrackName, useAudio, useMusicPlayer } from "@/audio";
 import { useUIStore } from "@/hooks/store/use-ui-store";
 import { applyWorldSelection } from "@/runtime/world";
-import { ToriiSetting } from "@/types";
 import { GraphicsSettings } from "@/ui/config";
 import { Avatar, Button, Checkbox, RangeInput } from "@/ui/design-system/atoms";
 import { Headline } from "@/ui/design-system/molecules";
 import { OSWindow, settings } from "@/ui/features/world";
 import { openWorldSelectorModal } from "@/ui/features/world-selector";
 import { addressToNumber, displayAddress } from "@/ui/utils/utils";
-import { DEFAULT_TORII_SETTING } from "@/utils/config";
 import { getAddressName } from "@bibliothecadao/eternum";
 import { useDojo, useGuilds, useScreenOrientation } from "@bibliothecadao/react";
 import { ContractAddress } from "@bibliothecadao/types";
@@ -86,15 +84,8 @@ export const SettingsWindow = () => {
   const { toggleFullScreen, isFullScreen } = useScreenOrientation();
   const [fullScreen, setFullScreen] = useState<boolean>(isFullScreen());
 
-  const initialToriiSetting = (localStorage.getItem("TORII_SETTING") as ToriiSetting) || DEFAULT_TORII_SETTING;
-  const [toriiSetting, setToriiSetting] = useState<ToriiSetting>(initialToriiSetting);
-
   // State to hold download links with names and URLs
   const [eternumLoaderDownloadLinks, setEternumLoaderDownloadLinks] = useState<string[]>([]);
-
-  useEffect(() => {
-    setToriiSetting(localStorage.getItem("TORII_SETTING") as ToriiSetting);
-  }, [localStorage.getItem("TORII_SETTING")]);
 
   const clickFullScreen = () => {
     setFullScreen(!fullScreen);
@@ -239,46 +230,10 @@ export const SettingsWindow = () => {
                 Realms Loader for optimal loading times.
               </div>
             )}
-            <div className="flex justify-between items-center space-x-2 text-xs cursor-pointer text-gray-gold">
-              <div className="flex flex-row space-x-4 items-center">
-                <div
-                  onClick={() => {
-                    const newToriiSetting =
-                      toriiSetting === ToriiSetting.Local ? ToriiSetting.Remote : ToriiSetting.Local;
-                    setToriiSetting(newToriiSetting);
-                  }}
-                  className="flex items-center space-x-2"
-                >
-                  <Checkbox enabled={toriiSetting === ToriiSetting.Local} />
-                  <div>Realms Loader</div>
-                </div>
-                <div
-                  onClick={() => {
-                    const newToriiSetting =
-                      toriiSetting === ToriiSetting.Local ? ToriiSetting.Remote : ToriiSetting.Local;
-                    setToriiSetting(newToriiSetting);
-                  }}
-                  className="flex items-center space-x-2"
-                >
-                  <Checkbox enabled={toriiSetting === ToriiSetting.Remote} />
-                  <div>Provided</div>
-                </div>
-              </div>
-              <div className="flex flex-col space-y-2">
-                <Button
-                  variant="outline"
-                  size="md"
-                  disabled={initialToriiSetting === toriiSetting}
-                  onClick={() => {
-                    localStorage.setItem("TORII_SETTING", toriiSetting);
-                    window.location.reload();
-                  }}
-                >
-                  Confirm
-                </Button>
-              </div>
+            <div className="flex flex-col space-y-2 text-xs text-gray-gold">
+              <div>Torii endpoint is controlled by the launcher/runtime for this environment.</div>
+              <div className="break-all">{gameEnv.VITE_PUBLIC_TORII}</div>
             </div>
-            <div className="w-fit text-xs text-gray-gold mx-auto">Changing this setting will reload the page</div>
           </section>
 
           {/* Video Section */}
