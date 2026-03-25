@@ -12,13 +12,15 @@ interface FactoryWorld {
   worldAddress: string | null;
 }
 
+const isLocalWorld = import.meta.env.VITE_PUBLIC_LOCAL_WORLD === "true";
+
 const fetchFactoryWorlds = async (chain: Chain): Promise<FactoryWorld[]> => {
-  // For local development, return a synthetic world entry — there is no factory
-  if (chain === "local") {
+  // For local development or operator dev-stack, return a synthetic world entry — skip factory
+  if (chain === "local" || isLocalWorld) {
     return [
       {
         name: env.VITE_PUBLIC_SLOT,
-        chain: "local",
+        chain,
         worldAddress: null,
       },
     ];

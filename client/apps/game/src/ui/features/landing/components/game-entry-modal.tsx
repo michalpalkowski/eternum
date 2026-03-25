@@ -1132,8 +1132,9 @@ export const GameEntryModal = ({
 
     try {
       let contracts: Record<string, string>;
-      if (chain === "local") {
-        const manifest = getGameManifest("local");
+      const isLocalWorld = import.meta.env.VITE_PUBLIC_LOCAL_WORLD === "true";
+      if (chain === "local" || isLocalWorld) {
+        const manifest = getGameManifest(chain === "local" ? "local" : (import.meta.env.VITE_PUBLIC_CHAIN as string));
         contracts = {};
         for (const c of (manifest as any).contracts ?? []) {
           if (c.selector && c.address) {

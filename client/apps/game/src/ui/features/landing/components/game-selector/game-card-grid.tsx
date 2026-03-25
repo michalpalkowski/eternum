@@ -631,10 +631,11 @@ export const UnifiedGameGrid = ({
 
   const { isOngoing, isEnded, isUpcoming } = useGameTimeStatus();
 
-  // For local development, only show local worlds; otherwise fetch from both chains.
+  // For local/dev-stack worlds, skip factory and use synthetic entry for the current chain.
   // Use raw env var — env.VITE_PUBLIC_CHAIN can be overridden by localStorage (see env.ts).
-  const isLocalChain = (import.meta.env.VITE_PUBLIC_CHAIN as string) === "local";
-  const factoryChains = isLocalChain ? ["local" as const] : ["mainnet" as const, "slot" as const];
+  const currentChain = (import.meta.env.VITE_PUBLIC_CHAIN as string) || "local";
+  const isLocalWorld = currentChain === "local" || import.meta.env.VITE_PUBLIC_LOCAL_WORLD === "true";
+  const factoryChains = isLocalWorld ? [currentChain as const] : ["mainnet" as const, "slot" as const];
   const {
     worlds: factoryWorlds,
     isLoading: factoryWorldsLoading,

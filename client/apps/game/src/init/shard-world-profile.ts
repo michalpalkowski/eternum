@@ -26,7 +26,8 @@ export const resolveProfileForShardSession = async (params: {
     return profile;
   }
 
-  if (chain === "local") {
+  const isLocalWorld = import.meta.env.VITE_PUBLIC_LOCAL_WORLD === "true";
+  if (chain === "local" || isLocalWorld) {
     console.warn("[bootstrap] Shard session world differs from active local profile; forcing manifest world address", {
       activeWorldName: profile.name,
       activeWorldAddress: profile.worldAddress,

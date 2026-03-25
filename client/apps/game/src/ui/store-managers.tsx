@@ -475,7 +475,7 @@ const ButtonStateStoreManager = () => {
     const nowSeconds = Date.now() / 1000;
     const seasonStartTime = Number(env.VITE_PUBLIC_SEASON_START_TIME);
     const seasonHasStarted =
-      env.VITE_PUBLIC_CHAIN === "local" ||
+      env.VITE_PUBLIC_CHAIN === "local" || import.meta.env.VITE_PUBLIC_LOCAL_WORLD === "true" ||
       !Number.isFinite(seasonStartTime) ||
       seasonStartTime <= 0 ||
       seasonStartTime < nowSeconds;

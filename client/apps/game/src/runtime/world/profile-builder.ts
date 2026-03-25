@@ -16,9 +16,11 @@ const toriiBaseUrlFromName = (name: string) => `${cartridgeApiBase}/x/${name}/to
  * Build a WorldProfile by querying the factory and the target world's Torii.
  * For local development, skips factory queries and uses environment variables directly.
  */
+const isLocalWorld = import.meta.env.VITE_PUBLIC_LOCAL_WORLD === "true";
+
 export const buildWorldProfile = async (chain: Chain, name: string): Promise<WorldProfile> => {
-  if (chain === "local") {
-    return buildLocalWorldProfile(name);
+  if (chain === "local" || isLocalWorld) {
+    return buildLocalWorldProfile(name, chain);
   }
 
   const factorySqlBaseUrl = getFactorySqlBaseUrl(chain);
@@ -103,7 +105,7 @@ export const buildWorldProfile = async (chain: Chain, name: string): Promise<Wor
  * Build a WorldProfile for local development using environment variables.
  * No factory queries — uses VITE_PUBLIC_TORII and VITE_PUBLIC_NODE_URL directly.
  */
-const buildLocalWorldProfile = async (name: string): Promise<WorldProfile> => {
+const buildLocalWorldProfile = async (name: string, chain: Chain = "local"): Promise<WorldProfile> => {
   const toriiBaseUrl = env.VITE_PUBLIC_TORII;
   const rpcUrl = normalizeRpcUrl(env.VITE_PUBLIC_NODE_URL);
 
@@ -123,7 +125,7 @@ const buildLocalWorldProfile = async (name: string): Promise<WorldProfile> => {
 
   const profile: WorldProfile = {
     name,
-    chain: "local",
+    chain,
     toriiBaseUrl,
     rpcUrl,
     worldAddress,

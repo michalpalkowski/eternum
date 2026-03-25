@@ -30,8 +30,10 @@ const calculateHyperstructuresLeft = (maxRingCount: number, createdCount: number
   return Math.max(0, total - createdCount);
 };
 
+const isLocalWorld = import.meta.env.VITE_PUBLIC_LOCAL_WORLD === "true";
+
 const buildToriiBaseUrl = (worldName: string, chain?: Chain) => {
-  if (chain === "local") return env.VITE_PUBLIC_TORII;
+  if (chain === "local" || isLocalWorld) return env.VITE_PUBLIC_TORII;
   return `https://api.cartridge.gg/x/${worldName}/torii`;
 };
 
@@ -179,7 +181,7 @@ const fetchPlayerRegistration = async (toriiBaseUrl: string, playerAddress: stri
 };
 
 const fetchPrizeDistributionAddress = async (worldName: string, chain: Chain): Promise<string | null> => {
-  if (chain === "local") {
+  if (chain === "local" || isLocalWorld) {
     return null;
   }
 
