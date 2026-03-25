@@ -10,9 +10,10 @@ pub impl VRFImpl of VRFTrait {
         let tx_info: TxInfo = starknet::get_tx_info().unbox();
 
         if vrf_provider_address.is_zero() {
-            // workaround for testnet
+            // workaround for dev/testnet — use tx_hash as pseudo-random seed.
+            // Only mainnet requires a real VRF provider.
             assert!(
-                tx_info.chain_id != 'SN_MAIN' && tx_info.chain_id != 'SN_SEPOLIA', "VRF provider address must be set",
+                tx_info.chain_id != 'SN_MAIN', "VRF provider address must be set on mainnet",
             );
 
             return tx_info.transaction_hash.into();

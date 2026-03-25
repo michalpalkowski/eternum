@@ -10,13 +10,13 @@ rpc_url = "https://api.cartridge.gg/x/starknet/sepolia/rpc/v0_9"
 
 [lib_versions]
 "s1_eternum-combat_library" = "0_1_12"
-"s1_eternum-rng_library" = "0_1_12"
+"s1_eternum-rng_library" = "0_1_13"
 "s1_eternum-biome_library" = "0_1_12"
 "s1_eternum-structure_creation_library" = "0_1_12"
 
 
 [world]
-seed = "sepoliaseed.sharding.1"
+seed = "sharding.sepolia.cfe94f4a"
 name = "Eternum Sepolia"
 description = "Rule the Hex"
 cover_uri = "file://assets/bg.webp"
@@ -55,4 +55,8 @@ website = "https://eternum.realms.world/"
     ## "s1_eternum-quest_systems",
     "s1_eternum-relic_systems",
     "s1_eternum-blitz_realm_systems",
+    "s1_eternum-prize_distribution_systems",
+    "s1_eternum-sharding_systems",
+    "s1_eternum-dev_realm_systems",
+    "s1_eternum-dev_config_systems",
 ]

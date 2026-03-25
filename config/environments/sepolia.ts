@@ -17,6 +17,20 @@ import { EternumGlobalConfig as CommonEternumGlobalConfig } from "./_shared_";
 // sepolia god mode
 export const SepoliaEternumGlobalConfig: Config = {
   ...CommonEternumGlobalConfig,
+  blitz: {
+    ...CommonEternumGlobalConfig.blitz,
+    registration: {
+      ...CommonEternumGlobalConfig.blitz.registration,
+      fee_amount: 0n,
+      registration_delay_seconds: 5,
+      registration_period_seconds: 10,
+      collectible_cosmetics_address: "0x0",
+      collectible_timelock_address: "0x0",
+      collectible_lootchest_address: "0x0",
+      collectible_elitenft_address: "0x0",
+      collectible_cosmetics_max: 0,
+    },
+  },
   agent: {
     ...CommonEternumGlobalConfig.agent,
     controller_address: "0x01BFC84464f990C09Cc0e5D64D18F54c3469fD5c467398BF31293051bAde1C39",
