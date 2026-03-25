@@ -16,14 +16,18 @@ export const Controller = ({ className = "" }: ControllerProps) => {
 
   const connectWallet = useCallback(async () => {
     try {
-      console.log("Attempting to connect wallet...");
+      console.log("Attempting to connect wallet...", { connectorCount: connectors.length, connectorIds: connectors.map(c => c.id), chain: import.meta.env.VITE_PUBLIC_CHAIN });
       const connectorToUse = pickPrimaryConnector(connectors);
       if (!connectorToUse) {
         console.error("No Starknet connectors available for Cartridge login");
         return;
       }
 
-      await connectWithControllerRetry(connectAsync, connectorToUse);
+      console.log("Calling connectWithControllerRetry...", connectorToUse.id);
+      await connectWithControllerRetry(connectAsync, connectorToUse).catch((err) => {
+        console.error("connectWithControllerRetry rejected:", err);
+        throw err;
+      });
       console.log("Wallet connected successfully.");
 
       if (connector && typeof connector.controller?.username === "function") {

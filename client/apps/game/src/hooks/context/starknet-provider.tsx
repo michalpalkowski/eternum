@@ -1,12 +1,13 @@
 import { getActiveWorld, normalizeRpcUrl } from "@/runtime/world";
 import { ControllerConnector } from "@cartridge/connector";
+import { PredeployedAccountsConnector } from "@dojoengine/predeployed-connector";
 import { usePredeployedAccounts } from "@dojoengine/predeployed-connector/react";
 import { Chain, getSlotChain, mainnet, sepolia } from "@starknet-react/chains";
 import { Connector, StarknetConfig, jsonRpcProvider, paymasterRpcProvider, voyager } from "@starknet-react/core";
 import { QueryClient } from "@tanstack/react-query";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { constants, shortString } from "starknet";
+import { Account, constants, ETransactionVersion, RpcProvider, shortString, WalletAccount } from "starknet";
 import { dojoConfig } from "../../../dojo-config";
 import { env } from "../../../env";
 import { parseShardUrlParams } from "@/sharding/protocol";
@@ -142,6 +143,71 @@ const queryClient = new QueryClient({
   },
 });
 
+const isLocalWorld = import.meta.env.VITE_PUBLIC_LOCAL_WORLD === "true";
+
+/**
+ * Create a predeployed-style connector from env MASTER_ADDRESS / MASTER_PRIVATE_KEY.
+ * Mirrors the internal pattern of @dojoengine/predeployed-connector but with a
+ * hardcoded account instead of querying dev_predeployedAccounts RPC.
+ */
+const createDeployerConnector = (rpcUrl: string): Connector | null => {
+  const address = env.VITE_PUBLIC_MASTER_ADDRESS;
+  const privateKey = env.VITE_PUBLIC_MASTER_PRIVATE_KEY;
+  if (!address || !privateKey) return null;
+
+  const provider = new RpcProvider({ nodeUrl: rpcUrl });
+  const account = new Account({
+    provider,
+    address,
+    signer: privateKey,
+    cairoVersion: "1",
+    transactionVersion: ETransactionVersion.V3,
+  });
+
+  // Build a fake wallet provider that delegates to our Account instance.
+  // This is what PredeployedAccountsConnector expects internally.
+  const fakeWallet: any = {
+    request: async (call: any) => {
+      switch (call.type) {
+        case "wallet_requestAccounts": return [address];
+        case "wallet_getPermissions": return ["accounts"];
+        case "wallet_requestChainId": return await provider.getChainId();
+        case "wallet_addInvokeTransaction":
+          return await account.execute(
+            call.params.calls.map((c: any) => ({
+              contractAddress: c.contract_address,
+              entrypoint: c.entry_point,
+              calldata: c.calldata,
+            })),
+          );
+        case "wallet_signTypedData": return await account.signMessage(call.params);
+        case "wallet_supportedSpecs": return [];
+        case "wallet_supportedWalletApi": return [];
+        case "wallet_switchStarknetChain": return true;
+        default: throw new Error(`Unsupported wallet call: ${call.type}`);
+      }
+    },
+    on: () => {},
+    off: () => {},
+    version: "v0.0.1",
+    icon: { dark: "", light: "" },
+  };
+
+  // Register on window so InjectedConnector can find it.
+  if (typeof window !== "undefined") {
+    (window as any)["starknet_deployer-0"] = fakeWallet;
+  }
+
+  const walletAccount = new WalletAccount({ provider, walletProvider: fakeWallet, address, cairoVersion: "1" });
+
+  return new PredeployedAccountsConnector({
+    rpc: rpcUrl,
+    id: "deployer-0",
+    name: "Deployer",
+    account: walletAccount,
+  } as any) as unknown as Connector;
+};
+
 export function StarknetProvider({ children }: { children: React.ReactNode }) {
   const isShardMode = useShardStore((state) => state.isShardMode);
   const storeShardRpcUrl = useShardStore((state) => state.shardRpcUrl);
@@ -192,6 +258,12 @@ export function StarknetProvider({ children }: { children: React.ReactNode }) {
     return createControllerConnector(rpcUrl, resolvedChainId) as unknown as Connector;
   }, [rpcUrl, resolvedChainId]);
 
+  // For dev-stack testnet: create a connector from deployer credentials (env vars).
+  const deployerConnector = useMemo(() => {
+    if (!isLocalWorld || isLocal) return null;
+    return createDeployerConnector(rpcUrl);
+  }, [rpcUrl]);
+
   useEffect(() => {
     if (!isLocal || typeof window === "undefined") {
       return;
@@ -216,7 +288,7 @@ export function StarknetProvider({ children }: { children: React.ReactNode }) {
       }
       provider={jsonRpcProvider({ rpc })}
       paymasterProvider={isLocal ? paymasterRpcProvider({ rpc: paymasterRpc }) : undefined}
-      connectors={isLocal ? predeployedConnectors : controllerConnector ? [controllerConnector] : []}
+      connectors={isLocal ? predeployedConnectors : isLocalWorld && deployerConnector ? [deployerConnector] : controllerConnector ? [controllerConnector] : []}
       explorer={voyager}
       autoConnect
       queryClient={queryClient}
