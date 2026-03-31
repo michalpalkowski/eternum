@@ -242,7 +242,7 @@ const TORII_BOUNDS_MODELS: BoundsModelConfig[] = [
   { model: "s1_eternum-ExplorerTroops", colField: "coord.x", rowField: "coord.y" },
 ];
 const WORLDMAP_CHUNK_POLICY = createWorldmapChunkPolicy(WORLD_CHUNK_CONFIG);
-const WORLDMAP_TILE_FETCH_TIMEOUT_MS = 8_000;
+const WORLDMAP_TILE_FETCH_TIMEOUT_MS = 30_000;
 const WORLDMAP_TILE_FETCH_PAGE_SIZE = 48;
 const WORLDMAP_TILE_FETCH_MAX_CONCURRENCY = 3;
 const WORLDMAP_TILE_FETCH_INITIAL_MAX_CONCURRENCY = 1;
