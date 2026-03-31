@@ -35,6 +35,13 @@ export const resolveGameRouteView = ({
     return "loading";
   }
 
+  // Bootstrap succeeded but wallet still connecting (e.g. Cartridge Controller
+  // on Sepolia is slow due to tip estimation). Show loading instead of redirecting
+  // to lobby — the account will arrive shortly.
+  if (hasSetupResult && !hasAccount && phase === "account") {
+    return "loading";
+  }
+
   if (REQUIRES_LANDING_PHASES.has(phase)) {
     return "redirect";
   }

@@ -44,6 +44,36 @@ const buildReceipt = (params: { gameAddress: string; shardContractAddress: strin
   ],
 });
 
+const buildShardStatusEntry = (params: {
+  phase: string;
+  gameContractAddress: string;
+  shardId: string;
+  katanaUrl?: string | null;
+  toriiUrl?: string | null;
+  toriiGrpcUrl?: string | null;
+  protocol?: {
+    phase?: string;
+    ready?: boolean;
+    retriable?: boolean;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+  };
+}) => ({
+  phase: params.phase,
+  game_contract_address: params.gameContractAddress,
+  shard_id: params.shardId,
+  katana_url: params.katanaUrl ?? null,
+  torii_url: params.toriiUrl ?? null,
+  torii_grpc_url: params.toriiGrpcUrl ?? null,
+  protocol: {
+    phase: params.protocol?.phase ?? params.phase,
+    ready: params.protocol?.ready ?? params.phase === "gameplay_active",
+    retriable: params.protocol?.retriable ?? false,
+    error_code: params.protocol?.errorCode ?? null,
+    error_message: params.protocol?.errorMessage ?? null,
+  },
+});
+
 describe("useShardRequest", () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -118,7 +148,7 @@ describe("useShardRequest", () => {
     expect(current.errorDiagnostic?.details).toContain("shard_contract_address");
   });
 
-  it("uses request_shard when related ids are provided", async () => {
+  it("uses request_shard_realm with exclusive related ids for a single realm request", async () => {
     const execute = vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" });
     const account: ExecutableAccount = {
       execute,
@@ -141,14 +171,14 @@ describe("useShardRequest", () => {
         new Response(
           JSON.stringify({
             shards: [
-              {
+              buildShardStatusEntry({
                 phase: "gameplay_active",
-                katana_url: "http://localhost:5050",
-                torii_url: "http://localhost:8080",
-                torii_grpc_url: "http://localhost:18090",
-                game_contract_address: "0xabc123",
-                shard_id: "0xabc123@0x9",
-              },
+                katanaUrl: "http://localhost:5050",
+                toriiUrl: "http://localhost:8080",
+                toriiGrpcUrl: "http://localhost:18090",
+                gameContractAddress: "0xabc123",
+                shardId: "0xabc123@0x9",
+              }),
             ],
           }),
           { status: 200 },
@@ -179,7 +209,81 @@ describe("useShardRequest", () => {
       await getHookState(latestState).requestShard([42], {
         explorerIds: [7, 7],
         tradeIds: [8],
-        hyperstructureIds: [9],
+      });
+    });
+    await act(async () => Promise.resolve());
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledWith([
+      {
+        contractAddress: "0x1234abcd",
+        entrypoint: "request_shard_realm",
+        calldata: ["42", "2", "7", "8", "0"],
+      },
+    ]);
+  });
+
+  it("uses request_shard with merged exclusive related ids for multi-entity requests", async () => {
+    const execute = vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" });
+    const account: ExecutableAccount = {
+      execute,
+      waitForTransaction: vi
+        .fn<NonNullable<ExecutableAccount["waitForTransaction"]>>()
+        .mockResolvedValue(buildReceipt({
+          gameAddress: "0xabc123",
+          shardContractAddress: "0x1234abcd",
+          onchainShardId: "0x9",
+        })),
+    };
+
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ shard_contract_address: "0x1234abcd" }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            shards: [
+              buildShardStatusEntry({
+                phase: "gameplay_active",
+                katanaUrl: "http://localhost:5050",
+                toriiUrl: "http://localhost:8080",
+                toriiGrpcUrl: "http://localhost:18090",
+                gameContractAddress: "0xabc123",
+                shardId: "0xabc123@0x9",
+              }),
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            transport: {
+              status: "healthy",
+              torii_http_reachable: true,
+              torii_sql_reachable: true,
+              torii_grpc_reachable: true,
+              bootstrap_snapshot_present: true,
+              error_code: null,
+              error_message: null,
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+
+    await act(async () => {
+      root.render(<HookHarness account={account} operatorUrl="http://localhost:3001" />);
+    });
+
+    await act(async () => {
+      await getHookState(latestState).requestShard([42, 43], {
+        explorerIds: [7],
+        tradeIds: [8],
       });
     });
     await act(async () => Promise.resolve());
@@ -189,9 +293,39 @@ describe("useShardRequest", () => {
       {
         contractAddress: "0x1234abcd",
         entrypoint: "request_shard",
-        calldata: ["1", "42"],
+        calldata: ["4", "42", "43", "7", "8", "0"],
       },
     ]);
+  });
+
+  it("fails fast when hyperstructure related ids are provided", async () => {
+    const execute = vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" });
+    const account: ExecutableAccount = { execute };
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ shard_contract_address: "0x1234abcd" }), {
+        status: 200,
+      }),
+    );
+
+    await act(async () => {
+      root.render(<HookHarness account={account} operatorUrl="http://localhost:3001" />);
+    });
+
+    await act(async () => {
+      await getHookState(latestState).requestShard([42], {
+        hyperstructureIds: [9],
+      });
+    });
+
+    const current = getHookState(latestState);
+    expect(current.phase).toBe("error");
+    expect(current.errorCode).toBe("INVALID_ENTITY_IDS");
+    expect(current.error).toContain("Hyperstructure related IDs are not supported");
+    expect(current.errorDiagnostic?.stage).toBe("validation");
+    expect(current.errorDiagnostic?.kind).toBe("invalid_entity_ids");
+    expect(current.errorDiagnostic?.hint).toContain("policy audit");
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("fails fast when related ids exceed on-chain limit", async () => {
@@ -310,14 +444,14 @@ describe("useShardRequest", () => {
         new Response(
           JSON.stringify({
             shards: [
-              {
+              buildShardStatusEntry({
                 phase: "gameplay_active",
-                katana_url: "http://localhost:5050",
-                torii_url: "http://localhost:8080",
-                torii_grpc_url: "http://localhost:18090",
-                game_contract_address: "0xabc123",
-                shard_id: "0xabc123@0x9",
-              },
+                katanaUrl: "http://localhost:5050",
+                toriiUrl: "http://localhost:8080",
+                toriiGrpcUrl: "http://localhost:18090",
+                gameContractAddress: "0xabc123",
+                shardId: "0xabc123@0x9",
+              }),
             ],
           }),
           { status: 200 },
@@ -327,14 +461,14 @@ describe("useShardRequest", () => {
         new Response(
           JSON.stringify({
             shards: [
-              {
+              buildShardStatusEntry({
                 phase: "gameplay_active",
-                katana_url: "http://localhost:5050",
-                torii_url: "http://localhost:8080",
-                torii_grpc_url: "http://localhost:18090",
-                game_contract_address: "0xabc123",
-                shard_id: "0xabc123@0x9",
-              },
+                katanaUrl: "http://localhost:5050",
+                toriiUrl: "http://localhost:8080",
+                toriiGrpcUrl: "http://localhost:18090",
+                gameContractAddress: "0xabc123",
+                shardId: "0xabc123@0x9",
+              }),
             ],
           }),
           { status: 200 },
@@ -416,14 +550,14 @@ describe("useShardRequest", () => {
         new Response(
           JSON.stringify({
             shards: [
-              {
+              buildShardStatusEntry({
                 phase: "gameplay_active",
-                katana_url: "http://localhost:5050",
-                torii_url: "http://localhost:8080",
-                torii_grpc_url: "http://localhost:18090",
-                game_contract_address: "0xabc123",
-                shard_id: "0xabc123@0x9",
-              },
+                katanaUrl: "http://localhost:5050",
+                toriiUrl: "http://localhost:8080",
+                toriiGrpcUrl: "http://localhost:18090",
+                gameContractAddress: "0xabc123",
+                shardId: "0xabc123@0x9",
+              }),
             ],
           }),
           { status: 200 },
@@ -487,14 +621,14 @@ describe("useShardRequest", () => {
         new Response(
           JSON.stringify({
             shards: [
-              {
+              buildShardStatusEntry({
                 phase: "gameplay_active",
-                katana_url: "http://localhost:5050",
-                torii_url: "http://localhost:8080",
-                torii_grpc_url: "http://localhost:18090",
-                game_contract_address: "0xdef456",
-                shard_id: "0xdef456@0x9",
-              },
+                katanaUrl: "http://localhost:5050",
+                toriiUrl: "http://localhost:8080",
+                toriiGrpcUrl: "http://localhost:18090",
+                gameContractAddress: "0xdef456",
+                shardId: "0xdef456@0x9",
+              }),
             ],
           }),
           { status: 200 },
@@ -546,14 +680,14 @@ describe("useShardRequest", () => {
         new Response(
           JSON.stringify({
             shards: [
-              {
+              buildShardStatusEntry({
                 phase: "gameplay_active",
-                katana_url: "http://localhost:5050",
-                torii_url: "http://localhost:8080",
-                torii_grpc_url: "http://localhost:18090",
-                game_contract_address: "0xabc123",
-                shard_id: "0xabc123@0x9",
-              },
+                katanaUrl: "http://localhost:5050",
+                toriiUrl: "http://localhost:8080",
+                toriiGrpcUrl: "http://localhost:18090",
+                gameContractAddress: "0xabc123",
+                shardId: "0xabc123@0x9",
+              }),
             ],
           }),
           { status: 200 },
@@ -563,14 +697,14 @@ describe("useShardRequest", () => {
         new Response(
           JSON.stringify({
             shards: [
-              {
+              buildShardStatusEntry({
                 phase: "gameplay_active",
-                katana_url: "http://localhost:5050",
-                torii_url: "http://localhost:8080",
-                torii_grpc_url: "http://localhost:18090",
-                game_contract_address: "0xabc123",
-                shard_id: "0xabc123@0x9",
-              },
+                katanaUrl: "http://localhost:5050",
+                toriiUrl: "http://localhost:8080",
+                toriiGrpcUrl: "http://localhost:18090",
+                gameContractAddress: "0xabc123",
+                shardId: "0xabc123@0x9",
+              }),
             ],
           }),
           { status: 200 },
@@ -658,22 +792,22 @@ describe("useShardRequest", () => {
         new Response(
           JSON.stringify({
             shards: [
-              {
+              buildShardStatusEntry({
                 phase: "gameplay_active",
-                katana_url: "http://localhost:5051",
-                torii_url: "http://localhost:8081",
-                torii_grpc_url: "http://localhost:18091",
-                game_contract_address: "0xabc123",
-                shard_id: "0xabc123@0x99",
-              },
-              {
+                katanaUrl: "http://localhost:5051",
+                toriiUrl: "http://localhost:8081",
+                toriiGrpcUrl: "http://localhost:18091",
+                gameContractAddress: "0xabc123",
+                shardId: "0xabc123@0x99",
+              }),
+              buildShardStatusEntry({
                 phase: "gameplay_active",
-                katana_url: "http://localhost:5050",
-                torii_url: "http://localhost:8080",
-                torii_grpc_url: "http://localhost:18090",
-                game_contract_address: "0xabc123",
-                shard_id: "0xabc123@0x9",
-              },
+                katanaUrl: "http://localhost:5050",
+                toriiUrl: "http://localhost:8080",
+                toriiGrpcUrl: "http://localhost:18090",
+                gameContractAddress: "0xabc123",
+                shardId: "0xabc123@0x9",
+              }),
             ],
           }),
           { status: 200 },
@@ -699,14 +833,14 @@ describe("useShardRequest", () => {
         new Response(
           JSON.stringify({
             shards: [
-              {
+              buildShardStatusEntry({
                 phase: "gameplay_active",
-                katana_url: "http://localhost:5050",
-                torii_url: "http://localhost:8080",
-                torii_grpc_url: "http://localhost:18090",
-                game_contract_address: "0xabc123",
-                shard_id: "0xabc123@0x9",
-              },
+                katanaUrl: "http://localhost:5050",
+                toriiUrl: "http://localhost:8080",
+                toriiGrpcUrl: "http://localhost:18090",
+                gameContractAddress: "0xabc123",
+                shardId: "0xabc123@0x9",
+              }),
             ],
           }),
           { status: 200 },
@@ -777,14 +911,14 @@ describe("useShardRequest", () => {
         new Response(
           JSON.stringify({
             shards: [
-              {
+              buildShardStatusEntry({
                 phase: "gameplay_active",
-                katana_url: "http://localhost:5050",
-                torii_url: "http://localhost:8080",
-                torii_grpc_url: "http://localhost:18090",
-                game_contract_address: "0xabc123",
-                shard_id: "0xabc123@0x9",
-              },
+                katanaUrl: "http://localhost:5050",
+                toriiUrl: "http://localhost:8080",
+                toriiGrpcUrl: "http://localhost:18090",
+                gameContractAddress: "0xabc123",
+                shardId: "0xabc123@0x9",
+              }),
             ],
           }),
           { status: 200 },
@@ -838,14 +972,17 @@ describe("useShardRequest", () => {
         new Response(
           JSON.stringify({
             shards: [
-              {
+              buildShardStatusEntry({
                 phase: "torii_ready",
-                katana_url: "http://localhost:5050",
-                torii_url: "http://localhost:8080",
-                torii_grpc_url: "http://localhost:18090",
-                game_contract_address: "0xabc123",
-                shard_id: "0xabc123@0x9",
-              },
+                katanaUrl: "http://localhost:5050",
+                toriiUrl: "http://localhost:8080",
+                toriiGrpcUrl: "http://localhost:18090",
+                gameContractAddress: "0xabc123",
+                shardId: "0xabc123@0x9",
+                protocol: {
+                  ready: false,
+                },
+              }),
             ],
           }),
           { status: 200 },
@@ -855,14 +992,14 @@ describe("useShardRequest", () => {
         new Response(
           JSON.stringify({
             shards: [
-              {
+              buildShardStatusEntry({
                 phase: "gameplay_active",
-                katana_url: "http://localhost:5050",
-                torii_url: "http://localhost:8080",
-                torii_grpc_url: "http://localhost:18090",
-                game_contract_address: "0xabc123",
-                shard_id: "0xabc123@0x9",
-              },
+                katanaUrl: "http://localhost:5050",
+                toriiUrl: "http://localhost:8080",
+                toriiGrpcUrl: "http://localhost:18090",
+                gameContractAddress: "0xabc123",
+                shardId: "0xabc123@0x9",
+              }),
             ],
           }),
           { status: 200 },
@@ -899,6 +1036,29 @@ describe("useShardRequest", () => {
     expect(getHookState(latestState).shardUrls?.shardId).toBe("0xabc123@0x9");
   });
 
+  it("treats operator 404 during recovery as 'no active shard' and stays idle", async () => {
+    const account: ExecutableAccount = {
+      execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" }),
+    };
+
+    fetchMock.mockResolvedValueOnce(new Response("missing", { status: 404 }));
+
+    await act(async () => {
+      root.render(<HookHarness account={account} operatorUrl="http://localhost:3001" />);
+    });
+
+    await act(async () => {
+      await getHookState(latestState).recoverShard();
+    });
+    await act(async () => Promise.resolve());
+
+    const current = getHookState(latestState);
+    expect(current.phase).toBe("idle");
+    expect(current.errorCode).toBeNull();
+    expect(current.errorDiagnostic).toBeNull();
+    expect(current.targetShardId).toBeNull();
+  });
+
   it("fails recovery when operator reports multiple recoverable shards for the same world", async () => {
     const account: ExecutableAccount = {
       execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" }),
@@ -908,22 +1068,25 @@ describe("useShardRequest", () => {
       new Response(
         JSON.stringify({
           shards: [
-            {
+            buildShardStatusEntry({
               phase: "gameplay_active",
-              katana_url: "http://localhost:5050",
-              torii_url: "http://localhost:8080",
-              torii_grpc_url: "http://localhost:18090",
-              game_contract_address: "0xabc123",
-              shard_id: "0xabc123@0x9",
-            },
-            {
+              katanaUrl: "http://localhost:5050",
+              toriiUrl: "http://localhost:8080",
+              toriiGrpcUrl: "http://localhost:18090",
+              gameContractAddress: "0xabc123",
+              shardId: "0xabc123@0x9",
+            }),
+            buildShardStatusEntry({
               phase: "torii_ready",
-              katana_url: "http://localhost:5051",
-              torii_url: "http://localhost:8081",
-              torii_grpc_url: "http://localhost:18091",
-              game_contract_address: "0xabc123",
-              shard_id: "0xabc123@0xa",
-            },
+              katanaUrl: "http://localhost:5051",
+              toriiUrl: "http://localhost:8081",
+              toriiGrpcUrl: "http://localhost:18091",
+              gameContractAddress: "0xabc123",
+              shardId: "0xabc123@0xa",
+              protocol: {
+                ready: false,
+              },
+            }),
           ],
         }),
         { status: 200 },

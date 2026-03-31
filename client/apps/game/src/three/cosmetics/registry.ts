@@ -13,7 +13,7 @@ let seeded = false;
 const ARMY_TROOP_TYPES = Object.values(TroopType) as TroopType[];
 const ARMY_TIERS = Object.values(TroopTier) as TroopTier[];
 const STRUCTURE_TYPES = Object.values(StructureType).filter((value) => typeof value === "number") as StructureType[];
-const COSMETIC_ROOT = "models/cosmetics";
+const COSMETIC_ROOT = "/models/cosmetics";
 
 // Only using low-res models now - files are named by attributesRaw (e.g., 0x305020701.glb)
 const lowResPath = (attributesRaw: string) => `${COSMETIC_ROOT}/low-res/${attributesRaw}.glb`;
@@ -23,8 +23,10 @@ const lowResPath = (attributesRaw: string) => `${COSMETIC_ROOT}/low-res/${attrib
  */
 function normalizeAssetPath(path: string): string {
   if (path.startsWith("/")) return path;
-  if (path.startsWith("models/")) return path;
-  return `models/${path}`;
+  // Ensure absolute path from domain root — relative paths break under /play/* routes
+  // because the browser resolves them relative to the current page directory.
+  if (path.startsWith("models/")) return `/${path}`;
+  return `/models/${path}`;
 }
 
 /**

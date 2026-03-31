@@ -96,6 +96,23 @@ const normalizePositiveIdList = (values: number[] | undefined, fieldName: string
   return normalized;
 };
 
+const mergeUniqueIdLists = (...lists: readonly number[][]): number[] => {
+  const merged: number[] = [];
+  const seen = new Set<number>();
+
+  for (const list of lists) {
+    for (const value of list) {
+      if (seen.has(value)) {
+        continue;
+      }
+      seen.add(value);
+      merged.push(value);
+    }
+  }
+
+  return merged;
+};
+
 const normalizeFeltToHex = (value: unknown, fieldName: string): string => {
   if (typeof value === "bigint") {
     return `0x${value.toString(16)}`.toLowerCase();
@@ -511,6 +528,9 @@ const fetchShardStatusEntries = async (
   gameContractAddress: string,
 ): Promise<ShardStatusEntry[]> => {
   const statusResponse = await fetch(`${operatorUrl}/shard/${gameContractAddress}`);
+  if (statusResponse.status === 404) {
+    return [];
+  }
   if (!statusResponse.ok) {
     throw new Error(`Failed to fetch shard status: HTTP ${statusResponse.status}`);
   }
@@ -658,6 +678,16 @@ const buildRequestTimeoutDiagnostic = (params: {
       operatorUrl: params.operatorUrl,
     },
   });
+};
+
+const isNoRecoverableShardError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("no recoverable shard")
+    || normalized.includes("does not report a recoverable shard")
+    || normalized.includes("failed to fetch shard status: http 404")
+  );
 };
 
 export const useShardRequest = (
@@ -1067,6 +1097,33 @@ export const useShardRequest = (
       beginTrackingRequestedShard(requestedContext);
       return;
     } catch (error) {
+      if (isNoRecoverableShardError(error)) {
+        // No active shard for this world is a valid steady state in the lobby.
+        stopPolling();
+        clearCapturedShardRequestDiagnostic();
+        clearCapturedReceipt();
+        setErrorDiagnostic(null);
+        setShardUrls(null);
+        setTargetShardId(null);
+        setPhase("idle");
+        clearMainShardRequestState();
+        logShardRequestDiagnostic(
+          createShardRequestDiagnostic({
+            code: "SHARD_ID_RESOLUTION_FAILED",
+            stage: "recovery",
+            kind: "operator_shard_not_found",
+            summary: "No active shard to recover for the current world",
+            hint: "Request a new shard when you want to enter shard mode.",
+            context: {
+              operatorUrl,
+              worldAddress: options?.worldAddress?.trim() || dojoConfig.manifest.world.address,
+              candidateShardId,
+            },
+          }),
+          "info",
+        );
+        return;
+      }
       failRequest(
         toShardRequestDiagnostic(error, {
           code: "SHARD_ID_RESOLUTION_FAILED",
@@ -1082,7 +1139,16 @@ export const useShardRequest = (
         }),
       );
     }
-  }, [account, beginTrackingRequestedShard, failRequest, operatorUrl, options?.worldAddress, targetShardId]);
+  }, [
+    account,
+    beginTrackingRequestedShard,
+    clearMainShardRequestState,
+    failRequest,
+    operatorUrl,
+    options?.worldAddress,
+    stopPolling,
+    targetShardId,
+  ]);
 
   const requestShard = useCallback(
     async (entityIds: number[], relatedIds?: ShardRequestRelatedIds) => {
@@ -1249,14 +1315,47 @@ export const useShardRequest = (
         return;
       }
 
+      if (hyperstructureIds.length > 0) {
+        failRequest(
+          createShardRequestDiagnostic({
+            code: "INVALID_ENTITY_IDS",
+            stage: "validation",
+            kind: "invalid_entity_ids",
+            summary: "Hyperstructure related IDs are not supported for shard requests yet",
+            hint: "Retry without hyperstructureIds for now. Shared hyperstructure scope still needs a dedicated policy audit.",
+            context: {
+              entityIds,
+              hyperstructureIds,
+            },
+          }),
+        );
+        return;
+      }
+
+      const exclusiveRelatedEntityIds = mergeUniqueIdLists(explorerIds, tradeIds);
+      const sharedEntityIds: number[] = [];
+
       // Use request_shard_realm for single realm entity — it pre-allocates
       // building hex grid positions and includes them in the shard scope.
-      // Falls back to request_shard for multi-entity requests.
+      // Generic request_shard already treats `entityIds` as exclusive, so
+      // related exclusive IDs are folded into that span for multi-entity flows.
       const isSingleRealm = entityIds.length === 1;
       const entrypoint = isSingleRealm ? "request_shard_realm" : "request_shard";
+      const exclusiveEntityIds = mergeUniqueIdLists(entityIds, exclusiveRelatedEntityIds);
       const calldata = isSingleRealm
-        ? [entityIds[0].toString()]
-        : [entityIds.length.toString(), ...entityIds.map((entityId) => entityId.toString())];
+        ? [
+            entityIds[0].toString(),
+            exclusiveRelatedEntityIds.length.toString(),
+            ...exclusiveRelatedEntityIds.map((entityId) => entityId.toString()),
+            sharedEntityIds.length.toString(),
+            ...sharedEntityIds.map((entityId) => entityId.toString()),
+          ]
+        : [
+            exclusiveEntityIds.length.toString(),
+            ...exclusiveEntityIds.map((entityId) => entityId.toString()),
+            sharedEntityIds.length.toString(),
+            ...sharedEntityIds.map((entityId) => entityId.toString()),
+          ];
 
       const requestShardCall: Call = {
         contractAddress: shardingContractAddress,

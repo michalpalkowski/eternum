@@ -633,9 +633,9 @@ export const UnifiedGameGrid = ({
 
   // For local/dev-stack worlds, skip factory and use synthetic entry for the current chain.
   // Use raw env var — env.VITE_PUBLIC_CHAIN can be overridden by localStorage (see env.ts).
-  const currentChain = (import.meta.env.VITE_PUBLIC_CHAIN as string) || "local";
+  const currentChain = ((import.meta.env.VITE_PUBLIC_CHAIN as string) || "local") as Chain;
   const isLocalWorld = currentChain === "local" || import.meta.env.VITE_PUBLIC_LOCAL_WORLD === "true";
-  const factoryChains = isLocalWorld ? [currentChain as const] : ["mainnet" as const, "slot" as const];
+  const factoryChains: Chain[] = isLocalWorld ? [currentChain] : ["mainnet", "slot"];
   const {
     worlds: factoryWorlds,
     isLoading: factoryWorldsLoading,

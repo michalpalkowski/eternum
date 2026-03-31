@@ -252,7 +252,7 @@ export const useWorldRegistration = ({
 
     const isLocalWorld = import.meta.env.VITE_PUBLIC_LOCAL_WORLD === "true";
     if (chain === "local" || isLocalWorld) {
-      const manifest = getGameManifest(chain === "local" ? "local" : (import.meta.env.VITE_PUBLIC_CHAIN as string));
+      const manifest = getGameManifest(chain === "local" ? "local" : (import.meta.env.VITE_PUBLIC_CHAIN as Chain));
       const map: Record<string, string> = {};
       for (const c of (manifest as any).contracts ?? []) {
         if (c.selector && c.address) {

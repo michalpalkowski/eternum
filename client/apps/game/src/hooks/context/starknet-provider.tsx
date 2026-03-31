@@ -15,6 +15,7 @@ import { bootstrapGame } from "../../init/bootstrap";
 import { useAccountStore } from "../store/use-account-store";
 import { useShardStore } from "../store/use-shard-store";
 import { useControllerAccount } from "./use-controller-account";
+import { useShardHealthGuard } from "./use-shard-health-guard";
 
 const slot: string = env.VITE_PUBLIC_SLOT;
 const namespace: string = "s1_eternum";
@@ -71,12 +72,24 @@ const deriveChainFromRpcUrl = (value: string): DerivedChain | null => {
   }
 };
 
+/**
+ * Resolve the "main chain" RPC URL — the one used for wallet/controller setup.
+ * In shard mode, the active RPC points to shard Katana which the ControllerConnector
+ * doesn't recognize. The main chain RPC (VITE_PUBLIC_NODE_URL) is always valid.
+ */
+const resolveMainChainRpcUrl = (): string => {
+  return normalizeRpcUrl(env.VITE_PUBLIC_NODE_URL);
+};
+
 const cartridgeApiBase = env.VITE_PUBLIC_CARTRIDGE_API_BASE || "https://api.cartridge.gg";
-const createControllerConnector = (rpcUrl: string, resolvedChainId: string) => {
+const createControllerConnector = (resolvedChainId: string) => {
+  // Always use stable, well-known RPC URLs for the controller's chain list.
+  // Shard Katana URLs (hypervisor proxy) are NOT valid chains for the controller.
+  const mainChainRpcUrl = resolveMainChainRpcUrl();
   const controllerSupportedRpcUrls = Array.from(
     new Set(
       [
-        rpcUrl,
+        mainChainRpcUrl,
         `${cartridgeApiBase}/x/eternum-blitz-slot-3/katana/rpc/v0_9`,
         `${cartridgeApiBase}/x/starknet/sepolia/rpc/v0_9`,
         `${cartridgeApiBase}/x/starknet/mainnet/rpc/v0_9`,
@@ -225,10 +238,16 @@ export function StarknetProvider({ children }: { children: React.ReactNode }) {
   })();
 
   const activeShardRpcUrl = isShardMode ? (storeShardRpcUrl ?? urlShardRpcUrl) : urlShardRpcUrl;
+
+  // RPC URL for data fetching (Torii sync, state reads, etc.).
+  // In shard mode this points to shard Katana; otherwise main chain.
   const baseRpcUrl = activeShardRpcUrl ?? (isLocal ? KATANA_RPC_URL : dojoConfig.rpcUrl || env.VITE_PUBLIC_NODE_URL);
   const rpcUrl = normalizeRpcUrl(baseRpcUrl);
 
-  const derivedChain = isLocal ? null : deriveChainFromRpcUrl(rpcUrl);
+  // Chain derivation always uses the main chain RPC, not the shard RPC.
+  // Shard Katana URLs (hypervisor proxy) can't be parsed as chain identifiers.
+  const mainChainRpc = isLocal ? KATANA_RPC_URL : resolveMainChainRpcUrl();
+  const derivedChain = isLocal ? null : deriveChainFromRpcUrl(mainChainRpc);
   const fallbackChain: DerivedChain = isSlot
     ? { kind: "slot", chainId: SLOT_CHAIN_ID }
     : isSlottest
@@ -253,10 +272,12 @@ export function StarknetProvider({ children }: { children: React.ReactNode }) {
     return { nodeUrl: rpcUrl };
   }, [rpcUrl]);
 
+  // Controller connector is stable — always configured with main chain RPC.
+  // It never sees shard Katana URLs, preventing "chain not supported" errors.
   const controllerConnector = useMemo(() => {
     if (isLocal) return null;
-    return createControllerConnector(rpcUrl, resolvedChainId) as unknown as Connector;
-  }, [rpcUrl, resolvedChainId]);
+    return createControllerConnector(resolvedChainId) as unknown as Connector;
+  }, [resolvedChainId]);
 
   // For dev-stack testnet: create a connector from deployer credentials (env vars).
   const deployerConnector = useMemo(() => {
@@ -301,6 +322,7 @@ export function StarknetProvider({ children }: { children: React.ReactNode }) {
 const StarknetAccountSync = ({ children }: { children: React.ReactNode }) => {
   useControllerAccount();
   useBootstrapPrefetch();
+  useShardHealthGuard();
 
   return <>{children}</>;
 };

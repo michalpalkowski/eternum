@@ -24,6 +24,10 @@ const envSchema = z.object({
 
   // API endpoints
   VITE_PUBLIC_TORII: z.string().url().optional().default("https://api.cartridge.gg/x/eternum-blitz-slot-3/torii"),
+  // gRPC-web endpoint for Torii subscriptions (SubscribeEntities, SubscribeEventMessages).
+  // Falls back to VITE_PUBLIC_TORII when unset — works for Slot/local where HTTP and gRPC
+  // share the same port. Set separately for nginx deployments with split ports (8080/8090).
+  VITE_PUBLIC_TORII_GRPC: z.string().url().optional(),
   VITE_PUBLIC_GLOBAL_TORII: z.string().url().optional().default("https://api.cartridge.gg/x/blitz-slot-global-1/torii"),
   VITE_PUBLIC_NODE_URL: z
     .string()

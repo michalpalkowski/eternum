@@ -250,11 +250,17 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
   // 2) Update global dojoConfig in place (shared object reference)
   //    - Torii base URL and manifest are used by setup() downstream
   //    - For local chain, use environment variables directly
-  const preferredToriiUrl = chain === "local" || hasExplicitToriiUrl ? env.VITE_PUBLIC_TORII : profile.toriiBaseUrl;
+  // Torii has two transport protocols:
+  //   - HTTP: SQL queries, REST endpoints
+  //   - gRPC-web: entity/event subscriptions (SubscribeEntities, SubscribeEventMessages)
+  // On Slot/local they share one URL. On nginx TEE deployments they have split ports.
+  const preferredToriiHttpUrl = chain === "local" || hasExplicitToriiUrl ? env.VITE_PUBLIC_TORII : profile.toriiBaseUrl;
+  const preferredToriiGrpcUrl = env.VITE_PUBLIC_TORII_GRPC ?? preferredToriiHttpUrl;
   const preferredRpcUrl =
     chain === "local" || hasExplicitNodeUrl ? env.VITE_PUBLIC_NODE_URL : (profile.rpcUrl ?? env.VITE_PUBLIC_NODE_URL);
 
-  (dojoConfig as any).toriiUrl = preferredToriiUrl;
+  // dojoConfig.toriiUrl is used by ToriiClient for gRPC-web subscriptions.
+  (dojoConfig as any).toriiUrl = preferredToriiGrpcUrl;
   (dojoConfig as any).rpcUrl = preferredRpcUrl;
   (dojoConfig as any).manifest = patchedManifest;
 
@@ -264,9 +270,9 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
     (dojoConfig as any).toriiUrl = shardSessionParams.toriiGrpcUrl;
   }
 
-  // 3) Point SQL API to the active world's Torii
-  const toriiUrl = shardSessionParams !== null ? shardSessionParams.toriiUrl : preferredToriiUrl;
-  setSqlApiBaseUrl(`${toriiUrl}/sql`);
+  // 3) Point SQL API to the HTTP Torii (not gRPC).
+  const toriiHttpUrl = shardSessionParams !== null ? shardSessionParams.toriiUrl : preferredToriiHttpUrl;
+  setSqlApiBaseUrl(`${toriiHttpUrl}/sql`);
 
   const setupResult = await setup(
     { ...dojoConfig },
