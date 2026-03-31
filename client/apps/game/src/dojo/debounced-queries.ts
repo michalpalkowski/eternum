@@ -7,6 +7,7 @@ import {
   getOwnedArmiesFromTorii,
   getTilesForPositionsFromTorii,
 } from "./queries";
+import { setQueueDepth, perfEvent } from "./perf-diagnostics";
 
 type QueueItem = {
   run: () => Promise<void>;
@@ -35,6 +36,11 @@ class RequestQueue {
         },
       });
 
+      setQueueDepth("subscriptionQueue", this.queue.length);
+      if (this.queue.length > 10) {
+        perfEvent("subscriptionQueue:highDepth", { depth: this.queue.length });
+      }
+
       if (!this.processing) {
         this.processing = true;
         void this.processQueue();
@@ -45,11 +51,17 @@ class RequestQueue {
   private async processQueue() {
     while (this.queue.length > 0) {
       const batch = this.queue.splice(0, this.batchSize);
+      setQueueDepth("subscriptionQueue", this.queue.length);
 
+      const t0 = performance.now();
       try {
         await Promise.all(batch.map((item) => item.run()));
       } catch (error) {
         console.error("Error processing request batch:", error);
+      }
+      const batchMs = performance.now() - t0;
+      if (batchMs > 500) {
+        perfEvent("subscriptionQueue:slowBatch", { batchSize: batch.length, durationMs: Math.round(batchMs), remaining: this.queue.length });
       }
 
       if (this.queue.length > 0) {
@@ -58,6 +70,7 @@ class RequestQueue {
       }
     }
     this.processing = false;
+    setQueueDepth("subscriptionQueue", 0);
   }
 
   clear() {

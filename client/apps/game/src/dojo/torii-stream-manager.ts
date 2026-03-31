@@ -4,6 +4,7 @@ import { getEntities } from "@dojoengine/state";
 import type { PatternMatching } from "@dojoengine/torii-client";
 import type { Clause, ToriiClient } from "@dojoengine/torii-wasm/types";
 import { syncEntitiesDebounced } from "./sync";
+import { timedAsync, perfEvent } from "./perf-diagnostics";
 
 export interface BoundsModelConfig {
   model: string;
@@ -94,7 +95,7 @@ export class ToriiStreamManager {
   private latestSwitchRequestId = 0;
   private clauseBuilder: (descriptor: BoundsDescriptor) => Clause | null;
   private currentSignature: string | null = null;
-  private readonly maxHydrationEntities = 40_000;
+  private readonly maxHydrationEntities = 10_000;
   private readonly switchTimeoutMs: number;
 
   constructor({
@@ -102,7 +103,7 @@ export class ToriiStreamManager {
     setup,
     logging = false,
     clauseBuilder = defaultClauseBuilder,
-    switchTimeoutMs = 8_000,
+    switchTimeoutMs = 30_000,
   }: ToriiStreamManagerConfig) {
     this.client = client;
     this.setup = setup;
@@ -137,7 +138,11 @@ export class ToriiStreamManager {
       let dropLateSubscription = false;
       let appliedSubscription: { cancel: () => void } | null = null;
 
-      const subscriptionPromise = syncEntitiesDebounced(this.client, this.setup, clause, this.logging).then(
+      perfEvent("streamManager:switchBounds", { requestId, models: descriptor.models.length });
+
+      const subscriptionPromise = timedAsync("streamManager:syncEntities", () =>
+        syncEntitiesDebounced(this.client, this.setup, clause, this.logging),
+      ).then(
         (subscription) => {
           const cancelableSubscription = subscription as { cancel: () => void };
           if (dropLateSubscription) {
@@ -167,7 +172,9 @@ export class ToriiStreamManager {
         appliedSubscription = subscription;
 
         await this.withTimeout(
-          this.hydrateBoundsSnapshot(descriptor, clause),
+          timedAsync("streamManager:hydrateBounds", () =>
+            this.hydrateBoundsSnapshot(descriptor, clause),
+          ),
           this.switchTimeoutMs,
           `bounds snapshot hydration (requestId=${requestId})`,
         );
@@ -243,14 +250,16 @@ export class ToriiStreamManager {
       return;
     }
 
-    await getEntities(
-      this.client,
-      clause,
-      this.setup.network.contractComponents as any,
-      [],
-      models,
-      this.maxHydrationEntities,
-      false,
+    await timedAsync(`query:boundsHydration(${models.length}models)`, () =>
+      getEntities(
+        this.client,
+        clause,
+        this.setup.network.contractComponents as any,
+        [],
+        models,
+        this.maxHydrationEntities,
+        false,
+      ),
     );
   }
 

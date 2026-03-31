@@ -14,6 +14,7 @@ import {
   debouncedGetOwnedArmiesFromTorii,
 } from "./debounced-queries";
 import { EVENT_QUERY_LIMIT } from "./sync";
+import { timedAsync } from "./perf-diagnostics";
 
 const isValidId = (id: unknown): id is ID => typeof id === "number" && Number.isFinite(id);
 const hasValidPosition = (position: HexPosition | undefined): position is HexPosition =>
@@ -21,7 +22,7 @@ const hasValidPosition = (position: HexPosition | undefined): position is HexPos
 
 const toEntityKeyHex = (id: ID): string => `0x${Math.trunc(id).toString(16)}`;
 const TILE_COORD_SYNC_BATCH_SIZE = 192;
-const TILE_ROWS_SYNC_BATCH_SIZE = 512;
+const TILE_ROWS_SYNC_BATCH_SIZE = 128;
 
 export const getTilesForPositionsFromTorii = async <S extends Schema>(
   client: ToriiClient,
@@ -39,19 +40,21 @@ export const getTilesForPositionsFromTorii = async <S extends Schema>(
     ]).build(),
   );
 
-  return getEntities(
-    client,
-    {
-      Composite: {
-        operator: "Or" as LogicalOperator,
-        clauses: tileClauses,
+  return timedAsync(`query:tiles(${positions.length})`, () =>
+    getEntities(
+      client,
+      {
+        Composite: {
+          operator: "Or" as LogicalOperator,
+          clauses: tileClauses,
+        },
       },
-    },
-    components as any,
-    [],
-    ["s1_eternum-TileOpt"],
-    EVENT_QUERY_LIMIT,
-    false,
+      components as any,
+      [],
+      ["s1_eternum-TileOpt"],
+      EVENT_QUERY_LIMIT,
+      false,
+    ),
   );
 };
 
@@ -240,14 +243,16 @@ export const getConfigFromTorii = async <S extends Schema>(
       },
     },
   ];
-  return getEntities(
-    client,
-    { Composite: { operator: "Or", clauses: configClauses } },
-    components,
-    [],
-    configModels,
-    EVENT_QUERY_LIMIT,
-    false,
+  return timedAsync("query:config", () =>
+    getEntities(
+      client,
+      { Composite: { operator: "Or", clauses: configClauses } },
+      components,
+      [],
+      configModels,
+      EVENT_QUERY_LIMIT,
+      false,
+    ),
   );
 };
 
@@ -264,7 +269,9 @@ export const getAddressNamesFromTorii = async <S extends Schema>(
     },
   };
 
-  return getEntities(client, query, components as any, [], models, EVENT_QUERY_LIMIT, false);
+  return timedAsync("query:addressNames", () =>
+    getEntities(client, query, components as any, [], models, EVENT_QUERY_LIMIT, false),
+  );
 };
 
 export const getGuildsFromTorii = async <S extends Schema>(
@@ -297,7 +304,9 @@ export const getGuildsFromTorii = async <S extends Schema>(
     },
   };
 
-  return getEntities(client, query, components as any, [], models, EVENT_QUERY_LIMIT, false);
+  return timedAsync("query:guilds", () =>
+    getEntities(client, query, components as any, [], models, EVENT_QUERY_LIMIT, false),
+  );
 };
 
 export const getHyperstructureFromTorii = async <S extends Schema>(
@@ -335,14 +344,16 @@ export const getHyperstructureFromTorii = async <S extends Schema>(
     },
   };
 
-  const structurePromise = getEntities(
-    client,
-    structureQuery,
-    components as any,
-    [],
-    ["s1_eternum-Structure"],
-    EVENT_QUERY_LIMIT,
-    false,
+  const structurePromise = timedAsync("query:hyperstructure:structures", () =>
+    getEntities(
+      client,
+      structureQuery,
+      components as any,
+      [],
+      ["s1_eternum-Structure"],
+      EVENT_QUERY_LIMIT,
+      false,
+    ),
   );
 
   const hyperstructureQuery = {
@@ -382,14 +393,16 @@ export const getHyperstructureFromTorii = async <S extends Schema>(
     "s1_eternum-PlayerRegisteredPoints",
   ];
 
-  const hyperstructurePromise = getEntities(
-    client,
-    hyperstructureQuery,
-    components as any,
-    [],
-    hyperstructureModels,
-    EVENT_QUERY_LIMIT,
-    false,
+  const hyperstructurePromise = timedAsync("query:hyperstructure:models", () =>
+    getEntities(
+      client,
+      hyperstructureQuery,
+      components as any,
+      [],
+      hyperstructureModels,
+      EVENT_QUERY_LIMIT,
+      false,
+    ),
   );
 
   return Promise.all([hyperstructurePromise, structurePromise]);
@@ -442,27 +455,31 @@ export const getEntitiesFromTorii = async <S extends Schema>(
           },
         };
 
-  return getEntities(client, query, components as any, [], entityModels, 40_000, false);
+  return timedAsync(`query:entities(${validEntityIDs.length})`, () =>
+    getEntities(client, query, components as any, [], entityModels, 40_000, false),
+  );
 };
 
 export const getMarketFromTorii = async <S extends Schema>(
   client: ToriiClient,
   components: Component<S, Metadata, undefined>[],
 ) => {
-  const promiseMarket = getEntities(
-    client,
-    {
-      Keys: {
-        keys: [undefined],
-        pattern_matching: "VariableLen",
-        models: [],
+  const promiseMarket = timedAsync("query:market", () =>
+    getEntities(
+      client,
+      {
+        Keys: {
+          keys: [undefined],
+          pattern_matching: "VariableLen",
+          models: [],
+        },
       },
-    },
-    components,
-    [],
-    ["s1_eternum-Market", "s1_eternum-Liquidity", "s1_eternum-Trade"],
-    EVENT_QUERY_LIMIT,
-    false,
+      components,
+      [],
+      ["s1_eternum-Market", "s1_eternum-Liquidity", "s1_eternum-Trade"],
+      EVENT_QUERY_LIMIT,
+      false,
+    ),
   );
 
   return Promise.all([promiseMarket]);
@@ -472,14 +489,16 @@ export const getBankStructuresFromTorii = async <S extends Schema>(
   client: ToriiClient,
   components: Component<S, Metadata, undefined>[],
 ) => {
-  return getEntities(
-    client,
-    MemberClause("s1_eternum-Structure", "category", "Eq", StructureType.Bank).build(),
-    components,
-    [],
-    ["s1_eternum-Structure"],
-    EVENT_QUERY_LIMIT,
-    false,
+  return timedAsync("query:bankStructures", () =>
+    getEntities(
+      client,
+      MemberClause("s1_eternum-Structure", "category", "Eq", StructureType.Bank).build(),
+      components,
+      [],
+      ["s1_eternum-Structure"],
+      EVENT_QUERY_LIMIT,
+      false,
+    ),
   );
 };
 
@@ -488,26 +507,28 @@ export const getOwnedArmiesFromTorii = async <S extends Schema>(
   components: Component<S, Metadata, undefined>[],
   owners: number[],
 ) => {
-  return getEntities(
-    client,
-    {
-      Composite: {
-        operator: "Or",
-        clauses: owners.map((owner) => ({
-          Member: {
-            model: "s1_eternum-ExplorerTroops",
-            member: "owner",
-            operator: "Eq",
-            value: { Primitive: { U32: owner } },
-          },
-        })),
+  return timedAsync(`query:ownedArmies(${owners.length})`, () =>
+    getEntities(
+      client,
+      {
+        Composite: {
+          operator: "Or",
+          clauses: owners.map((owner) => ({
+            Member: {
+              model: "s1_eternum-ExplorerTroops",
+              member: "owner",
+              operator: "Eq",
+              value: { Primitive: { U32: owner } },
+            },
+          })),
+        },
       },
-    },
-    components,
-    [],
-    ["s1_eternum-ExplorerTroops", "s1_eternum-Resource"],
-    EVENT_QUERY_LIMIT,
-    false,
+      components,
+      [],
+      ["s1_eternum-ExplorerTroops", "s1_eternum-Resource"],
+      EVENT_QUERY_LIMIT,
+      false,
+    ),
   );
 };
 
@@ -529,7 +550,9 @@ export const getBuildingsFromTorii = async <S extends Schema>(
     },
   };
 
-  return getEntities(client, query, components as any, [], ["s1_eternum-Building"], EVENT_QUERY_LIMIT, false);
+  return timedAsync(`query:buildings(${structurePositions.length})`, () =>
+    getEntities(client, query, components as any, [], ["s1_eternum-Building"], EVENT_QUERY_LIMIT, false),
+  );
 };
 
 const getMapFromTorii = async <S extends Schema>(
@@ -539,19 +562,21 @@ const getMapFromTorii = async <S extends Schema>(
   startRow: number,
   range: number,
 ) => {
-  return getEntities(
-    client,
-    AndComposeClause([
-      MemberClause("s1_eternum-TileOpt", "col", "Gte", startCol - range),
-      MemberClause("s1_eternum-TileOpt", "col", "Lte", startCol + range),
-      MemberClause("s1_eternum-TileOpt", "row", "Gte", startRow - range),
-      MemberClause("s1_eternum-TileOpt", "row", "Lte", startRow + range),
-    ]).build(),
-    components as any,
-    [],
-    ["s1_eternum-TileOpt"],
-    EVENT_QUERY_LIMIT,
-    false,
+  return timedAsync(`query:map(${startCol},${startRow},r=${range})`, () =>
+    getEntities(
+      client,
+      AndComposeClause([
+        MemberClause("s1_eternum-TileOpt", "col", "Gte", startCol - range),
+        MemberClause("s1_eternum-TileOpt", "col", "Lte", startCol + range),
+        MemberClause("s1_eternum-TileOpt", "row", "Gte", startRow - range),
+        MemberClause("s1_eternum-TileOpt", "row", "Lte", startRow + range),
+      ]).build(),
+      components as any,
+      [],
+      ["s1_eternum-TileOpt"],
+      EVENT_QUERY_LIMIT,
+      false,
+    ),
   );
 };
 
@@ -597,6 +622,10 @@ export const getMapFromToriiExact = async <S extends Schema>(
       },
     }));
     await setEntities(entities as any, components as any, false);
+    // Yield to the browser between batches to prevent main thread blocking.
+    if (index + TILE_ROWS_SYNC_BATCH_SIZE < uniqueRows.length) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
   }
 };
 
@@ -609,5 +638,7 @@ export const getQuestsFromTorii = async (client: ToriiClient, components: Compon
     },
   };
 
-  return getEntities(client, query, components as any, [], ["s1_eternum-Quest"], EVENT_QUERY_LIMIT, false);
+  return timedAsync("query:quests", () =>
+    getEntities(client, query, components as any, [], ["s1_eternum-Quest"], EVENT_QUERY_LIMIT, false),
+  );
 };

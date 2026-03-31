@@ -18,9 +18,12 @@ import { resolveInitialStructureSelection } from "./sync-initial-selection";
 import { isDeletionPayload } from "./sync-utils";
 import { ToriiSyncWorkerManager } from "./sync-worker-manager";
 import { buildModelKeysClause, type GlobalModelStreamConfig } from "./torii-stream-manager";
+import { timedAsync, timedSync, perfEvent } from "./perf-diagnostics";
 
 export const EVENT_QUERY_LIMIT = 40_000;
-const TORII_STREAM_SUBSCRIPTION_SETUP_TIMEOUT_MS = 8_000;
+// 8s was too aggressive for remote deployments (TEE/testnet) where Torii latency
+// is 100-500ms and initial subscription setup competes with query traffic.
+const TORII_STREAM_SUBSCRIPTION_SETUP_TIMEOUT_MS = 30_000;
 
 let entityStreamSubscription: { cancel: () => void } | null = null;
 let entityStreamSubscriptionAttempt = 0;
@@ -81,7 +84,7 @@ const GLOBAL_STREAM_MODELS: GlobalModelStreamConfig[] = GLOBAL_NON_SPATIAL_MODEL
 const GLOBAL_STREAM_CLAUSE = buildModelKeysClause(GLOBAL_STREAM_MODELS);
 
 const MAP_CENTER_FELT = 2_147_483_646;
-const SPATIAL_BOOTSTRAP_HYDRATION_BATCH_SIZE = 64;
+const SPATIAL_BOOTSTRAP_HYDRATION_BATCH_SIZE = 16;
 const REQUIRED_BOOTSTRAP_CONFIG_MODELS = [
   "BuildingCategoryConfig",
   "ResourceFactoryConfig",
@@ -298,18 +301,20 @@ export const syncEntitiesDebounced = async (
   } = setupResult;
 
   const applyBatch = ({ upserts, deletions }: BatchPayload) => {
-    if (deletions.length > 0) {
-      deletions.forEach((entityId) => {
-        world.deleteEntity(entityId as Entity);
-      });
-    }
+    timedSync(`applyBatch(del=${deletions.length},ups=${upserts.length})`, () => {
+      if (deletions.length > 0) {
+        deletions.forEach((entityId) => {
+          world.deleteEntity(entityId as Entity);
+        });
+      }
 
-    if (upserts.length > 0) {
-      const modelsArray = upserts.map((value) => {
-        return { hashed_keys: value.hashed_keys, models: value.models };
-      });
-      setEntities(modelsArray, world.components, logging);
-    }
+      if (upserts.length > 0) {
+        const modelsArray = upserts.map((value) => {
+          return { hashed_keys: value.hashed_keys, models: value.models };
+        });
+        setEntities(modelsArray, world.components, logging);
+      }
+    });
   };
 
   const queueProcessor =
@@ -323,15 +328,19 @@ export const syncEntitiesDebounced = async (
     }
   };
 
-  const entitySubPromise = client.onEntityUpdated(entityKeyClause, (data: ToriiEntity) => {
-    if (logging) console.log("Entity updated", data);
-    queueUpdate(data, "entity");
-  });
+  const entitySubPromise = timedAsync("subscription:onEntityUpdated", () =>
+    client.onEntityUpdated(entityKeyClause, (data: ToriiEntity) => {
+      if (logging) console.log("Entity updated", data);
+      queueUpdate(data, "entity");
+    }),
+  );
 
-  const eventSubPromise = client.onEventMessageUpdated(entityKeyClause, (data: ToriiEntity) => {
-    if (logging) console.log("Event message updated", data.hashed_keys);
-    queueUpdate(data, "event");
-  });
+  const eventSubPromise = timedAsync("subscription:onEventMessageUpdated", () =>
+    client.onEventMessageUpdated(entityKeyClause, (data: ToriiEntity) => {
+      if (logging) console.log("Event message updated", data.hashed_keys);
+      queueUpdate(data, "event");
+    }),
+  );
 
   // Main entity stream is critical for correctness; do not fail-fast here.
   // It can legitimately take longer on local shards under load.
@@ -545,6 +554,10 @@ const hydrateSpatialStructuresFromSqlSnapshot = async (
   for (let i = 0; i < structuresToHydrate.length; i += SPATIAL_BOOTSTRAP_HYDRATION_BATCH_SIZE) {
     const batch = structuresToHydrate.slice(i, i + SPATIAL_BOOTSTRAP_HYDRATION_BATCH_SIZE);
     await getStructuresDataFromTorii(setup.network.toriiClient, contractComponents, batch);
+    // Yield to the browser between batches so the UI thread can paint and handle input.
+    if (i + SPATIAL_BOOTSTRAP_HYDRATION_BATCH_SIZE < structuresToHydrate.length) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
   }
 
   return {
@@ -605,10 +618,14 @@ export const initialSync = async (
 
   const parallelTasks: Promise<void>[] = [];
 
+  perfEvent("initialSync:start");
+
   // BANKS (kicked off immediately so the request overlaps with other sync work)
   parallelTasks.push(
     runTimedTask("bank structures query", 10, async () => {
-      await getBankStructuresFromTorii(setup.network.toriiClient, contractComponents);
+      await timedAsync("initialSync:bankStructures", () =>
+        getBankStructuresFromTorii(setup.network.toriiClient, contractComponents),
+      );
     }),
   );
 
@@ -663,10 +680,17 @@ export const initialSync = async (
     updateProgress(25);
   }
 
-  await getConfigFromTorii(setup.network.toriiClient, setup.network.contractComponents as any);
+  await timedAsync("initialSync:getConfig", () =>
+    getConfigFromTorii(setup.network.toriiClient, setup.network.contractComponents as any),
+  );
+  // Yield between heavy sync steps so the browser can paint and stay responsive.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
   let worldConfigMapCenterOffset: number | null = null;
   try {
-    worldConfigMapCenterOffset = await ensureWorldConfigReady(setup, contractComponents);
+    worldConfigMapCenterOffset = await timedAsync("initialSync:ensureWorldConfig", () =>
+      ensureWorldConfigReady(setup, contractComponents),
+    );
   } catch (error) {
     if (enforceProtocolChecks) {
       throw error;
@@ -675,7 +699,9 @@ export const initialSync = async (
   }
 
   try {
-    await ensureBootstrapConfigModelsReady(setup);
+    await timedAsync("initialSync:ensureBootstrapConfig", () =>
+      ensureBootstrapConfigModelsReady(setup),
+    );
   } catch (error) {
     if (enforceProtocolChecks) {
       throw error;
@@ -684,20 +710,29 @@ export const initialSync = async (
   }
 
   updateProgress(50);
+  await new Promise((resolve) => setTimeout(resolve, 0));
 
-  await getAddressNamesFromTorii(setup.network.toriiClient, setup.network.contractComponents as any);
+  await timedAsync("initialSync:addressNames", () =>
+    getAddressNamesFromTorii(setup.network.toriiClient, setup.network.contractComponents as any),
+  );
   updateProgress(75);
+  await new Promise((resolve) => setTimeout(resolve, 0));
 
-  await getGuildsFromTorii(setup.network.toriiClient, setup.network.contractComponents as any);
+  await timedAsync("initialSync:guilds", () =>
+    getGuildsFromTorii(setup.network.toriiClient, setup.network.contractComponents as any),
+  );
   updateProgress(90);
+  await new Promise((resolve) => setTimeout(resolve, 0));
 
   const structureComponent = (setup.network.contractComponents as any).Structure;
   if (structureComponent) {
     const structureEntityCountBeforeSpatialHydration = runQuery([Has(structureComponent)]).size;
-    const hydrationResult = await hydrateSpatialStructuresFromSqlSnapshot(
-      setup,
-      contractComponents,
-      structureEntityCountBeforeSpatialHydration,
+    const hydrationResult = await timedAsync("initialSync:spatialHydration", () =>
+      hydrateSpatialStructuresFromSqlSnapshot(
+        setup,
+        contractComponents,
+        structureEntityCountBeforeSpatialHydration,
+      ),
     );
     const structureEntityCountAfterSpatialHydration = runQuery([Has(structureComponent)]).size;
 
@@ -720,8 +755,11 @@ export const initialSync = async (
     }
   }
 
-  await MapDataStore.getInstance(MAP_DATA_REFRESH_INTERVAL, sqlApi).refresh();
+  await timedAsync("initialSync:mapDataRefresh", () =>
+    MapDataStore.getInstance(MAP_DATA_REFRESH_INTERVAL, sqlApi).refresh(),
+  );
 
+  perfEvent("initialSync:complete");
   updateProgress(100);
 
   return { worldConfigMapCenterOffset };

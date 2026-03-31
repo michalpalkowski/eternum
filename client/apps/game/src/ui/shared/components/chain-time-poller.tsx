@@ -4,6 +4,7 @@ import { useEffect } from "react";
 
 import { useChainTimeStore } from "@/hooks/store/use-chain-time-store";
 import { CHAIN_TIME_DEBUG_STORAGE_KEY, logChainTimeDebug } from "@/utils/chain-time-debug";
+import { timedAsync } from "@/dojo/perf-diagnostics";
 
 const POLL_INTERVAL_MS = 60_000;
 
@@ -37,7 +38,7 @@ export const ChainTimePoller = () => {
 
       try {
         const pollStartedAtMs = Date.now();
-        const block = await rpcProvider.getBlock("latest");
+        const block = await timedAsync("rpc:getBlock(latest)", () => rpcProvider.getBlock("latest"));
         const timestampSeconds = Number((block as any).timestamp ?? (block as any).block_timestamp);
         if (!Number.isFinite(timestampSeconds)) {
           logChainTimeDebug("poll_invalid_timestamp", {
