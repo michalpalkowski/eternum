@@ -12,8 +12,6 @@ import { useUIStore } from "@/hooks/store/use-ui-store";
 import type { SetupResult } from "@/init/bootstrap";
 import { getActiveWorld, setActiveWorldName } from "@/runtime/world";
 import { useAccount, useConnect } from "@starknet-react/core";
-import { env } from "../../../env";
-
 import type { EagerBootstrapState } from "./use-eager-bootstrap";
 import { useEagerBootstrap } from "./use-eager-bootstrap";
 
@@ -113,12 +111,25 @@ export const useUnifiedOnboarding = (_backgroundImage: string): UnifiedOnboardin
   // Local state - initialize isSpectating from URL param
   const [isSpectating, setIsSpectating] = useState(urlSpectateMode);
   const [selectedWorldName, setSelectedWorldName] = useState<string | null>(() => {
+    // URL path is the primary source of truth — avoids race condition where
+    // localStorage hasn't been written yet when GameRoute mounts after navigation.
+    if (typeof window !== "undefined") {
+      const match = window.location.pathname.match(/^\/play\/([^/]+)(?:\/|$)/);
+      if (match?.[1]) {
+        try {
+          return decodeURIComponent(match[1]);
+        } catch {
+          // malformed URI component — fall through to localStorage
+        }
+      }
+    }
     const active = getActiveWorld();
     return active?.name ?? null;
   });
   const [placeholderAccount, setPlaceholderAccount] = useState<Account | null>(null);
-  // Avatar onboarding is optional and currently incomplete in local-dev flow.
-  const [hasCompletedAvatar, setHasCompletedAvatar] = useState(env.VITE_PUBLIC_CHAIN === "local");
+  // Avatar onboarding is optional and currently incomplete — skip on all chains.
+  // When the feature is ready, gate on chain type or on-chain AddressName presence.
+  const [hasCompletedAvatar, setHasCompletedAvatar] = useState(true);
 
   // If URL has spectate param and we have a world, auto-trigger spectate mode
   useEffect(() => {
@@ -207,6 +218,11 @@ export const useUnifiedOnboarding = (_backgroundImage: string): UnifiedOnboardin
 
   const completeAvatar = useCallback(() => {
     setHasCompletedAvatar(true);
+    try {
+      localStorage.setItem("eternum:avatar_completed", "1");
+    } catch {
+      // Storage full or unavailable — state still updated in memory.
+    }
   }, []);
 
   // Determine resolved account
