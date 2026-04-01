@@ -19,6 +19,7 @@ import {
   isRecoverableProtocolPhase,
   type OperatorConfig,
   parseShardIdParts,
+  parseInitStreamEvent,
   type RequestedShardContext,
   parseOperatorConfigResponse,
   parseShardStatusEntriesFromStatusResponse,
@@ -58,6 +59,10 @@ const SHARD_REQUEST_RECEIPT_CAPTURE_KEY = "__eternum_last_shard_request_receipt_
 const RECEIPT_RECOVERY_TIMEOUT_MS = 10_000;
 const RECEIPT_RECOVERY_POLL_INTERVAL_MS = 500;
 const MAX_RELATED_IDS_PER_LIST = 512;
+const EXECUTE_NONCE_TIMEOUT_MS = 1_500;
+const EXECUTE_NONCE_RETRIES = 1;
+const EXECUTE_NONCE_RETRY_BACKOFF_MS = 250;
+const SHARD_REQUEST_EXECUTE_TIP = "0x0";
 
 type ShardRequestPollObservation =
   | { type: "status_not_found" }
@@ -164,6 +169,81 @@ const parseTxHashFromExecuteResult = (executeResult: unknown): string => {
   }
 
   return normalizeFeltToHex(rawHash, "transaction_hash");
+};
+
+const delay = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutHandle !== null) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+};
+
+const resolveExecuteNonce = async (account: ExecutableAccount): Promise<string | null> => {
+  const nonceReaders: Array<() => Promise<unknown>> = [];
+
+  if (typeof account.getNonce === "function") {
+    nonceReaders.push(() => account.getNonce!());
+  }
+
+  if (
+    typeof account.provider?.getNonceForAddress === "function"
+    && typeof account.address === "string"
+    && account.address.length > 0
+  ) {
+    const getNonceForAddress = account.provider.getNonceForAddress;
+    const address = account.address;
+    nonceReaders.push(() => getNonceForAddress(address, "latest"));
+  }
+
+  if (nonceReaders.length === 0) {
+    return null;
+  }
+
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= EXECUTE_NONCE_RETRIES; attempt += 1) {
+    for (const readNonce of nonceReaders) {
+      try {
+        const rawNonce = await withTimeout(
+          readNonce(),
+          EXECUTE_NONCE_TIMEOUT_MS,
+          "resolve execute nonce",
+        );
+        return normalizeFeltToHex(rawNonce, "execute_nonce");
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+      }
+    }
+    if (attempt < EXECUTE_NONCE_RETRIES) {
+      await delay(EXECUTE_NONCE_RETRY_BACKOFF_MS * (attempt + 1));
+    }
+  }
+
+  throw new Error(`failed to resolve account nonce before execute: ${lastError?.message ?? "unknown error"}`);
+};
+
+const buildExecuteDetails = async (account: ExecutableAccount): Promise<Record<string, unknown>> => {
+  const details: Record<string, unknown> = {
+    tip: SHARD_REQUEST_EXECUTE_TIP,
+  };
+  const nonce = await resolveExecuteNonce(account);
+  if (nonce !== null) {
+    details.nonce = nonce;
+  }
+  return details;
 };
 
 const serializeDebugValue = (value: unknown, seen = new WeakSet<object>()): unknown => {
@@ -699,6 +779,7 @@ export const useShardRequest = (
   const [errorDiagnostic, setErrorDiagnostic] = useState<ShardRequestDiagnostic | null>(null);
   const [shardUrls, setShardUrls] = useState<ShardUrls | null>(null);
   const [targetShardId, setTargetShardId] = useState<string | null>(null);
+  const [initStepLabel, setInitStepLabel] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollLockRef = useRef(false);
   const pollStartedAtRef = useRef<number | null>(null);
@@ -750,6 +831,49 @@ export const useShardRequest = (
   );
 
   useEffect(() => stopPolling, [stopPolling]);
+
+  // SSE listener for init step progress during the "waiting" phase.
+  useEffect(() => {
+    if (phase !== "waiting" || targetShardId === null) {
+      setInitStepLabel(null);
+      return;
+    }
+
+    let gameContract: string;
+    try {
+      gameContract = parseShardIdParts(targetShardId).gameContractAddress;
+    } catch {
+      return;
+    }
+
+    const eventSource = new EventSource(`${operatorUrl}/shard/${gameContract}/events`);
+
+    eventSource.addEventListener("shard_initializing", (event) => {
+      if (!(event instanceof MessageEvent) || typeof event.data !== "string") return;
+      try {
+        const parsed = parseInitStreamEvent("shard_initializing", event.data);
+        if (parsed.type === "shard_initializing") {
+          setInitStepLabel(parsed.stepLabel);
+        }
+      } catch {
+        // Non-critical — keep polling, just skip the label update.
+      }
+    });
+
+    eventSource.addEventListener("gameplay_active", () => {
+      // Shard is ready — the poll cycle will pick up the transport health shortly.
+      setInitStepLabel(null);
+    });
+
+    eventSource.onerror = () => {
+      // Non-critical — polling is the primary mechanism, SSE is just for progress labels.
+    };
+
+    return () => {
+      eventSource.close();
+      setInitStepLabel(null);
+    };
+  }, [operatorUrl, phase, targetShardId]);
 
   const pollShardStatus = useCallback(async () => {
     if (pollLockRef.current) {
@@ -1120,7 +1244,7 @@ export const useShardRequest = (
               candidateShardId,
             },
           }),
-          "info",
+          "warn",
         );
         return;
       }
@@ -1363,9 +1487,31 @@ export const useShardRequest = (
         calldata,
       };
 
+      let executeDetails: Record<string, unknown>;
+      try {
+        executeDetails = await buildExecuteDetails(account);
+      } catch (error) {
+        failRequest(
+          toShardRequestDiagnostic(error, {
+            code: "EXECUTE_FAILED",
+            stage: "execute",
+            kind: "nonce_resolution_failed",
+            summary: "Failed to resolve nonce for shard request transaction",
+            hint: "Check main-chain RPC nonce endpoint health and retry the shard request.",
+            context: {
+              operatorUrl,
+              gameContractAddress: normalizedWorldAddress,
+              contractAddress: shardingContractAddress,
+              entrypoint,
+            },
+          }),
+        );
+        return;
+      }
+
       let executeResult: unknown;
       try {
-        executeResult = await account.execute([requestShardCall]);
+        executeResult = await account.execute([requestShardCall], executeDetails);
       } catch (error) {
         const message = error instanceof Error ? error.message : `${entrypoint} transaction failed`;
         if (isShardAlreadyLockedError(message)) {
@@ -1588,6 +1734,7 @@ export const useShardRequest = (
     errorDiagnostic,
     shardUrls,
     targetShardId,
+    initStepLabel,
     requestShard,
     recoverShard,
     openShardTab,

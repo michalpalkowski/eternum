@@ -105,6 +105,11 @@ export type SettlementStreamEvent =
   | { readonly type: "completed"; readonly shardId: string }
   | { readonly type: "failed"; readonly shardId: string; readonly reason: string };
 
+/** SSE events emitted during shard initialization (shard_initializing, gameplay_active). */
+export type InitStreamEvent =
+  | { readonly type: "shard_initializing"; readonly shardId: string; readonly stepLabel: string | null }
+  | { readonly type: "gameplay_active"; readonly shardId: string };
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
@@ -515,6 +520,35 @@ export const parseSettlementStreamEvent = (eventType: string, rawData: string): 
   }
 
   throw new ShardProtocolError("INVALID_SETTLEMENT_EVENT", `Unsupported settlement event type: ${eventType}`);
+};
+
+export const parseInitStreamEvent = (eventType: string, rawData: string): InitStreamEvent => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawData);
+  } catch {
+    throw new ShardProtocolError("INVALID_SETTLEMENT_EVENT", `${eventType} event payload must be valid JSON`);
+  }
+
+  if (!isRecord(parsed)) {
+    throw new ShardProtocolError("INVALID_SETTLEMENT_EVENT", `${eventType} event payload must be an object`);
+  }
+
+  const shardId = parseNonEmptyString(parsed.shard_id, "shard_id", "INVALID_SETTLEMENT_EVENT");
+
+  if (eventType === "shard_initializing") {
+    const stepLabel =
+      parsed.step_label === undefined || parsed.step_label === null
+        ? null
+        : parseNonEmptyString(parsed.step_label, "step_label", "INVALID_SETTLEMENT_EVENT");
+    return { type: "shard_initializing", shardId, stepLabel };
+  }
+
+  if (eventType === "gameplay_active") {
+    return { type: "gameplay_active", shardId };
+  }
+
+  throw new ShardProtocolError("INVALID_SETTLEMENT_EVENT", `Unsupported init event type: ${eventType}`);
 };
 
 export const extractGameContractFromShardId = (shardId: string): string => {

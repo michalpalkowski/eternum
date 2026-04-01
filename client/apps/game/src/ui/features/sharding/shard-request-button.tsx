@@ -54,11 +54,13 @@ export const ShardRequestButton = ({ entityId }: { entityId: number }) => {
     return null;
   }
 
+  const executableAccount = account as ExecutableAccount | null;
+
   if (isShardMode) {
-    return <SettleButton account={account} />;
+    return <SettleButton account={executableAccount} />;
   }
 
-  return <ShardButton entityId={entityId} account={account} components={components} />;
+  return <ShardButton entityId={entityId} account={executableAccount} components={components} />;
 };
 
 const toPositiveId = (value: unknown): number | null => {
@@ -79,7 +81,7 @@ const ShardButton = ({
   components: any;
 }) => {
   const operatorUrl = env.VITE_PUBLIC_SHARD_OPERATOR_URL;
-  const { phase, error, errorCode, errorDiagnostic, targetShardId, requestShard, recoverShard, openShardTab, reset } =
+  const { phase, error, errorCode, errorDiagnostic, targetShardId, initStepLabel, requestShard, recoverShard, openShardTab, reset } =
     useShardRequest(account, operatorUrl ?? "");
   const explorerEntities = useEntityQuery([Has(components.ExplorerTroops)]);
   const tradeEntities = useEntityQuery([Has(components.Trade)]);
@@ -207,7 +209,7 @@ const ShardButton = ({
           Reset
         </button>
       )}
-      {phase === "waiting" && <span className="text-amber-300 text-xs animate-pulse">Waiting for operator...</span>}
+      {phase === "waiting" && <span className="text-amber-300 text-xs animate-pulse">{initStepLabel ?? "Waiting for operator..."}</span>}
     </div>
   );
 };

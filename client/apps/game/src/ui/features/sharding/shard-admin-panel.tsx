@@ -54,7 +54,7 @@ export const ShardAdminPanel = () => {
     previousResolvedShardingContractAddressRef.current = resolvedShardingContractAddress;
   }, [resolvedShardingContractAddress]);
 
-  const { phase, error, errorCode, errorDiagnostic, requestShard, recoverShard, openShardTab, reset, targetShardId } =
+  const { phase, error, errorCode, errorDiagnostic, requestShard, recoverShard, openShardTab, reset, targetShardId, initStepLabel } =
     useShardRequest((account as ExecutableAccount | null) ?? null, operatorUrl, {
       worldAddress,
       shardingContractAddress,
@@ -209,7 +209,7 @@ export const ShardAdminPanel = () => {
           </button>
         )}
         {phase === "waiting" && targetShardId !== null && (
-          <span className="text-xs text-amber-300">Tracking shard: {targetShardId}</span>
+          <span className="text-xs text-amber-300 animate-pulse">{initStepLabel ?? `Tracking shard: ${targetShardId}`}</span>
         )}
       </div>
 
