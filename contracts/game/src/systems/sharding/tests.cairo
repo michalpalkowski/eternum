@@ -95,7 +95,7 @@ fn test_request_shard_locks_entity() {
     let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
 
     start_cheat_caller_address(system_addr, caller());
-    dispatcher.request_shard([entity_id.into()].span());
+    dispatcher.request_shard([entity_id.into()].span(), [].span());
     stop_cheat_caller_address(system_addr);
 
     // Balance should be unchanged after lock.
@@ -104,14 +104,14 @@ fn test_request_shard_locks_entity() {
 }
 
 #[test]
-#[should_panic(expected: "entity_ids must not be empty")]
+#[should_panic(expected: "entity_ids and shared_entity_ids must not both be empty")]
 fn test_request_shard_rejects_empty_entity_ids() {
     let mut world = setup_world();
     let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
     let empty: Array<felt252> = array![];
 
     start_cheat_caller_address(system_addr, caller());
-    dispatcher.request_shard(empty.span());
+    dispatcher.request_shard(empty.span(), [].span());
     stop_cheat_caller_address(system_addr);
 }
 
@@ -122,7 +122,7 @@ fn test_request_shard_rejects_non_admin_caller() {
     let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
 
     start_cheat_caller_address(system_addr, non_admin_caller());
-    dispatcher.request_shard([42].span());
+    dispatcher.request_shard([42].span(), [].span());
     stop_cheat_caller_address(system_addr);
 }
 
@@ -137,7 +137,7 @@ fn test_finish_shard() {
     let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
 
     start_cheat_caller_address(system_addr, caller());
-    dispatcher.request_shard([entity_id.into()].span());
+    dispatcher.request_shard([entity_id.into()].span(), [].span());
     stop_cheat_caller_address(system_addr);
 
     // finish_shard should not panic.
@@ -195,9 +195,144 @@ fn test_entity_lock_blocks_mainchain_write() {
     let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
 
     start_cheat_caller_address(system_addr, caller());
-    dispatcher.request_shard([entity_id.into()].span());
+    dispatcher.request_shard([entity_id.into()].span(), [].span());
     stop_cheat_caller_address(system_addr);
 
     // Write to locked entity should fail.
     ResourceImpl::write_balance(ref world, entity_id, 1, 80);
+}
+
+// ── Mixed exclusive + shared entity tests ───────────────────────────
+
+#[test]
+fn test_request_shard_with_exclusive_and_shared_entities() {
+    let mut world = setup_world();
+    let exclusive_id: ID = 42;
+    let shared_id: ID = 99;
+    ResourceImpl::write_balance(ref world, exclusive_id, 1, 100);
+    ResourceImpl::write_balance(ref world, shared_id, 1, 200);
+
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+
+    start_cheat_caller_address(system_addr, caller());
+    dispatcher.request_shard([exclusive_id.into()].span(), [shared_id.into()].span());
+    stop_cheat_caller_address(system_addr);
+
+    // Both entities should retain their balances after locking.
+    let exclusive_bal = ResourceImpl::read_balance(ref world, exclusive_id, 1);
+    let shared_bal = ResourceImpl::read_balance(ref world, shared_id, 1);
+    assert!(exclusive_bal == 100, "exclusive entity balance should be 100");
+    assert!(shared_bal == 200, "shared entity balance should be 200");
+}
+
+#[test]
+fn test_shared_entity_allows_mainchain_write() {
+    let mut world = setup_world();
+    let exclusive_id: ID = 42;
+    let shared_id: ID = 99;
+    ResourceImpl::write_balance(ref world, exclusive_id, 1, 100);
+    ResourceImpl::write_balance(ref world, shared_id, 1, 200);
+
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+
+    start_cheat_caller_address(system_addr, caller());
+    dispatcher.request_shard([exclusive_id.into()].span(), [shared_id.into()].span());
+    stop_cheat_caller_address(system_addr);
+
+    // Mainchain write to shared entity should succeed (not locked exclusively).
+    ResourceImpl::write_balance(ref world, shared_id, 1, 250);
+    let shared_bal = ResourceImpl::read_balance(ref world, shared_id, 1);
+    assert!(shared_bal == 250, "shared entity should accept mainchain writes");
+}
+
+#[test]
+#[should_panic]
+fn test_exclusive_entity_blocks_mainchain_write_with_shared_present() {
+    let mut world = setup_world();
+    let exclusive_id: ID = 42;
+    let shared_id: ID = 99;
+    ResourceImpl::write_balance(ref world, exclusive_id, 1, 100);
+    ResourceImpl::write_balance(ref world, shared_id, 1, 200);
+
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+
+    start_cheat_caller_address(system_addr, caller());
+    dispatcher.request_shard([exclusive_id.into()].span(), [shared_id.into()].span());
+    stop_cheat_caller_address(system_addr);
+
+    // Mainchain write to exclusive entity should fail even when shared entities exist.
+    ResourceImpl::write_balance(ref world, exclusive_id, 1, 80);
+}
+
+#[test]
+fn test_request_shard_multiple_exclusive_related_entities() {
+    let mut world = setup_world();
+    let realm_id: ID = 10;
+    let explorer_id: ID = 100;
+    let trade_id: ID = 200;
+    ResourceImpl::write_balance(ref world, realm_id, 1, 50);
+    ResourceImpl::write_balance(ref world, explorer_id, 1, 75);
+    ResourceImpl::write_balance(ref world, trade_id, 1, 25);
+
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+
+    start_cheat_caller_address(system_addr, caller());
+    dispatcher.request_shard(
+        [realm_id.into(), explorer_id.into(), trade_id.into()].span(),
+        [].span(),
+    );
+    stop_cheat_caller_address(system_addr);
+
+    // All exclusive entities should retain their balances.
+    assert!(ResourceImpl::read_balance(ref world, realm_id, 1) == 50, "realm balance");
+    assert!(ResourceImpl::read_balance(ref world, explorer_id, 1) == 75, "explorer balance");
+    assert!(ResourceImpl::read_balance(ref world, trade_id, 1) == 25, "trade balance");
+}
+
+#[test]
+#[should_panic]
+fn test_exclusive_related_entity_blocks_write() {
+    let mut world = setup_world();
+    let realm_id: ID = 10;
+    let explorer_id: ID = 100;
+    ResourceImpl::write_balance(ref world, realm_id, 1, 50);
+    ResourceImpl::write_balance(ref world, explorer_id, 1, 75);
+
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+
+    start_cheat_caller_address(system_addr, caller());
+    dispatcher.request_shard(
+        [realm_id.into(), explorer_id.into()].span(),
+        [].span(),
+    );
+    stop_cheat_caller_address(system_addr);
+
+    // Write to any exclusive entity (not just the first) should fail.
+    ResourceImpl::write_balance(ref world, explorer_id, 1, 0);
+}
+
+#[test]
+fn test_finish_shard_unlocks_exclusive_and_shared() {
+    let mut world = setup_world();
+    let exclusive_id: ID = 42;
+    let shared_id: ID = 99;
+    ResourceImpl::write_balance(ref world, exclusive_id, 1, 100);
+    ResourceImpl::write_balance(ref world, shared_id, 1, 200);
+
+    let (system_addr, dispatcher) = get_sharding_dispatcher(ref world);
+
+    start_cheat_caller_address(system_addr, caller());
+    dispatcher.request_shard([exclusive_id.into()].span(), [shared_id.into()].span());
+    stop_cheat_caller_address(system_addr);
+
+    // Finish the shard.
+    start_cheat_caller_address(system_addr, caller());
+    dispatcher.finish_shard(1);
+    stop_cheat_caller_address(system_addr);
+
+    // Both entities should be writable again after finish.
+    ResourceImpl::write_balance(ref world, exclusive_id, 1, 50);
+    ResourceImpl::write_balance(ref world, shared_id, 1, 150);
+    assert!(ResourceImpl::read_balance(ref world, exclusive_id, 1) == 50, "exclusive unlocked");
+    assert!(ResourceImpl::read_balance(ref world, shared_id, 1) == 150, "shared unlocked");
 }

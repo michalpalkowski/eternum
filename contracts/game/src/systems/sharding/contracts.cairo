@@ -3,10 +3,17 @@ pub trait IShardingSystems<T> {
     fn register_policies(ref self: T);
     /// Generic shard request. Commitment is computed atomically on-chain
     /// inside dojo's request_sharding as H(sorted(entity_ids)).
-    fn request_shard(ref self: T, entity_ids: Span<felt252>);
+    fn request_shard(
+        ref self: T, entity_ids: Span<felt252>, shared_entity_ids: Span<felt252>,
+    );
     /// Shard an entire realm. Computes entities (realm + hex grid buildings)
     /// on-chain, then atomically locks entities + computes commitment.
-    fn request_shard_realm(ref self: T, realm_entity_id: felt252);
+    fn request_shard_realm(
+        ref self: T,
+        realm_entity_id: felt252,
+        exclusive_related_entity_ids: Span<felt252>,
+        shared_entity_ids: Span<felt252>,
+    );
     fn finish_shard(ref self: T, shard_id: felt252);
 }
 
@@ -170,11 +177,17 @@ pub mod sharding_systems {
             );
         }
 
-        fn request_shard(ref self: ContractState, entity_ids: Span<felt252>) {
-            assert!(entity_ids.len() > 0, "entity_ids must not be empty");
+        fn request_shard(
+            ref self: ContractState, entity_ids: Span<felt252>, shared_entity_ids: Span<felt252>,
+        ) {
+            assert!(
+                entity_ids.len() + shared_entity_ids.len() > 0,
+                "entity_ids and shared_entity_ids must not both be empty"
+            );
             let world = self.world(DEFAULT_NS());
             assert_caller_is_admin(world);
             let mut dojo_entities: Array<felt252> = ArrayTrait::new();
+            let mut dojo_shared_entities: Array<felt252> = ArrayTrait::new();
             let mut entity_keys_flat: Array<felt252> = ArrayTrait::new();
             for id in entity_ids {
                 dojo_entities.append(entity_id_from_serialized_keys([*id].span()));
@@ -182,10 +195,25 @@ pub mod sharding_systems {
                 entity_keys_flat.append(1);
                 entity_keys_flat.append(*id);
             };
-            world.dispatcher.request_sharding(dojo_entities.span(), entity_keys_flat.span());
+            for id in shared_entity_ids {
+                dojo_shared_entities.append(entity_id_from_serialized_keys([*id].span()));
+                // Shared entities currently use the same single-key encoding.
+                entity_keys_flat.append(1);
+                entity_keys_flat.append(*id);
+            };
+            world
+                .dispatcher
+                .request_sharding(
+                    dojo_entities.span(), dojo_shared_entities.span(), entity_keys_flat.span(),
+                );
         }
 
-        fn request_shard_realm(ref self: ContractState, realm_entity_id: felt252) {
+        fn request_shard_realm(
+            ref self: ContractState,
+            realm_entity_id: felt252,
+            exclusive_related_entity_ids: Span<felt252>,
+            shared_entity_ids: Span<felt252>,
+        ) {
             let mut world = self.world(DEFAULT_NS());
             assert_caller_is_admin(world);
 
@@ -198,6 +226,7 @@ pub mod sharding_systems {
             let max_rings: u32 = base.max_level(world).into() + 1;
 
             let mut dojo_entities: Array<felt252> = ArrayTrait::new();
+            let mut dojo_shared_entities: Array<felt252> = ArrayTrait::new();
             let mut entity_keys_flat: Array<felt252> = ArrayTrait::new();
 
             // Realm entity: 1 key = realm_entity_id
@@ -225,7 +254,25 @@ pub mod sharding_systems {
                 ring += 1;
             };
 
-            world.dispatcher.request_sharding(dojo_entities.span(), entity_keys_flat.span());
+            for id in exclusive_related_entity_ids {
+                dojo_entities.append(entity_id_from_serialized_keys([*id].span()));
+                // Related entities currently use the same single-key encoding.
+                entity_keys_flat.append(1);
+                entity_keys_flat.append(*id);
+            };
+
+            for id in shared_entity_ids {
+                dojo_shared_entities.append(entity_id_from_serialized_keys([*id].span()));
+                // Shared entities currently use the same single-key encoding.
+                entity_keys_flat.append(1);
+                entity_keys_flat.append(*id);
+            };
+
+            world
+                .dispatcher
+                .request_sharding(
+                    dojo_entities.span(), dojo_shared_entities.span(), entity_keys_flat.span(),
+                );
         }
 
         fn finish_shard(ref self: ContractState, shard_id: felt252) {
