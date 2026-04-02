@@ -6,6 +6,8 @@ interface EntityWithModels {
   models: Record<string, unknown>;
 }
 
+export type SyncUpdateOrigin = "entity" | "event";
+
 /**
  * Determines if a Torii entity update represents a deletion notification.
  * Deletion is indicated by either:
@@ -20,4 +22,16 @@ export const isDeletionPayload = (entity: EntityWithModels): boolean => {
   return Object.values(entity.models).every(
     (model) => model && typeof model === "object" && Object.keys(model).length === 0,
   );
+};
+
+/**
+ * Protocol guard for deletion semantics.
+ * We only accept deletion payloads from the entity stream. Event stream updates
+ * can legitimately arrive without entity models and must not delete state.
+ */
+export const isDeletablePayloadForOrigin = (entity: EntityWithModels, origin: SyncUpdateOrigin): boolean => {
+  if (origin !== "entity") {
+    return false;
+  }
+  return isDeletionPayload(entity);
 };

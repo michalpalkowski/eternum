@@ -15,7 +15,7 @@ import {
   getStructuresDataFromTorii,
 } from "./queries";
 import { resolveInitialStructureSelection } from "./sync-initial-selection";
-import { isDeletionPayload } from "./sync-utils";
+import { isDeletionPayload, isDeletablePayloadForOrigin, type SyncUpdateOrigin } from "./sync-utils";
 import { ToriiSyncWorkerManager } from "./sync-worker-manager";
 import { buildModelKeysClause, type GlobalModelStreamConfig } from "./torii-stream-manager";
 import { timedAsync, timedSync, perfEvent } from "./perf-diagnostics";
@@ -138,7 +138,7 @@ const createMainThreadQueueProcessor = (
   applyBatch: (batch: BatchPayload) => void,
   logging: boolean,
 ): QueueProcessor => {
-  const updateQueue: Array<{ entityId: string; data: ToriiEntity }> = [];
+  const updateQueue: Array<{ entityId: string; data: ToriiEntity; origin: SyncUpdateOrigin }> = [];
   let isProcessing = false;
   let pendingTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
@@ -179,11 +179,23 @@ const createMainThreadQueueProcessor = (
     const itemsToProcess = updateQueue.splice(0, batchSize);
     if (logging) console.log(`Processing batch of ${itemsToProcess.length} updates`);
 
-    itemsToProcess.forEach(({ entityId, data }) => {
-      const isEntityDelete = isDeletionPayload(data);
+    itemsToProcess.forEach(({ entityId, data, origin }) => {
+      const isDeletionLikePayload = isDeletionPayload(data);
+      if (origin === "event" && isDeletionLikePayload) {
+        // Event stream payloads can arrive as metadata-only updates with empty models.
+        // Treating those as deletions causes authoritative entities to disappear.
+        if (logging) {
+          console.warn("[sync] Ignoring deletion-like event payload", { entityId });
+        }
+        return;
+      }
+
+      const isEntityDelete = isDeletablePayloadForOrigin(data, origin);
       if (isEntityDelete) {
         batchRecord[entityId] = data;
+        return;
       }
+
       if (batchRecord[entityId]) {
         const entityHasBeenDeleted = isDeletionPayload(batchRecord[entityId]);
         if (entityHasBeenDeleted) return;
@@ -213,8 +225,8 @@ const createMainThreadQueueProcessor = (
   };
 
   return {
-    queueUpdate: (entityId: string, data: ToriiEntity) => {
-      updateQueue.push({ entityId, data });
+    queueUpdate: (entityId: string, data: ToriiEntity, origin: SyncUpdateOrigin = "entity") => {
+      updateQueue.push({ entityId, data, origin });
       if (!isProcessing) {
         pendingTimeoutId = setTimeout(processNextInQueue, 200);
       }
@@ -330,6 +342,7 @@ export const syncEntitiesDebounced = async (
 
   const entitySubPromise = timedAsync("subscription:onEntityUpdated", () =>
     client.onEntityUpdated(entityKeyClause, (data: ToriiEntity) => {
+      perfEvent("callback:entityUpdated", { keys: data.hashed_keys });
       if (logging) console.log("Entity updated", data);
       queueUpdate(data, "entity");
     }),
@@ -337,6 +350,7 @@ export const syncEntitiesDebounced = async (
 
   const eventSubPromise = timedAsync("subscription:onEventMessageUpdated", () =>
     client.onEventMessageUpdated(entityKeyClause, (data: ToriiEntity) => {
+      perfEvent("callback:eventMessageUpdated", { keys: data.hashed_keys });
       if (logging) console.log("Event message updated", data.hashed_keys);
       queueUpdate(data, "event");
     }),
@@ -776,3 +790,4 @@ const resubscribeEntityStream = async (
     reportProgress: false,
   });
 };
+

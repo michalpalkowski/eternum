@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-import { isDeletionPayload } from "../sync-utils";
+import { isDeletionPayload, isDeletablePayloadForOrigin } from "../sync-utils";
 
 interface ToriiPayload {
   hashed_keys: string;
@@ -105,8 +105,15 @@ const scheduleFlush = () => {
   }, batchIntervalMs) as unknown as number;
 };
 
-const enqueueUpdate = (entityId: string, payload: ToriiPayload) => {
-  const deletion = isDeletionPayload(payload);
+const enqueueUpdate = (entityId: string, payload: ToriiPayload, origin: "entity" | "event") => {
+  const deletionLikePayload = isDeletionPayload(payload);
+  if (origin === "event" && deletionLikePayload) {
+    // Event stream payloads can be metadata-only with empty models.
+    // Ignore them so they cannot trigger unintended entity deletions.
+    return;
+  }
+
+  const deletion = isDeletablePayloadForOrigin(payload, origin);
   const existing = pending.get(entityId);
 
   if (existing) {
@@ -205,7 +212,7 @@ ctx.onmessage = (event: MessageEvent<InboundMessage>) => {
       break;
     }
     case "torii-event": {
-      enqueueUpdate(data.entityId, data.payload);
+      enqueueUpdate(data.entityId, data.payload, data.origin);
       break;
     }
     case "update-config": {
