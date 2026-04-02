@@ -16,7 +16,7 @@ import {
 } from "@/runtime/world";
 import { buildWorldProfile } from "@/runtime/world/profile-builder";
 import { fetchWorldConfigMapCenterOffset, setSqlApiBaseUrl } from "@/services/api";
-import { parseShardIdParts, parseShardUrlParams, parseTransportHealthFromStatusResponse } from "@/sharding/protocol";
+import { parseShardUrlParams } from "@/sharding/protocol";
 import { resolveMainGameReturnUrl, resolveRuntimeContext } from "@/sharding/runtime-context";
 import { Chain, getGameManifest } from "@contracts";
 import { dojoConfig } from "../../dojo-config";
@@ -83,52 +83,6 @@ const handleNoAccount = (modalContent: ReactNode) => {
   const uiStore = useUIStore.getState();
   uiStore.setModal(null, false);
   uiStore.setModal(modalContent, true);
-};
-
-const SHARD_TRANSPORT_HEALTH_TIMEOUT_MS = 30_000;
-const SHARD_TRANSPORT_HEALTH_POLL_INTERVAL_MS = 1_500;
-const SHARD_TRANSPORT_NOT_FOUND_STATUS = 404;
-const STALE_SHARD_SESSION_ERROR = "STALE_SHARD_SESSION";
-
-const waitForDelay = (delayMs: number): Promise<void> =>
-  new Promise((resolve) => {
-    setTimeout(resolve, delayMs);
-  });
-
-const ensureShardTransportHealthy = async (params: { operatorUrl: string; shardId: string }): Promise<void> => {
-  const { gameContractAddress, onchainShardId } = parseShardIdParts(params.shardId);
-  const transportUrl = `${params.operatorUrl}/shard/${gameContractAddress}/${onchainShardId}/transport-health`;
-  const startedAt = Date.now();
-  let lastReason = "transport status unknown";
-
-  while (Date.now() - startedAt < SHARD_TRANSPORT_HEALTH_TIMEOUT_MS) {
-    try {
-      const response = await fetch(transportUrl);
-      if (!response.ok) {
-        if (response.status === SHARD_TRANSPORT_NOT_FOUND_STATUS) {
-          throw new Error(STALE_SHARD_SESSION_ERROR + ": shard " + params.shardId + " is no longer active");
-        }
-        lastReason = "HTTP " + response.status;
-      } else {
-        const payload: unknown = await response.json();
-        const transport = parseTransportHealthFromStatusResponse(payload);
-        if (transport.status === "healthy") {
-          return;
-        }
-        lastReason = transport.errorCode ?? transport.errorMessage ?? `status=${transport.status}`;
-      }
-    } catch (error) {
-      if (error instanceof Error && error.message.startsWith(STALE_SHARD_SESSION_ERROR)) {
-        throw error;
-      }
-      lastReason = error instanceof Error ? error.message : "transport-health fetch failed";
-    }
-    await waitForDelay(SHARD_TRANSPORT_HEALTH_POLL_INTERVAL_MS);
-  }
-
-  throw new Error(
-    `[bootstrap] Shard transport is not healthy after ${SHARD_TRANSPORT_HEALTH_TIMEOUT_MS}ms (${lastReason})`,
-  );
 };
 
 const runBootstrap = async (): Promise<BootstrapResult> => {
@@ -226,13 +180,16 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
       : null;
 
   if (shardSessionParams !== null) {
+    // Shard transport readiness is guaranteed by the operator's protocol:
+    // torii_ready is only emitted when Torii has indexed up to the fork block
+    // and bootstrap invariants are satisfied. No polling needed here.
+    // Only check for stale sessions (shard no longer exists → 404).
     try {
-      await ensureShardTransportHealthy({
-        operatorUrl: shardSessionParams.operatorUrl,
-        shardId: shardSessionParams.shardId,
-      });
-    } catch (error) {
-      if (error instanceof Error && error.message.startsWith(STALE_SHARD_SESSION_ERROR)) {
+      const shardParts = shardSessionParams.shardId.split("@");
+      // Per-shard lookup: /shard/{game}/{onchain_id} → 200 if active, 404 if gone.
+      const staleCheckUrl = `${shardSessionParams.operatorUrl}/shard/${shardParts[0]}/${shardParts[1]}`;
+      const staleCheckResponse = await fetch(staleCheckUrl).catch(() => null);
+      if (staleCheckResponse?.status === 404) {
         const mainGameReturnUrl = resolveMainGameReturnUrl(runtimeContext);
         shardStore.clearShardMode();
         window.location.assign(mainGameReturnUrl);
@@ -240,7 +197,12 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
           "[bootstrap] stale shard session detected; redirecting to main game view: " + mainGameReturnUrl,
         );
       }
-      throw error;
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("stale shard session")) {
+        throw error;
+      }
+      // Non-critical: if the stale check fails, proceed anyway — shard may still work.
+      console.warn("[bootstrap] stale shard check failed, proceeding:", error);
     }
     shardStore.enterShardMode(shardSessionParams, runtimeContext);
   } else {
@@ -250,28 +212,30 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
   // 2) Update global dojoConfig in place (shared object reference)
   //    - Torii base URL and manifest are used by setup() downstream
   //    - For local chain, use environment variables directly
-  // Torii has two transport protocols:
-  //   - HTTP: SQL queries, REST endpoints
-  //   - gRPC-web: entity/event subscriptions (SubscribeEntities, SubscribeEventMessages)
-  // On Slot/local they share one URL. On nginx TEE deployments they have split ports.
-  const preferredToriiHttpUrl = chain === "local" || hasExplicitToriiUrl ? env.VITE_PUBLIC_TORII : profile.toriiBaseUrl;
-  const preferredToriiGrpcUrl = env.VITE_PUBLIC_TORII_GRPC ?? preferredToriiHttpUrl;
-  const preferredRpcUrl =
-    chain === "local" || hasExplicitNodeUrl ? env.VITE_PUBLIC_NODE_URL : (profile.rpcUrl ?? env.VITE_PUBLIC_NODE_URL);
+  // torii-wasm@1.7.0 has a single `toriiUrl` for both HTTP queries and gRPC-web
+  // subscriptions. Torii serves both protocols on every port, so we use the HTTP
+  // URL everywhere. The separate VITE_PUBLIC_TORII_GRPC is no longer needed —
+  // routing subscriptions through a different nginx location was causing silent
+  // stream drops (subscription callbacks stopped firing after initial sync).
+  const preferredToriiUrl = chain === "local" || hasExplicitToriiUrl ? env.VITE_PUBLIC_TORII : profile.toriiBaseUrl;
+  const preferredRpcUrl = normalizeRpcUrl(
+    chain === "local" || hasExplicitNodeUrl ? env.VITE_PUBLIC_NODE_URL : (profile.rpcUrl ?? env.VITE_PUBLIC_NODE_URL),
+  );
 
-  // dojoConfig.toriiUrl is used by ToriiClient for gRPC-web subscriptions.
-  (dojoConfig as any).toriiUrl = preferredToriiGrpcUrl;
+  // ToriiClient uses this single URL for getEntities (HTTP) + onEntityUpdated (gRPC-web).
+  (dojoConfig as any).toriiUrl = preferredToriiUrl;
   (dojoConfig as any).rpcUrl = preferredRpcUrl;
   (dojoConfig as any).manifest = patchedManifest;
 
   // 2b) Shard mode override, validated by sharding protocol parser.
   if (shardSessionParams !== null) {
-    (dojoConfig as any).rpcUrl = shardSessionParams.rpcUrl;
-    (dojoConfig as any).toriiUrl = shardSessionParams.toriiGrpcUrl;
+    (dojoConfig as any).rpcUrl = normalizeRpcUrl(shardSessionParams.rpcUrl);
+    // Use shard HTTP Torii URL (not gRPC) — same port serves both protocols.
+    (dojoConfig as any).toriiUrl = shardSessionParams.toriiUrl;
   }
 
-  // 3) Point SQL API to the HTTP Torii (not gRPC).
-  const toriiHttpUrl = shardSessionParams !== null ? shardSessionParams.toriiUrl : preferredToriiHttpUrl;
+  // 3) Point SQL API to the same Torii HTTP URL.
+  const toriiHttpUrl = shardSessionParams !== null ? shardSessionParams.toriiUrl : preferredToriiUrl;
   setSqlApiBaseUrl(`${toriiHttpUrl}/sql`);
 
   const setupResult = await setup(
@@ -304,6 +268,7 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
   });
 
   console.log("[INITIAL SYNC COMPLETED]");
+
 
   configManager.setDojo(setupResult.components, ETERNUM_CONFIG());
   let mapCenterOffset = initialSyncResult.worldConfigMapCenterOffset;

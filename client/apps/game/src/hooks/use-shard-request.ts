@@ -54,7 +54,9 @@ export interface ShardRequestRelatedIds {
 
 const SHARDING_REQUESTED_SELECTOR = hash.getSelectorFromName("ShardingRequested").toLowerCase();
 const SHARD_REQUEST_POLL_INTERVAL_MS = 2000;
-const SHARD_REQUEST_TIMEOUT_MS = 120_000;
+// Shard Torii indexes ~68K blocks from world deployment (2-5 min).
+// Timeout must exceed indexing time to avoid false failures.
+const SHARD_REQUEST_TIMEOUT_MS = 420_000; // 7 minutes
 const SHARD_REQUEST_RECEIPT_CAPTURE_KEY = "__eternum_last_shard_request_receipt__";
 const RECEIPT_RECOVERY_TIMEOUT_MS = 10_000;
 const RECEIPT_RECOVERY_POLL_INTERVAL_MS = 500;
@@ -1005,90 +1007,16 @@ export const useShardRequest = (
         return;
       }
 
-      const entryShardIdParts = parseShardIdParts(shardEntry.shardId);
-
-      const transportResponse = await fetch(
-        `${operatorUrl}/shard/${target.gameContractAddress}/${entryShardIdParts.onchainShardId}/transport-health`,
-      ).catch((error: unknown) => {
-        return rethrowShardRequestDiagnostic(error, {
-          code: "POLL_FAILED",
-          stage: "transport_health",
-          kind: "transport_http_error",
-          summary: "Failed to query shard transport health from the operator",
-          hint: "Check whether the operator transport-health endpoint is reachable for this shard.",
-          context: {
-            operatorUrl,
-            gameContractAddress: target.gameContractAddress,
-            targetShardId: target.shardId,
-            onchainShardId: entryShardIdParts.onchainShardId,
-          },
-        });
-      });
-      if (!transportResponse.ok) {
-        return throwShardRequestDiagnostic({
-          code: "POLL_FAILED",
-          stage: "transport_health",
-          kind: "transport_http_error",
-          summary: `Shard transport-health endpoint returned HTTP ${transportResponse.status}`,
-          hint: "Check the operator transport-health handler and shard lifecycle state.",
-          context: {
-            operatorUrl,
-            gameContractAddress: target.gameContractAddress,
-            targetShardId: target.shardId,
-            onchainShardId: entryShardIdParts.onchainShardId,
-            statusCode: transportResponse.status,
-          },
-        });
-      }
-      const transportPayload: unknown = await transportResponse.json().catch((error: unknown) => {
-        return rethrowShardRequestDiagnostic(error, {
-          code: "POLL_FAILED",
-          stage: "transport_health",
-          kind: "operator_response_invalid",
-          summary: "Shard transport-health response is not valid JSON",
-          hint: "Check the operator transport-health payload for this shard.",
-          context: {
-            operatorUrl,
-            gameContractAddress: target.gameContractAddress,
-            targetShardId: target.shardId,
-            onchainShardId: entryShardIdParts.onchainShardId,
-          },
-        });
-      });
-      const transport: ShardTransportHealth = (() => {
-        try {
-          return parseTransportHealthFromStatusResponse(transportPayload);
-        } catch (error) {
-          return rethrowShardRequestDiagnostic(error, {
-            code: "POLL_FAILED",
-            stage: "transport_health",
-            kind: "operator_response_invalid",
-            summary: "Shard transport-health response has an invalid shape",
-            hint: "Frontend and operator disagree on the transport-health schema.",
-            context: {
-              operatorUrl,
-              gameContractAddress: target.gameContractAddress,
-              targetShardId: target.shardId,
-              onchainShardId: entryShardIdParts.onchainShardId,
-            },
-          });
-        }
-      })();
-      if (transport.status !== "healthy") {
-        lastPollObservationRef.current = {
-          type: "transport_pending",
-          status: transport.status,
-          errorCode: transport.errorCode,
-          errorMessage: transport.errorMessage,
-        };
-        return;
-      }
+      // Trust the operator's protocol phase: when the shard entry has URLs,
+      // it means torii_ready was emitted — Torii has indexed up to the fork
+      // block and bootstrap invariants are satisfied. No separate transport-health
+      // poll needed (that endpoint is kept as a diagnostic tool only).
       if (shardEntry.katanaUrl === null || shardEntry.toriiUrl === null) {
         lastPollObservationRef.current = {
           type: "transport_pending",
-          status: transport.status,
+          status: "degraded",
           errorCode: "missing_runtime_urls",
-          errorMessage: "Operator reported healthy transport without katana_url or torii_url",
+          errorMessage: "Shard status does not yet include katana_url or torii_url — Torii still indexing",
         };
         return;
       }
