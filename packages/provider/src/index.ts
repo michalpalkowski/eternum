@@ -453,7 +453,18 @@ export class EternumProvider extends EnhancedDojoProvider {
     signer: Account | AccountInterface,
     transactionDetails: AllowArray<Call>,
   ): Promise<UniversalDetails> {
-    const details: UniversalDetails = { version: 3 };
+    // Katana (shard and local dev) has near-zero transaction history, causing
+    // starknet.js tip estimation to stall for 25+ seconds while retrying
+    // historical block sampling.  Setting tip: 0n bypasses this entirely —
+    // Katana's sequencer doesn't use tips for ordering anyway.
+    const nodeUrl: string = (this.provider as any)?.channel?.nodeUrl ?? "";
+    const isKatana = nodeUrl.includes("/katana") ||
+      nodeUrl.includes("hypervisor") ||
+      nodeUrl.includes("localhost:5050") ||
+      nodeUrl.includes("127.0.0.1:5050");
+    const tip = isKatana ? 0n : undefined;
+
+    const details: UniversalDetails = { version: 3, ...(tip !== undefined && { tip }) };
     const estimateInvokeFee = (signer as any)?.estimateInvokeFee;
     if (typeof estimateInvokeFee !== "function") {
       return details;
@@ -462,6 +473,8 @@ export class EternumProvider extends EnhancedDojoProvider {
     try {
       const estimate = (await estimateInvokeFee.call(signer, transactionDetails, {
         version: 3,
+        // Pass tip to estimateInvokeFee so starknet.js skips getEstimateTip() internally.
+        ...(tip !== undefined && { tip }),
       })) as { resourceBounds?: ResourceBoundsBN };
       const resourceBounds = withL2GasHeadroom(estimate?.resourceBounds);
       if (!resourceBounds) {

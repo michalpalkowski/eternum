@@ -220,7 +220,7 @@ describe("useShardRequest", () => {
         entrypoint: "request_shard_realm",
         calldata: ["42", "2", "7", "8", "0"],
       },
-    ]);
+    ], { tip: "0x0" });
   });
 
   it("uses request_shard with merged exclusive related ids for multi-entity requests", async () => {
@@ -295,7 +295,7 @@ describe("useShardRequest", () => {
         entrypoint: "request_shard",
         calldata: ["4", "42", "43", "7", "8", "0"],
       },
-    ]);
+    ], { tip: "0x0" });
   });
 
   it("fails fast when hyperstructure related ids are provided", async () => {

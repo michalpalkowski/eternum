@@ -99,6 +99,7 @@ export const useTransactionListener = () => {
           confirmedAt: Date.now(),
         });
       }
+
     };
 
     const handleTransactionFailed = (error: string | TransactionFailedPayload, meta?: TransactionFailedPayload) => {

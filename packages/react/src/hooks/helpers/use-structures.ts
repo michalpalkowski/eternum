@@ -13,14 +13,14 @@ export const usePlayerStructures = (playerAddress?: ContractAddress) => {
     setup: { components },
   } = useDojo();
 
-  const entities = useEntityQuery([
-    HasValue(components.Structure, { owner: playerAddress || ContractAddress(account.address) }),
-  ]);
+  const ownerAddress = playerAddress || ContractAddress(account.address);
+
+  const entities = useEntityQuery([HasValue(components.Structure, { owner: ownerAddress })]);
 
   const playerStructures = useMemo(() => {
     return entities
       .map((id) => {
-        const structure = getStructure(id, ContractAddress(account.address), components);
+        const structure = getStructure(id, ownerAddress, components);
         if (!structure) return null;
         return { ...structure, recsEntityKey: id } as StructureWithEntityKey;
       })
