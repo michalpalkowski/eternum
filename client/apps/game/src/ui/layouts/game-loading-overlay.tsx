@@ -1,7 +1,9 @@
+import { useAccountStore } from "@/hooks/store/use-account-store";
 import { useUIStore } from "@/hooks/store/use-ui-store";
 import { LoadingStateKey } from "@/hooks/store/use-world-loading";
 import { Position } from "@bibliothecadao/eternum";
 import { usePlayerStructures } from "@bibliothecadao/react";
+import { ContractAddress } from "@bibliothecadao/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BootstrapTask } from "@/hooks/context/use-eager-bootstrap";
 import { BootstrapLoadingPanel } from "@/ui/layouts/bootstrap-loading/bootstrap-loading-panel";
@@ -53,7 +55,10 @@ export const GameLoadingOverlay = () => {
   const setIsLoadingScreenEnabled = useUIStore((state) => state.setIsLoadingScreenEnabled);
   const isSpectating = useUIStore((state) => state.isSpectating);
   const mapLoading = useUIStore((state) => state.loadingStates[LoadingStateKey.Map]);
-  const playerStructures = usePlayerStructures();
+  const playerAddress = useAccountStore((state) => state.playerAddress);
+  const playerStructures = usePlayerStructures(
+    playerAddress ? ContractAddress(playerAddress) : undefined,
+  );
   const hasDismissed = useRef(false);
   const hasSeenMapLoading = useRef(false);
   const startedAt = useRef(0);

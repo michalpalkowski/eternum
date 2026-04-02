@@ -1,4 +1,5 @@
 import { POLLING_INTERVALS } from "@/config/polling";
+import { useAccountStore } from "@/hooks/store/use-account-store";
 import { usePlayerStructureSync } from "@/hooks/helpers/use-player-structure-sync";
 import { useWorldConfigValue } from "@/hooks/helpers/use-world-config";
 import { useChainTimeStore } from "@/hooks/store/use-chain-time-store";
@@ -436,7 +437,10 @@ const AutoRegisterPointsStoreManager = () => {
 };
 
 const PlayerStructuresStoreManager = () => {
-  const playerStructures = usePlayerStructures();
+  const playerAddress = useAccountStore((state) => state.playerAddress);
+  const playerStructures = usePlayerStructures(
+    playerAddress ? ContractAddress(playerAddress) : undefined,
+  );
   const setPlayerStructures = useUIStore((state) => state.setPlayerStructures);
 
   // Sync structure-scoped models (Resource, StructureBuildings, ProductionBoostBonus)

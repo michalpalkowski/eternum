@@ -4,6 +4,7 @@ import { getStructuresDataFromTorii } from "@/dojo/queries";
 import { syncEntitiesDebounced } from "@/dojo/sync";
 import { getSqlApiBaseUrl, sqlApi } from "@/services/api";
 import { padHexAddressTo66 } from "@/ui/utils/utils";
+import { ContractAddress } from "@bibliothecadao/types";
 import { useDojo, usePlayerStructures } from "@bibliothecadao/react";
 import { MemberClause } from "@dojoengine/sdk";
 import { getComponentValue, Has, runQuery } from "@dojoengine/recs";
@@ -78,7 +79,12 @@ export const usePlayerStructureSync = () => {
     setup,
   } = useDojo();
 
-  const playerStructures = usePlayerStructures();
+  // Use the original player address for ownership queries — in shard mode,
+  // account.address is MASTER_ADDRESS (TX signer) which doesn't own any structures.
+  const playerAddress = useAccountStore((state) => state.playerAddress);
+  const playerStructures = usePlayerStructures(
+    playerAddress ? ContractAddress(playerAddress) : undefined,
+  );
 
   const subscriptionRef = useRef<{ cancel: () => void } | null>(null);
   const ownerStructureSubscriptionRef = useRef<{ cancel: () => void } | null>(null);
@@ -123,7 +129,7 @@ export const usePlayerStructureSync = () => {
     [structureSyncTargetsKey],
   );
 
-  const accountAddress = useAccountStore().account?.address;
+  const accountAddress = playerAddress ?? useAccountStore().account?.address;
   const toriiComponents = contractComponents as unknown as Parameters<typeof getStructuresDataFromTorii>[1];
   const structureEntityIdsRef = useRef<ReadonlySet<number>>(new Set());
   const structureSyncTargetsRef = useRef<typeof structureSyncTargets>([]);

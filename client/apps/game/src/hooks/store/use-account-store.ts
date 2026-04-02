@@ -10,6 +10,9 @@ interface AccountState {
   setConnector: (connector: ControllerConnector | null) => void;
   accountName: string | null;
   setAccountName: (accountName: string | null) => void;
+  /** Original player address — survives shard mode account override. */
+  playerAddress: string | null;
+  setPlayerAddress: (address: string | null) => void;
 }
 
 export const useAccountStore = create<AccountState>()(
@@ -21,13 +24,15 @@ export const useAccountStore = create<AccountState>()(
       setConnector: (connector) => set({ connector }),
       accountName: null,
       setAccountName: (accountName) => set({ accountName }),
+      playerAddress: null,
+      setPlayerAddress: (playerAddress) => set({ playerAddress }),
     }),
     {
       name: "eternum_account_store",
-      version: 1,
+      version: 2,
       storage: createJSONStorage(() => localStorage),
       // Only persist simple, serializable fields
-      partialize: (state) => ({ accountName: state.accountName }),
+      partialize: (state) => ({ accountName: state.accountName, playerAddress: state.playerAddress }),
     },
   ),
 );

@@ -81,10 +81,22 @@ const resolveMainChainRpcUrl = (): string => {
   return normalizeRpcUrl(env.VITE_PUBLIC_NODE_URL);
 };
 
+/**
+ * Module-level reference to the raw ControllerConnector instance.
+ * starknet-react wraps connectors in its own Connector type, stripping the
+ * `.controller` property. This lets use-controller-account.ts access the
+ * real instance for switchRpc() without depending on starknet-react internals.
+ */
+let _controllerConnectorRef: InstanceType<typeof ControllerConnector> | null = null;
+
+/** Get the raw ControllerConnector (not the starknet-react wrapper). */
+export const getControllerConnector = (): InstanceType<typeof ControllerConnector> | null => _controllerConnectorRef;
+
 const cartridgeApiBase = env.VITE_PUBLIC_CARTRIDGE_API_BASE || "https://api.cartridge.gg";
 const createControllerConnector = (resolvedChainId: string) => {
-  // Always use stable, well-known RPC URLs for the controller's chain list.
-  // Shard Katana URLs (hypervisor proxy) are NOT valid chains for the controller.
+  // Controller chain list: only stable, well-known main-chain RPC URLs.
+  // Shard Katana URLs are NOT registered as chains — they use switchRpc()
+  // which bypasses chain validation entirely (see shard-write-protocol.ts).
   const mainChainRpcUrl = resolveMainChainRpcUrl();
   const controllerSupportedRpcUrls = Array.from(
     new Set(
@@ -93,7 +105,9 @@ const createControllerConnector = (resolvedChainId: string) => {
         `${cartridgeApiBase}/x/eternum-blitz-slot-3/katana/rpc/v0_9`,
         `${cartridgeApiBase}/x/starknet/sepolia/rpc/v0_9`,
         `${cartridgeApiBase}/x/starknet/mainnet/rpc/v0_9`,
-      ].map((value) => normalizeRpcUrl(value)),
+      ]
+        .filter((value): value is string => typeof value === "string" && value.length > 0)
+        .map((value) => normalizeRpcUrl(value)),
     ),
   );
 
@@ -275,8 +289,13 @@ export function StarknetProvider({ children }: { children: React.ReactNode }) {
   // Controller connector is stable — always configured with main chain RPC.
   // It never sees shard Katana URLs, preventing "chain not supported" errors.
   const controllerConnector = useMemo(() => {
-    if (isLocal) return null;
-    return createControllerConnector(resolvedChainId) as unknown as Connector;
+    if (isLocal) {
+      _controllerConnectorRef = null;
+      return null;
+    }
+    const cc = createControllerConnector(resolvedChainId);
+    _controllerConnectorRef = cc;
+    return cc as unknown as Connector;
   }, [resolvedChainId]);
 
   // For dev-stack testnet: create a connector from deployer credentials (env vars).
