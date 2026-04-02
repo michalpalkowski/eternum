@@ -48,6 +48,7 @@ export type ShardRequestErrorKind =
   | "transport_http_error"
   | "request_timeout"
   | "recovery_failed"
+  | "nonce_resolution_failed"
   | "unknown";
 
 export interface ShardRequestDiagnostic {

@@ -217,6 +217,24 @@ if (typeof window !== "undefined") {
   (window as any).__perfReset = resetStats;
   (window as any).__perfStop = stopSummary;
   startSummary();
+
+  // Intercept fetch to log gRPC-web subscription lifecycle.
+  const origFetch = window.fetch.bind(window);
+  window.fetch = ((...args: Parameters<typeof fetch>) => {
+    const url = typeof args[0] === "string" ? args[0] : (args[0] as Request)?.url ?? "";
+    if (!url.includes("Subscribe") && !url.includes("subscribe")) {
+      return origFetch(...args);
+    }
+    const short = url.replace(/https?:\/\/[^/]+/, "").slice(0, 100);
+    console.log(`[fetch-spy] → ${short}`);
+    return origFetch(...args).then((r: Response) => {
+      const cl = r.headers.get("content-length");
+      const ct = r.headers.get("content-type");
+      const gs = r.headers.get("grpc-status");
+      console.log(`[fetch-spy] ← ${short} status=${r.status} content-length=${cl} grpc-status=${gs} type=${ct}`);
+      return r;
+    });
+  }) as typeof fetch;
 }
 
 export { dumpStats, resetStats, startSummary, stopSummary };
