@@ -59,6 +59,7 @@ export const SepoliaEternumGlobalConfig: Config = {
   },
   season: {
     ...CommonEternumGlobalConfig.season,
+    durationSeconds: 60 * 60 * 24 * 30, // 30 days (override 90min default for testnet)
     pointRegistrationCloseAfterEndSeconds: 60 * 60 * 1, // 1 hour after season end
     bridgeCloseAfterEndSeconds: 60 * 60 * 1, // 1 hour after season end
     startSettlingAfterSeconds: 60 * 30, // 30 minutes

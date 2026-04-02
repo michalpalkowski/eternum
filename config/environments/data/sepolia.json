@@ -1565,8 +1565,8 @@
     "startSettlingAfterSeconds": 1800,
     "startSettlingAt": 0,
     "startMainAfterSeconds": 3600,
-    "startMainAt": 1774028123,
-    "durationSeconds": 5400,
+    "startMainAt": 1774885942,
+    "durationSeconds": 2592000,
     "bridgeCloseAfterEndSeconds": 3600,
     "pointRegistrationCloseAfterEndSeconds": 3600
   },
@@ -1766,17 +1766,20 @@
     "registration": {
       "fee_token": "0x22b68d4ede70ad64d3b1c43b544b34515c0d7d9a6adc085c44fdd29ad53507c",
       "fee_recipient": "0x040DB150844Dc372928b3B47e23CB6E240E2c99ddC5381680aFd73d777Cbd6C8",
-      "fee_amount": "10000000000000000000",
+      "fee_amount": "0",
       "registration_count_max": 30,
-      "registration_delay_seconds": 10,
-      "registration_period_seconds": 10800,
+      "registration_delay_seconds": 5,
+      "registration_period_seconds": 10,
       "entry_token_class_hash": "0x181c70595dd7db697c37ceb35c74fab69a037836b99cc80c17fd92a16289e26",
       "entry_token_ipfs_cid": "Qm123idkmaybe",
       "collectible_cosmetics_max_items": 5,
-      "collectible_cosmetics_address": "0x59b49434d129e1a7fab31ef3652f07fa5cd8ba5acaa45bb48a6aad50086b395",
-      "collectible_timelock_address": "0x4e847f9abd36c5f91eaaf51699934b7a5dd44ff9dc8d3d78d97710df1e152f",
+      "collectible_cosmetics_address": "0x0",
+      "collectible_timelock_address": "0x0",
       "collectibles_lootchest_address": "0x3055a923ad7546302c22c7faea014179b6c0fdb7677aedd9439b2cbf6c68806",
-      "collectibles_elitenft_address": "0x0"
+      "collectibles_elitenft_address": "0x0",
+      "collectible_lootchest_address": "0x0",
+      "collectible_elitenft_address": "0x0",
+      "collectible_cosmetics_max": 0
     }
   },
   "factory": {
@@ -2311,6 +2314,16 @@
             }
           ],
           "name": "core::array::Span::<dojo::sharding::request::ShardField>",
+          "type": "struct"
+        },
+        {
+          "members": [
+            {
+              "name": "snapshot",
+              "type": "@core::array::Array::<dojo::sharding::request::SlotEntry>"
+            }
+          ],
+          "name": "core::array::Span::<dojo::sharding::request::SlotEntry>",
           "type": "struct"
         },
         {
@@ -2977,6 +2990,42 @@
         {
           "members": [
             {
+              "name": "key_derivation_chain",
+              "type": "core::array::Span::<core::felt252>"
+            },
+            {
+              "name": "packed_offset",
+              "type": "core::integer::u32"
+            }
+          ],
+          "name": "dojo::sharding::request::DeterministicProof",
+          "type": "struct"
+        },
+        {
+          "members": [
+            {
+              "name": "keys",
+              "type": "core::array::Span::<core::felt252>"
+            },
+            {
+              "name": "values",
+              "type": "core::array::Span::<core::felt252>"
+            },
+            {
+              "name": "commitment",
+              "type": "core::felt252"
+            },
+            {
+              "name": "fork_state_root",
+              "type": "core::felt252"
+            }
+          ],
+          "name": "dojo::sharding::request::InitialProof",
+          "type": "struct"
+        },
+        {
+          "members": [
+            {
               "name": "selector",
               "type": "core::felt252"
             },
@@ -2991,6 +3040,54 @@
           ],
           "name": "dojo::sharding::request::ShardField",
           "type": "struct"
+        },
+        {
+          "members": [
+            {
+              "name": "key",
+              "type": "core::felt252"
+            },
+            {
+              "name": "value",
+              "type": "core::felt252"
+            },
+            {
+              "name": "model_selector",
+              "type": "core::felt252"
+            },
+            {
+              "name": "entity_id",
+              "type": "core::felt252"
+            },
+            {
+              "name": "member_selector",
+              "type": "core::felt252"
+            },
+            {
+              "name": "initial_value",
+              "type": "core::felt252"
+            },
+            {
+              "name": "verification",
+              "type": "dojo::sharding::request::SlotVerification"
+            }
+          ],
+          "name": "dojo::sharding::request::SlotEntry",
+          "type": "struct"
+        },
+        {
+          "name": "dojo::sharding::request::SlotVerification",
+          "type": "enum",
+          "variants": [
+            {
+              "name": "Deterministic",
+              "type": "dojo::sharding::request::DeterministicProof"
+            },
+            {
+              "name": "DynamicLock",
+              "type": "()"
+            }
+          ]
         },
         {
           "items": [
@@ -3594,6 +3691,10 @@
               "inputs": [
                 {
                   "name": "entities",
+                  "type": "core::array::Span::<core::felt252>"
+                },
+                {
+                  "name": "shared_entities",
                   "type": "core::array::Span::<core::felt252>"
                 },
                 {
@@ -4357,18 +4458,6 @@
                   "type": "core::felt252"
                 },
                 {
-                  "name": "changed_keys",
-                  "type": "core::array::Span::<core::felt252>"
-                },
-                {
-                  "name": "changed_values",
-                  "type": "core::array::Span::<core::felt252>"
-                },
-                {
-                  "name": "state_diff_hash",
-                  "type": "core::felt252"
-                },
-                {
                   "name": "global_state_root",
                   "type": "core::felt252"
                 },
@@ -4377,28 +4466,8 @@
                   "type": "core::integer::u64"
                 },
                 {
-                  "name": "slot_model_selectors",
-                  "type": "core::array::Span::<core::felt252>"
-                },
-                {
-                  "name": "slot_entity_ids",
-                  "type": "core::array::Span::<core::felt252>"
-                },
-                {
-                  "name": "slot_computation_keys",
-                  "type": "core::array::Span::<core::felt252>"
-                },
-                {
-                  "name": "slot_member_selectors",
-                  "type": "core::array::Span::<core::felt252>"
-                },
-                {
-                  "name": "slot_packed_offsets",
-                  "type": "core::array::Span::<core::integer::u32>"
-                },
-                {
-                  "name": "slot_initial_values",
-                  "type": "core::array::Span::<core::felt252>"
+                  "name": "slots",
+                  "type": "core::array::Span::<dojo::sharding::request::SlotEntry>"
                 },
                 {
                   "name": "entity_model_selectors",
@@ -4407,6 +4476,10 @@
                 {
                   "name": "entity_keys_flat",
                   "type": "core::array::Span::<core::felt252>"
+                },
+                {
+                  "name": "initial_proof",
+                  "type": "dojo::sharding::request::InitialProof"
                 }
               ],
               "name": "settle",
@@ -4445,10 +4518,21 @@
                   "type": "core::felt252"
                 }
               ],
-              "name": "get_shard_commitment",
+              "name": "get_shard_attestation_fork_block_number",
               "outputs": [
                 {
-                  "type": "core::felt252"
+                  "type": "core::integer::u64"
+                }
+              ],
+              "state_mutability": "view",
+              "type": "function"
+            },
+            {
+              "inputs": [],
+              "name": "get_sharding_proxy",
+              "outputs": [
+                {
+                  "type": "core::starknet::contract_address::ContractAddress"
                 }
               ],
               "state_mutability": "view",
@@ -4513,40 +4597,12 @@
                   "type": "core::felt252"
                 },
                 {
-                  "name": "changed_keys",
-                  "type": "core::array::Span::<core::felt252>"
-                },
-                {
-                  "name": "changed_values",
-                  "type": "core::array::Span::<core::felt252>"
-                },
-                {
                   "name": "end_block_number",
                   "type": "core::integer::u64"
                 },
                 {
-                  "name": "slot_model_selectors",
-                  "type": "core::array::Span::<core::felt252>"
-                },
-                {
-                  "name": "slot_entity_ids",
-                  "type": "core::array::Span::<core::felt252>"
-                },
-                {
-                  "name": "slot_computation_keys",
-                  "type": "core::array::Span::<core::felt252>"
-                },
-                {
-                  "name": "slot_member_selectors",
-                  "type": "core::array::Span::<core::felt252>"
-                },
-                {
-                  "name": "slot_packed_offsets",
-                  "type": "core::array::Span::<core::integer::u32>"
-                },
-                {
-                  "name": "slot_initial_values",
-                  "type": "core::array::Span::<core::felt252>"
+                  "name": "slots",
+                  "type": "core::array::Span::<dojo::sharding::request::SlotEntry>"
                 },
                 {
                   "name": "entity_model_selectors",
@@ -15950,6 +16006,10 @@
                 {
                   "name": "entity_ids",
                   "type": "core::array::Span::<core::felt252>"
+                },
+                {
+                  "name": "shared_entity_ids",
+                  "type": "core::array::Span::<core::felt252>"
                 }
               ],
               "name": "request_shard",
@@ -15962,6 +16022,14 @@
                 {
                   "name": "realm_entity_id",
                   "type": "core::felt252"
+                },
+                {
+                  "name": "exclusive_related_entity_ids",
+                  "type": "core::array::Span::<core::felt252>"
+                },
+                {
+                  "name": "shared_entity_ids",
+                  "type": "core::array::Span::<core::felt252>"
                 }
               ],
               "name": "request_shard_realm",
@@ -17009,7 +17077,7 @@
               ]
             }
           ],
-          "address": "0x13b77358a7d7b66b1842ca488dcb80c58887fe2bbdffff623631aba766c130a",
+          "address": "0x17a7c7eed0afaff8adef18a799fe9a3fd5a595f6cb44513c21b23eaaafe1d76",
           "class_hash": "0x71290c18f0080c193881d29cf36bb45054a3e97fef3c7468cda35c01f1ec9f",
           "init_calldata": [],
           "selector": "0x39779154845217b9230e347a39ab6e47e8f2d46c1fd80c6996d13988857d770",
@@ -17278,7 +17346,7 @@
               ]
             }
           ],
-          "address": "0x6d8415144ab0c5aec6842df4fb76febff3a4f52209283b898ed60afad9f916b",
+          "address": "0x98fdf3d687784023b5c94fa92765591b5dd8cccb92b1507769cfb17740b081",
           "class_hash": "0x21de4d7f3de62c9591207d194e05b639f010a79a1864c1138432c3bd730e302",
           "init_calldata": [],
           "selector": "0x44475a775d79049bbe99567b7c00a1e4d8d582cade61a8aec07ca3bb234f6e6",
@@ -17549,7 +17617,7 @@
               ]
             }
           ],
-          "address": "0x6a0343928763b1b250e0f38a4c1f6c17616d4a402b71aa42a4b63f55a5e3983",
+          "address": "0x4eb1cd9fcde2075a7775171528daabedf1fdb47b154969f68a72c58145eaac4",
           "class_hash": "0x6a92d2d7ec44ab29fc002be1c77616811c46b604ec69f5326b6aa1ccbc52f6",
           "init_calldata": [],
           "selector": "0x3414be5ba2c90784f15eb572e9222b5c83a6865ec0e475a57d7dc18af9b3742",
@@ -19388,7 +19456,7 @@
               ]
             }
           ],
-          "address": "0x100b588fef52dcc29edf66bf9508040e3234dbffc469e3932de4e4febe91a5",
+          "address": "0x757efbc29bce6e1e8c7950b6a3a9aace1fdfb51605e5aa96802aa9c72dee41d",
           "class_hash": "0xe3855d40d98df8093d35c4839e7c3ac37de35933e6981081c5a32a3426e933",
           "init_calldata": [],
           "selector": "0x1cb4608b18b40cb6420be7cf67ff21abe727a2bf599f2727d8eed5e36099fc2",
@@ -19621,7 +19689,7 @@
               ]
             }
           ],
-          "address": "0x424686bcfe3510043c0a882ba249c54969028ff554dd56e861bead0dcfb656b",
+          "address": "0x5892e27aa03fb1e2db4368f5d8bba200f630e2e4a1f1e6892953d3c41d8afc7",
           "class_hash": "0x284af3afd168f34f28dcaf379602dd95fe09b1d9b8cf1cb8aeaf76083b69e1b",
           "init_calldata": [],
           "selector": "0x11f834f0265a2bcc31088ba6f8cf52a2a160b55c3fcf102a6056ed2e0b9066a",
@@ -19833,7 +19901,7 @@
               ]
             }
           ],
-          "address": "0x46b234b8debbd10d3720de9091750b14a9b21269c9f96a45f44f0d6b48b42b",
+          "address": "0x3c4d2deb0a85d17715e3bad9fdbd9339967751645bfd02767799238c6b1fb7",
           "class_hash": "0x21886821582238db178afdbccbbcb8a8420547bcfb39b0a9cc7e26c78cf3684",
           "init_calldata": [],
           "selector": "0x32279d1c73c6356f5f15ff0e59adc6bfc45ffcde796c785452f6944b9b36ef1",
@@ -20047,7 +20115,7 @@
               ]
             }
           ],
-          "address": "0x60bdbfd2dffabc2ff000f4d5d0d7812b9589865c5e3d346c485c5074b8c3fa8",
+          "address": "0x65a4fbfb755b06861b91ff5fd1681a5b01dc5775b3795aa3a19655f589c1c3f",
           "class_hash": "0x3e551834892c210d8895ee212b2be65b7ae062227b59f028ed2aa089163f8b7",
           "init_calldata": [],
           "selector": "0x4d5cfcb90997c42faaec636a440b73118f54d7e5321a8e6e134bdb0ac946333",
@@ -20312,7 +20380,7 @@
               ]
             }
           ],
-          "address": "0x60890545c44c02b583df0eff2132f8a31d536f94e1aeb2d3a8c11f39fc28534",
+          "address": "0x3dfba619a08ba4706ed99375b74b92f0724f01dd284e087bb3fb1c37a071f9b",
           "class_hash": "0x22f7524507fa211d33c3599432e6ad97e02980eddf814d5034ef647a2514d23",
           "init_calldata": [],
           "selector": "0x15516acac71fbb80f953b9a8fac7d65ceff957f7f2d568fecbccba36bec6263",
@@ -20834,7 +20902,7 @@
               ]
             }
           ],
-          "address": "0x5688a537677975e1fe8bbc2bc937d533c5f07112391492a2ad0b2124bdcba7c",
+          "address": "0x5164ed68a2ffb8f3528b1d50d4263ca2de22ca09ce0722e81e4a769ccfd4afa",
           "class_hash": "0x85455c0a312ad3be3135813ec7bd5d01930e373c004882a9976488e682cc1b",
           "init_calldata": [],
           "selector": "0x4de7ee78f9f01b8f7b98c172552cc0f7b81c8706ffc85e7b831021e820420d1",
@@ -21145,7 +21213,7 @@
               ]
             }
           ],
-          "address": "0x684eed88aff21e0dc28d0a1ca1175aee0189b97f6d0d2ac6cbfaa0c8643adba",
+          "address": "0xb69ff0ce194093904209e6068148dc3618e07b157f64f4ca4f8c08ccb6022a",
           "class_hash": "0x52f3b2e37c25ef38880f4d20b08c0aa3ca07e20da60cd6614934e7a0f95b438",
           "init_calldata": [],
           "selector": "0x4bdd8bcbb935577aba3b974bd7e906698504fcb75e0c3aa34913c21342b4498",
@@ -21389,7 +21457,7 @@
               ]
             }
           ],
-          "address": "0x5f30dc5ecc0290076fd7aeb8e918628d86f1fe786937d2dc627cca17be13265",
+          "address": "0x50dbd9795526ff762d5dbb3e596b8812c39b264e8f9285518bfd077a2bdcd44",
           "class_hash": "0x72167c0846ed633ca80dc344f8545314b361f0f67a54cb97744a3c10df8b918",
           "init_calldata": [],
           "selector": "0xf480ba1a0c3e5b85a74ba14244a1653f886654d67c71b4dd0804d9eecf1cd9",
@@ -21908,7 +21976,7 @@
               ]
             }
           ],
-          "address": "0x2d8d89c5427988e5302089ffc8688e3fcab8b688dbe9611efe269eb6596556c",
+          "address": "0x3741e1b2e91738d55614adad8d7b845dbac04fc99e128743aafeee812070f24",
           "class_hash": "0x2c58188c003f00510370f6e49dc6de8c73ba260a3b34e83a4c14647305d2eec",
           "init_calldata": [],
           "selector": "0x567d970e2796f641f9a9c23fa16378ddaee5c8a7d27ac4e3edbd4dfa25a1743",
@@ -22119,7 +22187,7 @@
               ]
             }
           ],
-          "address": "0x7cb3258769ee252dedead25d4e79b7ea89b3a8bf604dd0e11eb38bcb0a22efb",
+          "address": "0x2c542baef742fb4b6a7470d8395cf44db9ea8da7080187274aa14d4895b4e4a",
           "class_hash": "0x621ec9cf8626b1977c6b42fc8772cc7656534b7a6d099f9fd20674266910d0a",
           "init_calldata": [],
           "selector": "0x628d6becd2c6fa1835109109b92cc642dfe69ab9194ca331cf7c510d9e2b5ce",
@@ -22320,7 +22388,7 @@
               ]
             }
           ],
-          "address": "0x76b38f476b579647c902c34d0751f1f7c7e1ce7ba14272364ba044166da80ae",
+          "address": "0x49fc75d5ff1c68f46d73db36d31b6695ab1902eea02980f46d1e87ffc72b92c",
           "class_hash": "0x68efc734b937fbfd29559e06d2abd71a8dfbce2e860cbf17d0ded265dc67626",
           "init_calldata": [],
           "selector": "0x45b86c7ee3f36393c4d14a0da3c58fdf406677137f1d840c53f01e8544e3b80",
@@ -22540,7 +22608,7 @@
               ]
             }
           ],
-          "address": "0x2ea899a2789714fe192f4b956482aafb4b43b53a45d29d94144f6023cc53569",
+          "address": "0x18003e70cdacffc173b4f37a3c720ec35ec678418fd90c66b665f45900fe88a",
           "class_hash": "0x38b6d5a210039092af134f93e8016319a75ff02a1b5c54a9ccd775c66e2e3fa",
           "init_calldata": [],
           "selector": "0x5045fbdb3ad9b695ea6f218e57a3ca2ce575a2964f30e15f2e710f691aa0622",
@@ -22745,7 +22813,7 @@
               ]
             }
           ],
-          "address": "0x55dadd0e3076be267cb4c57688a47be0ba36c757d7be57c1b73003ba5d9fd48",
+          "address": "0x488d1359e30b302a70eed5470df36ea9665cda694c9494b54f5461543584acb",
           "class_hash": "0x708c67ca62c1305467a1917eca69cca87d00d6e48518a3e5c0b9bb2b2631fef",
           "init_calldata": [],
           "selector": "0x583f59a664c37a0eb068b8a2fea20d6652fb22e8cbc1b1ffe936ebd26c545bf",
@@ -23136,7 +23204,7 @@
               ]
             }
           ],
-          "address": "0x554164d09b761c178ac927d7f2b4bd6e89c12b03cbc600091f63b3b114775e6",
+          "address": "0x4d49970d10aca102a41b3f9c80e5ec7880d70073c5ea72af33e103ac308e465",
           "class_hash": "0x478fd8753a23604ec68761b1d6e26bdf62bb99a930d47331fbbb18639dfaed4",
           "init_calldata": [],
           "selector": "0x42230b5f7ccc6ce02a4ecb99c31d92ddd0f24ab472896afd617a2a763cf4179",
@@ -23719,7 +23787,7 @@
               ]
             }
           ],
-          "address": "0xd080aac5ee69e15e3f154b379b22cb21e6fb0a81a85d7dab36b46cca02321a",
+          "address": "0x21307f384693bc3f4a3b4e4916a141cea9fe0bf44399a0d1dec1713104184c4",
           "class_hash": "0x10bc7bb3bfb93c8c68d2fbd062a91504d00e8c0367ea30bbb6109e138b47661",
           "init_calldata": [],
           "selector": "0x6d70095d0a6ca6efc41633bafa4ac5202f1f83c75afbba78987b58f495a4c0",
@@ -23985,7 +24053,7 @@
               ]
             }
           ],
-          "address": "0x6c787036a002af019db5c688bdad608f2106b59bf579697688b5bad97f542a4",
+          "address": "0x513cf992277cffcf190ec953781cfcd921e251a8d386261cf50ea508500fccc",
           "class_hash": "0x59322a95ff17652eff8f004537723df0bb4334ef16e256223807d13279a5936",
           "init_calldata": [],
           "selector": "0x4bb1850a95a41d6b0c7992a0c75bb1212f0ea054dc04866d6a6392cccec58b3",
@@ -24219,7 +24287,7 @@
               ]
             }
           ],
-          "address": "0x30137cb56b2ba464f716c9394864458128e57b37a637046197e68dcb7d12015",
+          "address": "0x72d97f24806ade7cbab7816a4a5f9625b76e2ba5c059542219b713df799c8a1",
           "class_hash": "0xabc074070ab604b743af81ead7f2450c0aca26c1db286c7364d74fda7f11db",
           "init_calldata": [],
           "selector": "0x3b4cc14cbb49692c85e1b132ac8536fe7d0d1361cd2fb5ba8df29f726ca02d2",
@@ -24737,7 +24805,7 @@
               ]
             }
           ],
-          "address": "0x3da9519126a3f05197c882e08c45ea2715baa2d826716e014ba763433048448",
+          "address": "0x2a04c04d5a943481fd2fbab334acdcaf3b3bffa3ddb9b52dafe6708746c32e1",
           "class_hash": "0x75ff3c2dacdc224dcd8c121fb5723648d6a68b34d8d2c09db2f36b445481d3a",
           "init_calldata": [],
           "selector": "0x6c7d7c49c05a128b5ef90b795f638288b11b478ce950a706f6c1db5356ef6a6",
@@ -25010,7 +25078,7 @@
               ]
             }
           ],
-          "address": "0x6eb49de4d5fb0aae537b8baf8d863d38cf7a6bc0f793aced9aef380d7f1bf42",
+          "address": "0x155813eeb1e9a5f35664a830eee935d902907917cac24a94655eb2870ffe66b",
           "class_hash": "0x8acbe029215acdc303fdfceff15268d1ad1ab0eb084bb189d9a1cf3cf8d12f",
           "init_calldata": [],
           "selector": "0x632480e29dba9c95a8b4e4ba0c7ad48bd5abdd3906211ec6f8a5350249b9d0",
@@ -25296,7 +25364,7 @@
               ]
             }
           ],
-          "address": "0x76a86bf90697903b07e5f42bbb4977252692da6417c734bbc93b4e971753968",
+          "address": "0x4e8f2f0b936ff0bd734aebae06ea83c576c715080762cc923460bd410d79c27",
           "class_hash": "0x2aa46dc77a52f6d247d6f7f12ceb4e9e438a7fc16497255dd84412db06e12e4",
           "init_calldata": [],
           "selector": "0x4f94ba58902810acb653eeeb2a36e5f8f5a7096ceac7a2705c52732281e3cd2",
@@ -25685,7 +25753,7 @@
               ]
             }
           ],
-          "address": "0x4c64db3edcdfa58774f7b3d291b19c087dbd5187a132453d40c9570460aa646",
+          "address": "0x2ac201f9cbb5ef341ae835a9854104395e9803aa98e47228e49bf3a4bcdba01",
           "class_hash": "0x119d36ed1a6a0b916952b863a902ffa22fa1b3ccc640f8c29f22007866965c0",
           "init_calldata": [],
           "selector": "0x626970a749fd6b8230875061236c1a9446ae65287beb6107d5b88e5ca078019",
@@ -25889,7 +25957,7 @@
               ]
             }
           ],
-          "address": "0x1de3185845f563271e323c71f986e3412de93a5f5fe91ee6f689f70d381a33b",
+          "address": "0x26092d618a698c9fb6bae16c1cdd1db4be463adc9a9e7ff98714e86600ee8f7",
           "class_hash": "0x14beadcf08541a3ee5fb6df4b80e2040d2deed697455157132ebde5465f9e99",
           "init_calldata": [],
           "selector": "0x44e1edf9ca51b11a8c1d6ffc341d3248fdbeebc7e7d3ee6314fee33174860c4",
@@ -25980,6 +26048,10 @@
                     {
                       "name": "entity_ids",
                       "type": "core::array::Span::<core::felt252>"
+                    },
+                    {
+                      "name": "shared_entity_ids",
+                      "type": "core::array::Span::<core::felt252>"
                     }
                   ],
                   "name": "request_shard",
@@ -25992,6 +26064,14 @@
                     {
                       "name": "realm_entity_id",
                       "type": "core::felt252"
+                    },
+                    {
+                      "name": "exclusive_related_entity_ids",
+                      "type": "core::array::Span::<core::felt252>"
+                    },
+                    {
+                      "name": "shared_entity_ids",
+                      "type": "core::array::Span::<core::felt252>"
                     }
                   ],
                   "name": "request_shard_realm",
@@ -26130,8 +26210,8 @@
               ]
             }
           ],
-          "address": "0x1dc82f2c32ac4c6051e1012c817707cf7ca87c4470e537437ff4ead96aa7b35",
-          "class_hash": "0x7d3b95d3f452f798755ebac769b5aabef50a1be1537b33a48e4295dba78262c",
+          "address": "0xf5571dba8b722a558e6d8cefcee31a076b952333e1c436be658d26c99e6cf3",
+          "class_hash": "0x4e6064e96db6160f2e273e7e0a2834762c1977a7dfa318516dc053c182d9ca4",
           "init_calldata": [],
           "selector": "0x9afc8a5def42a92120c6b38ad4c2027903ee56147bf6f2d5dfd10335c97298",
           "systems": [
@@ -26333,7 +26413,7 @@
               ]
             }
           ],
-          "address": "0x46e03d9c72c855804fa0f138d350ed7c42db7a617329d7ca0dcbf60fe248e98",
+          "address": "0x5fb7f202398b8be7115eb73bfee601ff53a435397c68a0eaea1e20960785a1b",
           "class_hash": "0x484af8bbb6958e3b0a641a413e79e75c74e6db0199eebbf2c16d37c952531de",
           "init_calldata": [],
           "selector": "0x15f0efd5ca9fd9dc6685e7555bc35ed59422d97e19589d4b218b5f7a36096fd",
@@ -26569,7 +26649,7 @@
               ]
             }
           ],
-          "address": "0x50fc7ca4bb142b55c3bbddccd2e4a3c4104b95c4809f8f63fc1d5e8c222ea75",
+          "address": "0x4e38af8ef55bdde5a6b5b9398115ee633fcbc8d8eb83205f390b4d13ce3053e",
           "class_hash": "0x1936d55e8b75da08a39cbd2ddc25722e80975b7e670a87e8486edb2649ce3d9",
           "init_calldata": [],
           "selector": "0x187f170f62cb2f89334e291ddc0d0f388a855abcdd2b911425fed8304d3fdc3",
@@ -26834,7 +26914,7 @@
               ]
             }
           ],
-          "address": "0x51a7bb18bf2a468756a8665a6132fcf82dbce85472e7124a48b177c2ab86a09",
+          "address": "0x8df9d0485894c6c4b1a0aed6d1147f49efc7236f3b6544ec20c8a70c3fabdb",
           "class_hash": "0x6deb48297af8c037d7d3d2b70c47f958e5d976249a9cd309e6b5b79f86e748c",
           "init_calldata": [],
           "selector": "0x25205919a9c1be9b6b4c75d8435d21e748b4144575e3ed50d453ebd586f1467",
@@ -27154,7 +27234,7 @@
               ]
             }
           ],
-          "address": "0x62205ff4e19914314ac4701246c7a6be1fc18f336000870ac52f1437b5398e2",
+          "address": "0x2a9cdfea50a48642d8bd06bdea85b8f333f8bae3ae46e1f24b0e916caf42172",
           "class_hash": "0x4e0c90a8e2d2e4ba4d0cd70aa2e5d0ccb8f71e090a4ae815eb049b21fc5dab2",
           "init_calldata": [],
           "selector": "0x473dc1d8bca81e2a2d92011b4171ffe608d47dcde63f7d112f03bb767b57aea",
@@ -27620,7 +27700,7 @@
               ]
             }
           ],
-          "address": "0x4b9b79124252cc11b69304c1e6309d4548ce9555abf237bb33307ee7b31f988",
+          "address": "0x95f75fd743af548d40113d553d7d9956e1653c047640689574fd8a189b5db5",
           "class_hash": "0x7f41639186271ddaae75e7d5d0aad70d9a0e7e29bd32d01dc3010442cf2a41f",
           "init_calldata": [],
           "selector": "0x49b9809fc3839b4eb765c5d1db1d1a835678574e42bf24bf70235cecf2f8437",
@@ -27953,7 +28033,7 @@
               ]
             }
           ],
-          "address": "0x36cc9a2f1b5193cbe6c0bbc2d29ed06fb4e7c428fdca8bb6f48f0740f2079c5",
+          "address": "0x253f6887bd874bfc4e6abf62386e6a383c96d8aad4b898601a8db7f517bfac7",
           "class_hash": "0x2b9e03836337c79a32d05168213ace2918ddba261d385021938161381e1e6f7",
           "init_calldata": [],
           "selector": "0x522c38540c126c2f193f496d4eb1882a63cdc02997f64c298d41622b26ded2b",
@@ -28472,7 +28552,7 @@
               ]
             }
           ],
-          "address": "0x755499a2d553a732e3cb31a91a4b6004a391aa125bd47b7dd095c25f55ac296",
+          "address": "0x5faa21aec63e964de56068eab5a95493be5f2ed2947f6a68daa80f41dfbe350",
           "class_hash": "0x73968fb044c09b98d295ddc1a5f429e6c5dc41cc4f29c6cab8dd77db76784e3",
           "init_calldata": [],
           "selector": "0x1a8cd271b73203df04608c15bc7be031b756ed2ffc25bab756cf9ff6c8731d0",
@@ -28723,7 +28803,7 @@
               ]
             }
           ],
-          "address": "0x3e55a5f66b01e6b5440b65b8fb45053c69ddd4287742821afa4d5ee18aa7495",
+          "address": "0x809d48b9c46105cbc77e25fec33e456ab7240cc16d3aaf3ba859e9edb3d31f",
           "class_hash": "0x49203e98fc9d16484d722f88a6e353bf2b5eaae663248b8f849a36ea862aca",
           "init_calldata": [],
           "selector": "0x2cba999742f3b0dad2f036c7ea44826e236555cf5d82930faadcf43260524",
@@ -29241,7 +29321,7 @@
               ]
             }
           ],
-          "address": "0x41d97b9edd04839173cd35b8dbf69f60c91a302878c831fd29061a182a4610c",
+          "address": "0x6cd0f46f5c3574ffa0652de558d14cabc8fc370cde71d0f207d47700826daab",
           "class_hash": "0x56d54b52e6e94e8b5d49f98cd75a7f1da97f35bc817cfcbe69a57dafde4831e",
           "init_calldata": [],
           "selector": "0x52ecb1dffcd93e8b7f1379f426b123cc1de850735306874424bf8fe817f3862",
@@ -29494,7 +29574,7 @@
               ]
             }
           ],
-          "address": "0x6e40b675e6fb91094c0b294fe2b0d455099573d7dd2c879f33487a9313eac65",
+          "address": "0x317f025a6e0d47d407f24a0f549280212d02eac47b5655b588ce9f7a683d514",
           "class_hash": "0x1b0087db1fcfbd2d6677fdb4b4b1552a8f4007dd3338da2bbd573c90b523040",
           "init_calldata": [],
           "selector": "0x7626c7e3f63dbae9658ee764d453a8dbdbc0df9797ba797fa6564759c444771",
@@ -30284,11 +30364,11 @@
           "version": "0_1_12"
         },
         {
-          "class_hash": "0x12ac1e840849844af231fe5e4bc35ae8ffb8459feed18c99b6fa77f8f3f75e6",
+          "class_hash": "0x5d7ecbab8f91be9ccc600ee0a1d902cf76c49940259b562da9ef0299cdb4fed",
           "selector": "0x706baa7e13795e75b18774b3068f4bfbf16c3c22692cd8ac1e329255380ab03",
           "systems": [],
-          "tag": "s1_eternum-rng_library_v0_1_12",
-          "version": "0_1_12"
+          "tag": "s1_eternum-rng_library_v0_1_13",
+          "version": "0_1_13"
         },
         {
           "class_hash": "0x433bb4917a795cbe9ff677a105eef755ed33305a242a0b8d5dd0b63477a2d64",
@@ -34007,6 +34087,10 @@
                     "type": "core::array::Span::<core::felt252>"
                   },
                   {
+                    "name": "shared_entities",
+                    "type": "core::array::Span::<core::felt252>"
+                  },
+                  {
                     "name": "entity_keys_flat",
                     "type": "core::array::Span::<core::felt252>"
                   }
@@ -34103,11 +34187,95 @@
           {
             "members": [
               {
-                "name": "snapshot",
-                "type": "@core::array::Array::<core::integer::u32>"
+                "name": "key_derivation_chain",
+                "type": "core::array::Span::<core::felt252>"
+              },
+              {
+                "name": "packed_offset",
+                "type": "core::integer::u32"
               }
             ],
-            "name": "core::array::Span::<core::integer::u32>",
+            "name": "dojo::sharding::request::DeterministicProof",
+            "type": "struct"
+          },
+          {
+            "name": "dojo::sharding::request::SlotVerification",
+            "type": "enum",
+            "variants": [
+              {
+                "name": "Deterministic",
+                "type": "dojo::sharding::request::DeterministicProof"
+              },
+              {
+                "name": "DynamicLock",
+                "type": "()"
+              }
+            ]
+          },
+          {
+            "members": [
+              {
+                "name": "key",
+                "type": "core::felt252"
+              },
+              {
+                "name": "value",
+                "type": "core::felt252"
+              },
+              {
+                "name": "model_selector",
+                "type": "core::felt252"
+              },
+              {
+                "name": "entity_id",
+                "type": "core::felt252"
+              },
+              {
+                "name": "member_selector",
+                "type": "core::felt252"
+              },
+              {
+                "name": "initial_value",
+                "type": "core::felt252"
+              },
+              {
+                "name": "verification",
+                "type": "dojo::sharding::request::SlotVerification"
+              }
+            ],
+            "name": "dojo::sharding::request::SlotEntry",
+            "type": "struct"
+          },
+          {
+            "members": [
+              {
+                "name": "snapshot",
+                "type": "@core::array::Array::<dojo::sharding::request::SlotEntry>"
+              }
+            ],
+            "name": "core::array::Span::<dojo::sharding::request::SlotEntry>",
+            "type": "struct"
+          },
+          {
+            "members": [
+              {
+                "name": "keys",
+                "type": "core::array::Span::<core::felt252>"
+              },
+              {
+                "name": "values",
+                "type": "core::array::Span::<core::felt252>"
+              },
+              {
+                "name": "commitment",
+                "type": "core::felt252"
+              },
+              {
+                "name": "fork_state_root",
+                "type": "core::felt252"
+              }
+            ],
+            "name": "dojo::sharding::request::InitialProof",
             "type": "struct"
           },
           {
@@ -34119,18 +34287,6 @@
                     "type": "core::felt252"
                   },
                   {
-                    "name": "changed_keys",
-                    "type": "core::array::Span::<core::felt252>"
-                  },
-                  {
-                    "name": "changed_values",
-                    "type": "core::array::Span::<core::felt252>"
-                  },
-                  {
-                    "name": "state_diff_hash",
-                    "type": "core::felt252"
-                  },
-                  {
                     "name": "global_state_root",
                     "type": "core::felt252"
                   },
@@ -34139,28 +34295,8 @@
                     "type": "core::integer::u64"
                   },
                   {
-                    "name": "slot_model_selectors",
-                    "type": "core::array::Span::<core::felt252>"
-                  },
-                  {
-                    "name": "slot_entity_ids",
-                    "type": "core::array::Span::<core::felt252>"
-                  },
-                  {
-                    "name": "slot_computation_keys",
-                    "type": "core::array::Span::<core::felt252>"
-                  },
-                  {
-                    "name": "slot_member_selectors",
-                    "type": "core::array::Span::<core::felt252>"
-                  },
-                  {
-                    "name": "slot_packed_offsets",
-                    "type": "core::array::Span::<core::integer::u32>"
-                  },
-                  {
-                    "name": "slot_initial_values",
-                    "type": "core::array::Span::<core::felt252>"
+                    "name": "slots",
+                    "type": "core::array::Span::<dojo::sharding::request::SlotEntry>"
                   },
                   {
                     "name": "entity_model_selectors",
@@ -34169,6 +34305,10 @@
                   {
                     "name": "entity_keys_flat",
                     "type": "core::array::Span::<core::felt252>"
+                  },
+                  {
+                    "name": "initial_proof",
+                    "type": "dojo::sharding::request::InitialProof"
                   }
                 ],
                 "name": "settle",
@@ -34207,10 +34347,21 @@
                     "type": "core::felt252"
                   }
                 ],
-                "name": "get_shard_commitment",
+                "name": "get_shard_attestation_fork_block_number",
                 "outputs": [
                   {
-                    "type": "core::felt252"
+                    "type": "core::integer::u64"
+                  }
+                ],
+                "state_mutability": "view",
+                "type": "function"
+              },
+              {
+                "inputs": [],
+                "name": "get_sharding_proxy",
+                "outputs": [
+                  {
+                    "type": "core::starknet::contract_address::ContractAddress"
                   }
                 ],
                 "state_mutability": "view",
@@ -34280,40 +34431,12 @@
                     "type": "core::felt252"
                   },
                   {
-                    "name": "changed_keys",
-                    "type": "core::array::Span::<core::felt252>"
-                  },
-                  {
-                    "name": "changed_values",
-                    "type": "core::array::Span::<core::felt252>"
-                  },
-                  {
                     "name": "end_block_number",
                     "type": "core::integer::u64"
                   },
                   {
-                    "name": "slot_model_selectors",
-                    "type": "core::array::Span::<core::felt252>"
-                  },
-                  {
-                    "name": "slot_entity_ids",
-                    "type": "core::array::Span::<core::felt252>"
-                  },
-                  {
-                    "name": "slot_computation_keys",
-                    "type": "core::array::Span::<core::felt252>"
-                  },
-                  {
-                    "name": "slot_member_selectors",
-                    "type": "core::array::Span::<core::felt252>"
-                  },
-                  {
-                    "name": "slot_packed_offsets",
-                    "type": "core::array::Span::<core::integer::u32>"
-                  },
-                  {
-                    "name": "slot_initial_values",
-                    "type": "core::array::Span::<core::felt252>"
+                    "name": "slots",
+                    "type": "core::array::Span::<dojo::sharding::request::SlotEntry>"
                   },
                   {
                     "name": "entity_model_selectors",
@@ -35041,8 +35164,8 @@
             ]
           }
         ],
-        "address": "0x6a29d52ad218384ec68c445e053df21ad5eeda654de0b828e9e277c98fb5b51",
-        "class_hash": "0x76765babde3ba99403fcadae7737b1be30f123257c49b968193795182866f4f",
+        "address": "0x61ed65fa6f76a6e28944df5fae7f92099cc141c3f0db890a9d00f234d1e1e0e",
+        "class_hash": "0x2758960ccb81ff5fe17a73ab36a84d7ea59a97bf3428a80e74e30e41fd90aa6",
         "entrypoints": [
           "uuid",
           "set_metadata",
@@ -35079,10 +35202,10 @@
           "settle_dev"
         ],
         "name": "Eternum Sepolia",
-        "seed": "sepoliaseed.sharding.1"
+        "seed": "sharding.sepolia.82c4a2da"
       }
     }
   },
-  "prev_prize_distribution_address": "0xa7bc741c5cd3231b75f9cb80ab258c56e8dd6d82eaac857376402b84398f1f"
+  "prev_prize_distribution_address": "0xa91a55d2ffc83cf3b475ffe668e4d3acd73540bcbfde9758a4837c26185f13"
 }
     }

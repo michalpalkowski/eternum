@@ -15,7 +15,7 @@ private_key = "0xc5b2fcab997346f3ea1c00b002ecf6f382c5f9c9659a3894eb783c5320f912"
 rpc_url = "http://localhost:5050"
 
 [world]
-seed = "s1_eternum"
+seed = "sharding.local.a79e09c4"
 name = "Realms: Eternum"
 description = "Rule the Hex"
 cover_uri = "file://assets/bg.webp"

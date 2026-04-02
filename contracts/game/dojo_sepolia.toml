@@ -16,7 +16,7 @@ rpc_url = "https://api.cartridge.gg/x/starknet/sepolia/rpc/v0_9"
 
 
 [world]
-seed = "sharding.sepolia.cfe94f4a"
+seed = "sharding.sepolia.82c4a2da"
 name = "Eternum Sepolia"
 description = "Rule the Hex"
 cover_uri = "file://assets/bg.webp"
