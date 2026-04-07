@@ -1,4 +1,10 @@
 import { getFactorySqlBaseUrl as getFactorySqlBaseUrlRuntime } from "@/runtime/world";
+import {
+  DEFAULT_FACTORY_NAMESPACE,
+  FACTORY_ADDRESSES as SHARED_FACTORY_ADDRESSES,
+  getFactoryExplorerTxUrl,
+  resolveFactoryConfigDefaultVersion,
+} from "@/ui/features/factory/shared/factory-metadata";
 import { getSeasonAddresses, type Chain } from "@contracts";
 import { env } from "../../../../env";
 import type { ChainType } from "./utils/manifest-loader";
@@ -12,8 +18,8 @@ export const WORLD_DEPLOYED_ADDRESS_MAP_KEY = "eternum_world_deployed_address_ma
 export const WORLD_SERIES_METADATA_KEY = "eternum_world_series_metadata";
 
 // Defaults
-export const DEFAULT_VERSION = "180";
-export const DEFAULT_NAMESPACE = "s1_eternum";
+export const getDefaultVersion = resolveFactoryConfigDefaultVersion;
+export const DEFAULT_NAMESPACE = DEFAULT_FACTORY_NAMESPACE;
 export const INDEXER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 
 // External endpoints (env-backed with safe defaults)
@@ -22,26 +28,15 @@ export const TORII_CREATOR_URL =
   env.VITE_PUBLIC_TORII_CREATOR_URL || "https://torii-creator.zerocredence.workers.dev/dispatch/torii";
 
 // Explorer helpers
-const EXPLORER_MAINNET = env.VITE_PUBLIC_EXPLORER_MAINNET || "https://voyager.online";
-const EXPLORER_SEPOLIA = env.VITE_PUBLIC_EXPLORER_SEPOLIA || "https://sepolia.voyager.online";
-
-export const getExplorerTxUrl = (chain: Chain | ChainType, txHash: string) => {
-  const base = chain === "sepolia" ? EXPLORER_SEPOLIA : EXPLORER_MAINNET;
-  return `${base}/tx/${txHash}`;
-};
+export const getExplorerTxUrl = (chain: Chain | ChainType, txHash: string) =>
+  getFactoryExplorerTxUrl(chain as Chain, txHash);
 
 // Factory addresses by chain (single source of truth for UI)
-export const FACTORY_ADDRESSES: Record<ChainType, string> = {
-  sepolia: "0x07A6F094f15f8C18704bfb19fFEBCBC70b87e41674dE97EbeC7cb7Ffe5c9581B",
-  slot: "0x242226ce5f17914fc148cb111980b24e2bda624379877cda66f7e76884d2deb",
-  local: "",
-  mainnet: "0x525410a4d0ebd4a313e2125ac986710cd8f1bd08d47379b7f45c8b9c71b4da",
-  slottest: "",
-};
+export const FACTORY_ADDRESSES: Record<ChainType, string> = SHARED_FACTORY_ADDRESSES;
 
 // Default max actions per chain (mirrors FACTORY_ADDRESSES pattern)
 const DEFAULT_MAX_ACTIONS_BY_CHAIN: Record<ChainType, number> = {
-  mainnet: 100,
+  mainnet: 70,
   sepolia: 20,
   slot: 300,
   slottest: 300,
@@ -58,7 +53,7 @@ const parsePositiveInt = (value?: string): number | null => {
 };
 
 const DEFAULT_FACTORY_DEPLOY_REPEATS_BY_CHAIN: Record<ChainType, number> = {
-  mainnet: 2,
+  mainnet: 3,
   sepolia: 1,
   slot: 1,
   slottest: 1,
@@ -88,6 +83,11 @@ export const getDefaultBlitzRegistrationConfig = (chain: ChainType): BlitzRegist
 // Public API: reuse runtime helper for SQL base URL
 export const getFactorySqlBaseUrl = (chain: Chain) => getFactorySqlBaseUrlRuntime(chain);
 
+// Bank creation config (eternum only)
+export const BANK_STEPS_FROM_CENTER = 15 * 21;
+export const BANK_NAME_PREFIX = "Central Bank";
+export const BANK_COUNT = 6;
+
 // Torii RPC per environment (admin usage)
 export const getRpcUrlForChain = (chain: Chain | ChainType): string => {
   switch (chain) {
@@ -96,7 +96,7 @@ export const getRpcUrlForChain = (chain: Chain | ChainType): string => {
     case "sepolia":
       return `${CARTRIDGE_API_BASE}/x/starknet/sepolia`;
     case "slot":
-      return `${CARTRIDGE_API_BASE}/x/eternum-blitz-slot-3/katana`;
+      return `${CARTRIDGE_API_BASE}/x/eternum-blitz-slot-4/katana`;
     case "slottest":
       return `${CARTRIDGE_API_BASE}/x/eternum-blitz-slot-test/katana`;
     default:

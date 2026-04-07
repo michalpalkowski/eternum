@@ -31,7 +31,35 @@ describe("Worldmap lifecycle baseline", () => {
     fixture.destroy();
 
     expect(fixture.switchOffCalls).toBe(1);
+    expect(fixture.interactionResetCalls).toBe(1);
     expect(fixture.listenerRemoves.length).toBe(1);
+  });
+
+  it("destroys worldmap-owned managers and FX systems during teardown", () => {
+    const fixture = createWorldmapLifecycleFixture();
+
+    fixture.setup();
+    fixture.destroy();
+
+    expect(fixture.destroyCalls.armyManager).toBe(1);
+    expect(fixture.destroyCalls.structureManager).toBe(1);
+    expect(fixture.destroyCalls.chestManager).toBe(1);
+    expect(fixture.destroyCalls.fxManager).toBe(1);
+    expect(fixture.destroyCalls.resourceFXManager).toBe(1);
+  });
+
+  it("installs and removes worldmap debug hooks symmetrically", () => {
+    const fixture = createWorldmapLifecycleFixture();
+
+    fixture.setup();
+
+    expect(typeof fixture.debugWindow.testMaterialSharing).toBe("function");
+    expect(typeof fixture.debugWindow.testTroopDiffFx).toBe("function");
+
+    fixture.destroy();
+
+    expect("testMaterialSharing" in fixture.debugWindow).toBe(false);
+    expect("testTroopDiffFx" in fixture.debugWindow).toBe(false);
   });
 
   it("detaches urlChanged listener when switching off to avoid inactive-scene callbacks", () => {
@@ -42,6 +70,15 @@ describe("Worldmap lifecycle baseline", () => {
 
     expect(fixture.listenerRemoves.length).toBe(1);
     expect(fixture.listenerRemoves[0].event).toBe("urlChanged");
+  });
+
+  it("resets interaction selection exactly once during switch-off", () => {
+    const fixture = createWorldmapLifecycleFixture();
+
+    fixture.setup();
+    fixture.switchOff();
+
+    expect(fixture.interactionResetCalls).toBe(1);
   });
 
   it("short-circuits requestChunkRefresh when the worldmap scene is switched off", () => {

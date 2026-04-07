@@ -17,9 +17,27 @@ interface ResolveMovementProgressUpdateResult {
   shouldCompletePath: boolean;
 }
 
+interface ResolveJourneyProgressUpdateInput {
+  currentProgress: number;
+  totalLength: number;
+  speed: number;
+  deltaTime: number;
+}
+
+interface ResolveJourneyProgressUpdateResult {
+  nextProgress: number;
+  isComplete: boolean;
+}
+
 interface ShouldSwitchModelForPositionInput<TModel> {
   currentModel: TModel | undefined;
   resolvedModel: TModel;
+}
+
+interface RaycastIntersectionLike<TMesh> {
+  distance: number;
+  mesh: TMesh;
+  instanceId: number | undefined;
 }
 
 export function resolveRotationUpdate(input: ResolveRotationUpdateInput): number {
@@ -50,4 +68,33 @@ export function resolveMovementProgressUpdate(
 
 export function shouldSwitchModelForPosition<TModel>(input: ShouldSwitchModelForPositionInput<TModel>): boolean {
   return input.currentModel !== input.resolvedModel;
+}
+
+export function resolveNearestIntersection<TMesh>(
+  current: RaycastIntersectionLike<TMesh> | undefined,
+  candidate: RaycastIntersectionLike<TMesh>,
+): RaycastIntersectionLike<TMesh> {
+  if (!current || candidate.distance < current.distance) {
+    return candidate;
+  }
+
+  return current;
+}
+
+export function resolveJourneyProgressUpdate(
+  input: ResolveJourneyProgressUpdateInput,
+): ResolveJourneyProgressUpdateResult {
+  const { currentProgress, totalLength, speed, deltaTime } = input;
+
+  if (!Number.isFinite(totalLength) || totalLength <= 0) {
+    return { nextProgress: 1, isComplete: true };
+  }
+
+  const progressStep = (speed * deltaTime) / totalLength;
+  const nextProgress = currentProgress + progressStep;
+
+  return {
+    nextProgress,
+    isComplete: nextProgress >= 1,
+  };
 }

@@ -1,5 +1,7 @@
 import { create } from "zustand";
+import { toast } from "sonner";
 
+import { AudioManager } from "@/audio/core/AudioManager";
 import { RealtimeClient } from "@bibliothecadao/types";
 import type {
   DirectMessage,
@@ -528,6 +530,10 @@ export const useRealtimeChatStore = create<RealtimeChatStore>((set, get) => ({
       const isOwnMessage = matchesIdentityAlias(identity, normalizedMessage.sender.playerId);
       const shouldIncrement = !isOwnMessage && replacementIndex === -1 && (!isShellOpen || !isActiveZone);
 
+      if (shouldIncrement) {
+        AudioManager.getInstance().play("ui.msg_receive");
+      }
+
       const unreadCount = isShellOpen && isActiveZone ? 0 : zoneState.unreadCount + (shouldIncrement ? 1 : 0);
       const nextUnreadTotal = shouldIncrement ? unreadWorldTotal + 1 : unreadWorldTotal;
 
@@ -555,6 +561,15 @@ export const useRealtimeChatStore = create<RealtimeChatStore>((set, get) => ({
       const isActiveThread = activeThreadId === normalizedMessage.threadId;
       const shouldIncrement = !isOwnMessage && (!isShellOpen || !isActiveThread);
       const unreadCount = shouldIncrement ? threadState.unreadCount + 1 : threadState.unreadCount;
+
+      if (shouldIncrement) {
+        AudioManager.getInstance().play("ui.msg_receive");
+        const { onlinePlayers } = get();
+        const senderName =
+          onlinePlayers[normalizedMessage.senderId]?.displayName ?? normalizedMessage.senderId.slice(0, 8);
+        const preview = normalizedMessage.content.slice(0, 60);
+        toast(`${senderName}: ${preview}`);
+      }
 
       const updatedAt =
         normalizedMessage.createdAt instanceof Date
@@ -784,6 +799,7 @@ export const useRealtimeChatStore = create<RealtimeChatStore>((set, get) => ({
 
       try {
         client.send(message);
+        AudioManager.getInstance().play("ui.msg_send");
       } catch (error) {
         set((state) => {
           const zoneState = state.worldZones[zoneId];
@@ -816,6 +832,7 @@ export const useRealtimeChatStore = create<RealtimeChatStore>((set, get) => ({
         },
       };
       client.send(message);
+      AudioManager.getInstance().play("ui.msg_send");
     },
     acknowledgeDirectRead: async (receipt: DirectMessageReadReceipt) => {
       const { client } = get();

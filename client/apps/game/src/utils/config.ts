@@ -1,9 +1,15 @@
-import { Chain, getConfigFromNetwork } from "@config";
+import { Chain, GameType, getConfigFromNetwork } from "@config";
 import { env } from "./../../env";
 
-export const ETERNUM_CONFIG = () => {
-  const config = getConfigFromNetwork(env.VITE_PUBLIC_CHAIN! as Chain);
-  return config;
+type ConfigResolutionOptions = {
+  chain?: Chain;
+  gameType?: GameType;
+};
+
+export const ETERNUM_CONFIG = (options: ConfigResolutionOptions = {}) => {
+  const chain = options.chain ?? (env.VITE_PUBLIC_CHAIN as Chain);
+  const gameType = options.gameType ?? ((env.VITE_PUBLIC_GAME_TYPE as GameType) || "eternum");
+  return getConfigFromNetwork(chain, gameType);
 };
 
 export const TORII_SETTING = async (): Promise<string> => {

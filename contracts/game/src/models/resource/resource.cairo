@@ -1,3 +1,4 @@
+use core::array::SpanTrait;
 use core::fmt::{Display, Error, Formatter};
 use core::num::traits::zero::Zero;
 use dojo::model::{Model, ModelStorage};
@@ -119,6 +120,18 @@ pub impl TroopResourceImpl of TroopResourceTrait {
             || resource_type == ResourceTypes::PALADIN_T1
             || resource_type == ResourceTypes::PALADIN_T2
             || resource_type == ResourceTypes::PALADIN_T3
+    }
+
+    fn contains_troops(resources: Span<(u8, u128)>) -> bool {
+        let mut index = 0;
+        while index < resources.len() {
+            let (resource_type, _) = *resources.at(index);
+            if Self::is_troop(resource_type) {
+                return true;
+            }
+            index += 1;
+        }
+        false
     }
 
     fn is_t2_troop(resource_type: u8) -> bool {
@@ -251,6 +264,9 @@ pub struct Resource {
     RELIC_E16_BALANCE: u128,
     RELIC_E17_BALANCE: u128,
     RELIC_E18_BALANCE: u128,
+    RESEARCH_BALANCE: u128,
+    // Bitcoin Mine Resources
+    SATOSHI_BALANCE: u128,
     weight: Weight,
     STONE_PRODUCTION: Production,
     COAL_PRODUCTION: Production,
@@ -290,6 +306,8 @@ pub struct Resource {
     FISH_PRODUCTION: Production,
     LORDS_PRODUCTION: Production,
     ESSENCE_PRODUCTION: Production,
+    RESEARCH_PRODUCTION: Production,
+    SATOSHI_PRODUCTION: Production,
 }
 
 
@@ -307,6 +325,7 @@ pub impl ResourceImpl of ResourceTrait {
     }
 
     fn read_production(ref world: WorldStorage, entity_id: ID, resource_type: u8) -> Production {
+        // Skip production for resources that don't have production mechanics
         if RelicResourceImpl::is_relic(resource_type) || resource_type == ResourceTypes::LORDS {
             return Zero::zero();
         }
@@ -323,6 +342,7 @@ pub impl ResourceImpl of ResourceTrait {
     }
 
     fn write_production(ref world: WorldStorage, entity_id: ID, resource_type: u8, production: Production) {
+        // Skip production for resources that don't have production mechanics
         if RelicResourceImpl::is_relic(resource_type) || resource_type == ResourceTypes::LORDS {
             return;
         }
@@ -401,6 +421,9 @@ pub impl ResourceImpl of ResourceTrait {
             54 => selector!("RELIC_E16_BALANCE"),
             55 => selector!("RELIC_E17_BALANCE"),
             56 => selector!("RELIC_E18_BALANCE"),
+            57 => selector!("RESEARCH_BALANCE"),
+            // Bitcoin Mine Resources
+            58 => selector!("SATOSHI_BALANCE"),
             _ => panic!("Invalid resource type"),
         }
     }
@@ -446,6 +469,8 @@ pub impl ResourceImpl of ResourceTrait {
             36 => selector!("FISH_PRODUCTION"),
             37 => selector!("LORDS_PRODUCTION"),
             38 => selector!("ESSENCE_PRODUCTION"),
+            57 => selector!("RESEARCH_PRODUCTION"),
+            58 => selector!("SATOSHI_PRODUCTION"),
             _ => panic!("Invalid resource type"),
         }
     }

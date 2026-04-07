@@ -1,14 +1,23 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+// @vitest-environment node
+
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@dojoengine/sdk", () => ({
+  AndComposeClause: vi.fn(() => ({
+    build: () => ({ mocked: true }),
+  })),
+  MemberClause: vi.fn(),
+}));
+
+vi.mock("@dojoengine/torii-client", () => ({
+  PatternMatching: {},
+}));
 
 vi.mock("./sync", () => ({
   syncEntitiesDebounced: vi.fn(),
 }));
-vi.mock("@dojoengine/state", () => ({
-  getEntities: vi.fn(),
-}));
 
 import { syncEntitiesDebounced } from "./sync";
-import { getEntities } from "@dojoengine/state";
 import { ToriiStreamManager, type BoundsDescriptor } from "./torii-stream-manager";
 
 function deferred<T>() {
@@ -30,40 +39,14 @@ const descriptor = (minCol: number): BoundsDescriptor => ({
 });
 
 describe("ToriiStreamManager", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("hydrates existing bounds entities before stream takeover", async () => {
-    const syncMock = vi.mocked(syncEntitiesDebounced);
-    const getEntitiesMock = vi.mocked(getEntities);
-    const cancel = vi.fn();
-    syncMock.mockImplementation(async () => ({ cancel }));
-    getEntitiesMock.mockResolvedValue(undefined);
-
-    const manager = new ToriiStreamManager({
-      client: {} as any,
-      setup: { network: { contractComponents: [] } } as any,
-      logging: false,
-    });
-
-    const result = await manager.switchBounds(descriptor(0));
-
-    expect(result.outcome).toBe("applied");
-    expect(getEntitiesMock).toHaveBeenCalledTimes(1);
-    expect(syncMock).toHaveBeenCalledTimes(1);
-  });
-
   it("reports skipped outcome when switching to an unchanged signature", async () => {
     const syncMock = vi.mocked(syncEntitiesDebounced);
-    const getEntitiesMock = vi.mocked(getEntities);
     const cancel = vi.fn();
     syncMock.mockImplementation(async () => ({ cancel }));
-    getEntitiesMock.mockResolvedValue(undefined);
 
     const manager = new ToriiStreamManager({
       client: {} as any,
-      setup: { network: { contractComponents: [] } } as any,
+      setup: {} as any,
       logging: false,
     });
 
@@ -77,7 +60,6 @@ describe("ToriiStreamManager", () => {
 
   it("keeps the newest bounds subscription active when switches race", async () => {
     const syncMock = vi.mocked(syncEntitiesDebounced);
-    const getEntitiesMock = vi.mocked(getEntities);
     const firstSwitch = deferred<{ cancel: () => void }>();
     const secondSwitch = deferred<{ cancel: () => void }>();
 
@@ -87,11 +69,10 @@ describe("ToriiStreamManager", () => {
     syncMock
       .mockImplementationOnce(async () => firstSwitch.promise)
       .mockImplementationOnce(async () => secondSwitch.promise);
-    getEntitiesMock.mockResolvedValue(undefined);
 
     const manager = new ToriiStreamManager({
       client: {} as any,
-      setup: { network: { contractComponents: [] } } as any,
+      setup: {} as any,
       logging: false,
     });
 
@@ -116,7 +97,6 @@ describe("ToriiStreamManager", () => {
 
   it("drops stale middle switch during A->B->A bounds churn", async () => {
     const syncMock = vi.mocked(syncEntitiesDebounced);
-    const getEntitiesMock = vi.mocked(getEntities);
     const firstSwitch = deferred<{ cancel: () => void }>();
     const secondSwitch = deferred<{ cancel: () => void }>();
     const thirdSwitch = deferred<{ cancel: () => void }>();
@@ -129,11 +109,10 @@ describe("ToriiStreamManager", () => {
       .mockImplementationOnce(async () => firstSwitch.promise)
       .mockImplementationOnce(async () => secondSwitch.promise)
       .mockImplementationOnce(async () => thirdSwitch.promise);
-    getEntitiesMock.mockResolvedValue(undefined);
 
     const manager = new ToriiStreamManager({
       client: {} as any,
-      setup: { network: { contractComponents: [] } } as any,
+      setup: {} as any,
       logging: false,
     });
 
@@ -157,109 +136,76 @@ describe("ToriiStreamManager", () => {
     expect(cancelThird).toHaveBeenCalledTimes(1);
   });
 
-  it("rolls back applied subscription when snapshot hydration fails", async () => {
+  it("passes the subscription setup timeout through to syncEntitiesDebounced", async () => {
     const syncMock = vi.mocked(syncEntitiesDebounced);
-    const getEntitiesMock = vi.mocked(getEntities);
-    const cancelFirst = vi.fn();
-    const cancelSecond = vi.fn();
-
-    syncMock
-      .mockImplementationOnce(async () => ({ cancel: cancelFirst }))
-      .mockImplementationOnce(async () => ({ cancel: cancelSecond }));
-    getEntitiesMock
-      .mockRejectedValueOnce(new Error("hydrate failed"))
-      .mockResolvedValueOnce(undefined);
+    syncMock.mockImplementationOnce(async (...args) => {
+      const options = args[5] as { subscriptionSetupTimeoutMs?: number } | undefined;
+      throw new Error(`timeout:${options?.subscriptionSetupTimeoutMs ?? "missing"}`);
+    });
 
     const manager = new ToriiStreamManager({
       client: {} as any,
-      setup: { network: { contractComponents: [] } } as any,
+      setup: {} as any,
       logging: false,
+      subscriptionSetupTimeoutMs: 25,
     });
 
-    await expect(manager.switchBounds(descriptor(0))).rejects.toThrow("hydrate failed");
-    expect(cancelFirst).toHaveBeenCalledTimes(1);
+    await expect(manager.switchBounds(descriptor(0))).rejects.toThrow("timeout:25");
+  });
 
-    const retryResult = await manager.switchBounds(descriptor(0));
-    expect(retryResult.outcome).toBe("applied");
+  it("allows a later bounds switch to recover after a timed out setup", async () => {
+    const syncMock = vi.mocked(syncEntitiesDebounced);
+    const cancelRecovered = vi.fn();
+
+    syncMock.mockRejectedValueOnce(new Error("timeout:25")).mockResolvedValueOnce({ cancel: cancelRecovered });
+
+    const manager = new ToriiStreamManager({
+      client: {} as any,
+      setup: {} as any,
+      logging: false,
+      subscriptionSetupTimeoutMs: 25,
+    });
+
+    await expect(manager.switchBounds(descriptor(0))).rejects.toThrow("timeout:25");
+
+    const recovered = await manager.switchBounds(descriptor(24));
 
     manager.cancelCurrentSubscription();
-    expect(cancelSecond).toHaveBeenCalledTimes(1);
+
+    expect(recovered.outcome).toBe("applied");
+    expect(cancelRecovered).toHaveBeenCalledTimes(1);
   });
 
-  it("times out sync subscription setup and cancels late subscription", async () => {
-    vi.useFakeTimers();
-    try {
-      const syncMock = vi.mocked(syncEntitiesDebounced);
-      const getEntitiesMock = vi.mocked(getEntities);
-      const lateSubscription = deferred<{ cancel: () => void }>();
-      const cancelLate = vi.fn();
+  it("reports subscription setup timeouts with the switch request id", async () => {
+    const syncMock = vi.mocked(syncEntitiesDebounced);
+    const onSubscriptionSetupTimeout = vi.fn();
 
-      syncMock.mockImplementationOnce(async () => lateSubscription.promise);
-      getEntitiesMock.mockResolvedValue(undefined);
-
-      const manager = new ToriiStreamManager({
-        client: {} as any,
-        setup: { network: { contractComponents: [] } } as any,
-        logging: false,
-        switchTimeoutMs: 1000,
+    syncMock.mockImplementationOnce(async (...args) => {
+      const options = args[5] as
+        | {
+            onSubscriptionSetupTimeout?: (info: { label: string; timeoutMs: number }) => void;
+          }
+        | undefined;
+      options?.onSubscriptionSetupTimeout?.({
+        label: "event subscription",
+        timeoutMs: 25,
       });
+      throw new Error("timeout:25");
+    });
 
-      const pendingSwitch = manager.switchBounds(descriptor(0));
-      const timeoutExpectation = expect(pendingSwitch).rejects.toThrow(
-        "sync subscription setup (requestId=1) timed out after 1000ms",
-      );
-      await vi.advanceTimersByTimeAsync(1000);
-      await timeoutExpectation;
+    const manager = new ToriiStreamManager({
+      client: {} as any,
+      setup: {} as any,
+      logging: false,
+      subscriptionSetupTimeoutMs: 25,
+      onSubscriptionSetupTimeout,
+    });
 
-      lateSubscription.resolve({ cancel: cancelLate });
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(cancelLate).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("times out bounds snapshot hydration and clears active subscription signature", async () => {
-    vi.useFakeTimers();
-    try {
-      const syncMock = vi.mocked(syncEntitiesDebounced);
-      const getEntitiesMock = vi.mocked(getEntities);
-      const cancelFirst = vi.fn();
-      const cancelSecond = vi.fn();
-      const stuckHydration = deferred<void>();
-
-      syncMock
-        .mockImplementationOnce(async () => ({ cancel: cancelFirst }))
-        .mockImplementationOnce(async () => ({ cancel: cancelSecond }));
-      getEntitiesMock
-        .mockImplementationOnce(async () => stuckHydration.promise)
-        .mockResolvedValueOnce(undefined);
-
-      const manager = new ToriiStreamManager({
-        client: {} as any,
-        setup: { network: { contractComponents: [] } } as any,
-        logging: false,
-        switchTimeoutMs: 1000,
-      });
-
-      const firstSwitch = manager.switchBounds(descriptor(0));
-      const timeoutExpectation = expect(firstSwitch).rejects.toThrow(
-        "bounds snapshot hydration (requestId=1) timed out after 1000ms",
-      );
-      await vi.advanceTimersByTimeAsync(1000);
-      await timeoutExpectation;
-      expect(cancelFirst).toHaveBeenCalledTimes(1);
-
-      stuckHydration.resolve(undefined);
-      await Promise.resolve();
-
-      const retry = await manager.switchBounds(descriptor(0));
-      expect(retry.outcome).toBe("applied");
-      manager.cancelCurrentSubscription();
-      expect(cancelSecond).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.useRealTimers();
-    }
+    await expect(manager.switchBounds(descriptor(0))).rejects.toThrow("timeout:25");
+    expect(onSubscriptionSetupTimeout).toHaveBeenCalledWith({
+      label: "event subscription",
+      timeoutMs: 25,
+      requestId: 1,
+    });
   });
 });

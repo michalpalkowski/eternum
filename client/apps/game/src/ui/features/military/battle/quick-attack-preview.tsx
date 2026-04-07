@@ -1,14 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 
+import { playUnitCommandSound } from "@/audio/unit-command-audio";
+import { useBlockTimestamp } from "@/hooks/helpers/use-block-timestamp";
 import { useAccountStore } from "@/hooks/store/use-account-store";
 import { useUIStore } from "@/hooks/store/use-ui-store";
+import {
+  createPendingWorldmapFxKey,
+  dispatchPendingWorldmapFxStart,
+  dispatchPendingWorldmapFxStop,
+} from "@/utils/pending-worldmap-fx";
 import Button from "@/ui/design-system/atoms/button";
 import {
   Biome,
   CombatSimulator,
   configManager,
+  DEFAULT_COORD_ALT,
   formatTime,
-  getBlockTimestamp,
   getEntityIdFromKeys,
   getGuardsByStructure,
   StaminaManager,
@@ -24,6 +31,7 @@ import { TargetType } from "./types";
 import {
   getDirectionBetweenAdjacentHexes,
   RESOURCE_PRECISION,
+  TickIds,
   type ActorType,
   type ID,
   type RelicEffectWithEndTick,
@@ -37,6 +45,7 @@ interface ActorSummary {
   type: ActorType;
   id: ID;
   hex: { x: number; y: number };
+  alt?: boolean;
 }
 
 interface QuickAttackPreviewProps {
@@ -88,6 +97,7 @@ export const QuickAttackPreview = ({ attacker, target }: QuickAttackPreviewProps
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [currentTime, setCurrentTime] = useState(() => Math.floor(Date.now() / 1000));
+  const { currentArmiesTick, armiesTickTimeRemaining } = useBlockTimestamp();
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -103,7 +113,7 @@ export const QuickAttackPreview = ({ attacker, target }: QuickAttackPreviewProps
     target: targetData,
     targetResources,
     isLoading,
-  } = useAttackTargetData(attacker.id, target.hex);
+  } = useAttackTargetData(attacker.id, target.hex, target.alt ?? DEFAULT_COORD_ALT);
 
   const combatConfig = useMemo(() => configManager.getCombatConfig(), []);
   const biome = useMemo(() => Biome.getBiome(target.hex.x, target.hex.y), [target.hex.x, target.hex.y]);
@@ -128,8 +138,6 @@ export const QuickAttackPreview = ({ attacker, target }: QuickAttackPreviewProps
   }, [attackerType, attacker.id, Structure]);
 
   const attackerStamina = useMemo(() => {
-    const { currentArmiesTick } = getBlockTimestamp();
-
     if (attackerType === AttackerType.Structure) {
       const activeGuard = structureGuards[0];
       if (!activeGuard || !activeGuard.troops.stamina) return 0n;
@@ -137,7 +145,31 @@ export const QuickAttackPreview = ({ attacker, target }: QuickAttackPreviewProps
     }
 
     return new StaminaManager(components, attacker.id).getStamina(currentArmiesTick).amount;
-  }, [attackerType, structureGuards, components, attacker.id]);
+  }, [attackerType, structureGuards, components, attacker.id, currentArmiesTick]);
+
+  const attackerStaminaValue = Number(attackerStamina);
+  const requiredAttackStamina = Number(combatConfig.stamina_attack_req);
+
+  const staminaWaitSeconds = useMemo(() => {
+    if (attackerStaminaValue >= requiredAttackStamina) return 0;
+
+    const deficit = requiredAttackStamina - attackerStaminaValue;
+    const refillPerTick = Number(configManager.getRefillPerTick());
+    const tickDuration = Number(configManager.getTick(TickIds.Armies));
+
+    if (!Number.isFinite(deficit) || !Number.isFinite(refillPerTick) || !Number.isFinite(tickDuration)) {
+      return null;
+    }
+    if (deficit <= 0) return 0;
+    if (refillPerTick <= 0 || tickDuration <= 0) return null;
+
+    const ticksNeeded = Math.ceil(deficit / refillPerTick);
+    const timeToNextArmiesTick = Math.max(0, Math.ceil(armiesTickTimeRemaining));
+
+    if (ticksNeeded <= 0) return 0;
+
+    return timeToNextArmiesTick + Math.max(0, ticksNeeded - 1) * tickDuration;
+  }, [attackerStaminaValue, requiredAttackStamina, armiesTickTimeRemaining]);
 
   const attackerArmyData: { troops: Troops } | null = useMemo(() => {
     if (attackerType === AttackerType.Structure) {
@@ -238,6 +270,8 @@ export const QuickAttackPreview = ({ attacker, target }: QuickAttackPreviewProps
   const attackDisabled =
     (hasDefenders && (attackerOnCooldown || attackerStamina < combatConfig.stamina_attack_req)) || !attackerArmyData;
 
+  const isLowStamina = hasDefenders && !attackerOnCooldown && attackerStamina < combatConfig.stamina_attack_req;
+
   const attackButtonLabel = (() => {
     if (!attackerArmyData) return "No troops selected";
     if (!hasDefenders) return "Claim";
@@ -275,14 +309,26 @@ export const QuickAttackPreview = ({ attacker, target }: QuickAttackPreviewProps
   const handleAttack = async () => {
     if (!selectedHex || !targetData) return;
 
+    let pendingFxKey: string | null = null;
     try {
       setIsSubmitting(true);
+
+      pendingFxKey = createPendingWorldmapFxKey("attack");
+      dispatchPendingWorldmapFxStart({
+        key: pendingFxKey,
+        kind: "attack",
+        attackerId: attacker.id,
+        defenderId: targetData.id,
+        attackerHex: { col: selectedHex.col, row: selectedHex.row },
+        targetHex: { col: target.hex.x, row: target.hex.y },
+      });
 
       if (attackerType === AttackerType.Structure) {
         const direction = getDirectionBetweenAdjacentHexes(selectedHex, { col: target.hex.x, row: target.hex.y });
         const guardSlot = structureGuards[0]?.slot;
         if (direction === null || guardSlot === undefined) return;
 
+        playUnitCommandSound("attack");
         await attack_guard_vs_explorer({
           signer: account,
           structure_id: attacker.id,
@@ -294,6 +340,7 @@ export const QuickAttackPreview = ({ attacker, target }: QuickAttackPreviewProps
         const direction = getDirectionBetweenAdjacentHexes(selectedHex, { col: target.hex.x, row: target.hex.y });
         if (direction === null) return;
 
+        playUnitCommandSound("attack");
         await attack_explorer_vs_explorer({
           signer: account,
           aggressor_id: attacker.id,
@@ -305,6 +352,7 @@ export const QuickAttackPreview = ({ attacker, target }: QuickAttackPreviewProps
         const direction = getDirectionBetweenAdjacentHexes(selectedHex, { col: target.hex.x, row: target.hex.y });
         if (direction === null) return;
 
+        playUnitCommandSound("attack");
         await attack_explorer_vs_guard({
           signer: account,
           explorer_id: attacker.id,
@@ -316,6 +364,9 @@ export const QuickAttackPreview = ({ attacker, target }: QuickAttackPreviewProps
       updateSelectedEntityId(null);
       toggleModal(null);
     } catch (error) {
+      if (pendingFxKey) {
+        dispatchPendingWorldmapFxStop({ key: pendingFxKey });
+      }
       console.error("Quick attack failed", error);
     } finally {
       setIsSubmitting(false);
@@ -428,6 +479,14 @@ export const QuickAttackPreview = ({ attacker, target }: QuickAttackPreviewProps
               <span>{attackButtonLabel}</span>
               {attackerOnCooldown && attackerCooldownRemaining > 0 && (
                 <div className="mt-1 text-[11px] text-gold/70">{formatTime(attackerCooldownRemaining)} remaining</div>
+              )}
+              {isLowStamina && (
+                <div className="mt-1 text-[11px] text-gold/70">
+                  <div>
+                    Current: {attackerStaminaValue} / Required: {requiredAttackStamina}
+                  </div>
+                  {staminaWaitSeconds !== null && <div>Ready in: {formatTime(staminaWaitSeconds)}</div>}
+                </div>
               )}
             </div>
           )}

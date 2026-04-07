@@ -1,4 +1,11 @@
 import { useGameModeConfig } from "@/config/game-modes/use-game-mode-config";
+import { useOwnedMilitaryStructureInfos } from "@/hooks/helpers/use-owned-structure-info";
+import { useBlockTimestamp } from "@/hooks/helpers/use-block-timestamp";
+import {
+  createPendingWorldmapFxKey,
+  dispatchPendingWorldmapFxStart,
+  dispatchPendingWorldmapFxStop,
+} from "@/utils/pending-worldmap-fx";
 import { sqlApi } from "@/services/api";
 import { SecondaryPopup } from "@/ui/design-system/molecules/secondary-popup";
 import { useUIStore } from "@/hooks/store/use-ui-store";
@@ -12,12 +19,7 @@ import {
   getEntityIdFromKeys,
   getTroopResourceId,
 } from "@bibliothecadao/eternum";
-import {
-  useDojo,
-  useExplorersByStructure,
-  usePlayerOwnedRealmsInfo,
-  usePlayerOwnedVillagesInfo,
-} from "@bibliothecadao/react";
+import { useDojo, useExplorersByStructure } from "@bibliothecadao/react";
 import {
   Direction,
   DISPLAYED_SLOT_NUMBER_MAP,
@@ -40,8 +42,10 @@ import {
   getUnlockedGuardSlots,
   MAX_GUARD_SLOT_COUNT,
 } from "../../utils/defense-slot-utils";
+import { getGuardStaminaSnapshot } from "../../utils/guard-stamina";
 import { ActionFooter } from "./action-footer";
 import { ArmyTypeToggle } from "./army-type-toggle";
+import { DeploymentStrengthSummary } from "../deployment-strength-summary";
 import { DefenseSlotSelection } from "./defense-slot-selection";
 import { DirectionSelection } from "./direction-selection";
 import { TroopCountSelector } from "./troop-count-selector";
@@ -82,24 +86,17 @@ export const UnifiedArmyCreationModal = ({
   } = useDojo();
   const queryClient = useQueryClient();
   const mode = useGameModeConfig();
-
-  const playerRealms = usePlayerOwnedRealmsInfo();
-  const playerVillages = usePlayerOwnedVillagesInfo();
+  const playerStructures = useOwnedMilitaryStructureInfos();
   const selectedStructureId = useUIStore((state) => state.structureEntityId);
-
-  const playerStructures = useMemo(() => {
-    return [...playerRealms, ...playerVillages]
-      .filter((realm) => {
-        const maxAttack = realm.structure.base.troop_max_explorer_count || 0;
-        const maxDefense = realm.structure.base.troop_max_guard_count || 0;
-        return maxAttack > 0 || maxDefense > 0;
-      })
-      .toSorted((a, b) => {
+  const sortedPlayerStructures = useMemo(
+    () =>
+      playerStructures.toSorted((a, b) => {
         const nameA = mode.structure.getName(a.structure).name;
         const nameB = mode.structure.getName(b.structure).name;
         return nameA.localeCompare(nameB);
-      });
-  }, [playerRealms, playerVillages, mode]);
+      }),
+    [playerStructures, mode],
+  );
 
   const [isLoading, setIsLoading] = useState(false);
   const [freeDirections, setFreeDirections] = useState<Direction[]>([]);
@@ -114,6 +111,7 @@ export const UnifiedArmyCreationModal = ({
   const [troopCount, setTroopCount] = useState(0);
   const [guardSlot, setGuardSlot] = useState(initialGuardSlot ?? 0);
   const [armyType, setArmyType] = useState(isExplorer);
+  const { currentArmiesTick } = useBlockTimestamp();
   const currentDefaultTick = getBlockTimestamp().currentDefaultTick;
   const previousStructureIdRef = useRef<number | null>(null);
 
@@ -175,8 +173,8 @@ export const UnifiedArmyCreationModal = ({
       return resolvedSelectedStructureId;
     }
 
-    return playerStructures[0]?.entityId ?? 0;
-  }, [shouldFollowSelection, resolvedSelectedStructureId, resolvedStructureIdProp, playerStructures]);
+    return sortedPlayerStructures[0]?.entityId ?? 0;
+  }, [shouldFollowSelection, resolvedSelectedStructureId, resolvedStructureIdProp, sortedPlayerStructures]);
 
   const structureComponent = useMemo(() => {
     if (!activeStructureId) return null;
@@ -184,8 +182,8 @@ export const UnifiedArmyCreationModal = ({
   }, [components, activeStructureId]);
 
   const activeStructureInfo = useMemo(
-    () => playerStructures.find((realm) => realm.entityId === activeStructureId),
-    [playerStructures, activeStructureId],
+    () => sortedPlayerStructures.find((realm) => realm.entityId === activeStructureId),
+    [sortedPlayerStructures, activeStructureId],
   );
 
   const structureBase = activeStructureInfo?.structure.base ?? structureComponent?.base;
@@ -264,20 +262,27 @@ export const UnifiedArmyCreationModal = ({
       }
       const troops = guard.troops;
       const count = troops && troops.count !== undefined ? divideByPrecision(Number(troops.count)) : undefined;
+      const category = troops?.category as TroopType | undefined;
+      const tier = troops?.tier as TroopTier | undefined;
+      const staminaSnapshot = getGuardStaminaSnapshot(troops, currentArmiesTick);
+      const staminaCurrent = staminaSnapshot?.current;
+      const staminaMax = staminaSnapshot?.max;
 
       map.set(numericSlot, {
         slot: guard.slot,
         troops: troops
           ? {
-              category: troops.category as TroopType | undefined,
-              tier: troops.tier as TroopTier | undefined,
+              category,
+              tier,
               count,
+              staminaCurrent,
+              staminaMax,
             }
           : null,
       });
     });
     return map;
-  }, [guardsData, availableGuardSlotSet]);
+  }, [guardsData, availableGuardSlotSet, currentArmiesTick]);
 
   const selectedGuard = guardsBySlot.get(guardSlot);
   const selectedGuardCountValue = Number(selectedGuard?.troops?.count ?? 0);
@@ -288,6 +293,7 @@ export const UnifiedArmyCreationModal = ({
         ? troopCapacityLimit
         : Math.max(troopCapacityLimit - selectedGuardCount, 0)
       : null;
+  const projectedTroopCountForSummary = armyType ? troopCount : selectedGuardCount + troopCount;
 
   const selectedGuardCategory = selectedGuard?.troops?.category as TroopType | undefined;
   const selectedGuardTier = selectedGuard?.troops?.tier as TroopTier | undefined;
@@ -511,12 +517,21 @@ export const UnifiedArmyCreationModal = ({
     if (!armyManager || troopCount <= 0) return;
 
     setIsLoading(true);
+    let pendingFxKey: string | null = null;
 
     try {
       if (armyType) {
         if (selectedDirection === null) {
           throw new Error("No direction selected");
         }
+        pendingFxKey = createPendingWorldmapFxKey("create-army");
+        dispatchPendingWorldmapFxStart({
+          key: pendingFxKey,
+          kind: "create-army",
+          structureId: activeStructureId,
+          direction: selectedDirection,
+          troopResourceId: getTroopResourceId(selectedTroopCombo.type, selectedTroopCombo.tier),
+        });
         await armyManager.createExplorerArmy(
           account,
           selectedTroopCombo.type,
@@ -556,6 +571,9 @@ export const UnifiedArmyCreationModal = ({
         }
       }
     } catch (error) {
+      if (pendingFxKey) {
+        dispatchPendingWorldmapFxStop({ key: pendingFxKey });
+      }
       console.error("Failed to create army:", error);
     } finally {
       setIsLoading(false);
@@ -631,7 +649,7 @@ export const UnifiedArmyCreationModal = ({
     !armyType && (!canInteractWithDefense || isDefenseSlotCreationBlocked || !isDefenseSlotCompatible);
 
   const actionLabel = armyType
-    ? "CREATE ATTACK ARMY"
+    ? "CREATE FIELD ARMY"
     : `ADD DEFENSE - ${GUARD_SLOT_NAMES[guardSlot as GuardSlot]?.toUpperCase()}`;
 
   const isActionDisabled =
@@ -653,7 +671,7 @@ export const UnifiedArmyCreationModal = ({
   };
   const handleTroopCountChange = (value: number) => setTroopCount(Math.max(0, Math.min(value, maxAffordable)));
 
-  const modalBaseTitle = armyType ? "Create Attack Army" : "Create Defense Army";
+  const modalBaseTitle = armyType ? "Create Field Army" : "Create Defense Army";
   const modalTitle = structureName ? `${structureName} - ${modalBaseTitle}` : modalBaseTitle;
   const toggleModal = useUIStore((state) => state.toggleModal);
   const handleClose = useCallback(() => {
@@ -690,6 +708,16 @@ export const UnifiedArmyCreationModal = ({
                 onChange={handleTroopCountChange}
                 capacityRemaining={capacityRemainingForSelector}
                 troopMaxSize={troopCapacityLimit ?? undefined}
+              />
+              <DeploymentStrengthSummary
+                className="mt-2"
+                structureLevel={structureLevel}
+                troopTier={selectedTroopCombo.tier}
+                troopCount={projectedTroopCountForSummary}
+                maxTroopSize={troopCapacityLimit}
+                capacityRemaining={capacityRemainingForSelector}
+                collapsible
+                defaultExpanded={false}
               />
             </div>
 

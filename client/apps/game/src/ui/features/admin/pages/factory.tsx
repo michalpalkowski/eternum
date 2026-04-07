@@ -4,7 +4,7 @@ import { buildWorldProfile, patchManifestWithFactory } from "@/runtime/world";
 import { Controller } from "@/ui/modules/controller/controller";
 import { ETERNUM_CONFIG } from "@/utils/config";
 import { EternumProvider } from "@bibliothecadao/provider";
-import type { Config as EternumConfig } from "@bibliothecadao/types";
+import { type Config as EternumConfig } from "@bibliothecadao/types";
 import {
   SetResourceFactoryConfig,
   setAgentConfig,
@@ -47,16 +47,18 @@ import XCircle from "lucide-react/dist/esm/icons/x-circle";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { shortString } from "starknet";
+import { useBootDocumentState } from "@/ui/modules/boot-loader";
 import { env } from "../../../../../env";
 import { AdminHeader } from "../components/admin-header";
 import { ShardAdminPanel } from "../../sharding/shard-admin-panel";
 import {
+  BANK_COUNT,
   CARTRIDGE_API_BASE,
   DEFAULT_NAMESPACE,
-  DEFAULT_VERSION,
   FACTORY_ADDRESSES,
   getDefaultBlitzRegistrationConfig,
   getDefaultMaxActionsForChain,
+  getDefaultVersion,
   getExplorerTxUrl,
   getFactoryDeployRepeatsForChain,
   getRpcUrlForChain,
@@ -67,7 +69,11 @@ import {
   generateFactoryCalldata,
   type FactoryConfigCalldataParts,
 } from "../services/factory-config";
-import { createIndexer as createIndexerService } from "../services/factory-indexer";
+import {
+  createIndexer as createIndexerService,
+  updateIndexerTier as updateIndexerTierService,
+} from "../services/factory-indexer";
+import { buildAdminBanksForMapCenterOffset, fetchWorldMapCenterOffset } from "../services/world-banks";
 import { buildWorldConfigForFactory } from "../services/world-config-builder";
 import { getManifestJsonString, type ChainType } from "../utils/manifest-loader";
 import {
@@ -91,6 +97,7 @@ type TxState = { status: "idle" | "running" | "success" | "error"; hash?: string
 type AutoDeployState = { current: number; total: number; status: "running" | "stopping" };
 type FactoryConfigCall = { entrypoint: string; calldata: any[] };
 type ConfigPreset = "sandbox" | "blitz-slot";
+type GameMode = "blitz" | "eternum";
 
 // Maximum hours in the future that a game start time can be set
 const MAX_START_TIME_HOURS = 50_000;
@@ -275,10 +282,13 @@ interface FactoryPageProps {
 }
 
 export const FactoryPage = ({ embedded = false }: FactoryPageProps = {}) => {
+  useBootDocumentState("app-ready");
+
   const navigate = useNavigate();
   const { account, accountName } = useAccountStore();
 
   const currentChain = env.VITE_PUBLIC_CHAIN as ChainType;
+  const deployProfileMode: GameMode = (env.VITE_PUBLIC_FORCE_GAME_MODE_ID as GameMode) ?? "eternum";
   const { refreshStatuses, checkIndexerExists, getWorldDeployedAddressLocal } = useFactoryAdmin(currentChain);
   const factoryDeployRepeats = getFactoryDeployRepeatsForChain(currentChain);
   const defaultBlitzRegistration = useMemo(() => getDefaultBlitzRegistrationConfig(currentChain), [currentChain]);
@@ -291,7 +301,7 @@ export const FactoryPage = ({ embedded = false }: FactoryPageProps = {}) => {
   } = useFactorySeries(currentChain as Chain, account?.address ?? null);
 
   const [factoryAddress, setFactoryAddress] = useState<string>("");
-  const [version, setVersion] = useState<string>(DEFAULT_VERSION);
+  const [version, setVersion] = useState<string>(getDefaultVersion(deployProfileMode));
   const [namespace, setNamespace] = useState<string>(DEFAULT_NAMESPACE);
   const [worldName, setWorldName] = useState<string>("");
   const [seriesName, setSeriesName] = useState<string>("");
@@ -335,14 +345,17 @@ export const FactoryPage = ({ embedded = false }: FactoryPageProps = {}) => {
   const [worldSeriesMetadata, setWorldSeriesMetadata] = useState<Record<string, WorldSeriesMetadata>>({});
   const [worldIndexerStatus, setWorldIndexerStatus] = useState<Record<string, boolean>>({});
   const [creatingIndexer, setCreatingIndexer] = useState<Record<string, boolean>>({});
+  const [updatingIndexerTier, setUpdatingIndexerTier] = useState<Record<string, string | null>>({});
   const [indexerActionErrors, setIndexerActionErrors] = useState<Record<string, string>>({});
   const [worldDeployedStatus, setWorldDeployedStatus] = useState<Record<string, boolean>>({});
+  const [worldBankStatus, setWorldBankStatus] = useState<Record<string, boolean>>({});
   const [verifyingDeployment, setVerifyingDeployment] = useState<Record<string, boolean>>({});
   const [autoDeployState, setAutoDeployState] = useState<Record<string, AutoDeployState>>({});
   const autoDeployCancelRef = useRef<Record<string, boolean>>({});
   // Per-world config execution state
   const [worldConfigOpen, setWorldConfigOpen] = useState<Record<string, boolean>>({});
   const [worldConfigTx, setWorldConfigTx] = useState<Record<string, TxState>>({});
+  const [createBanksTx, setCreateBanksTx] = useState<Record<string, TxState>>({});
   // Per-world season start override (epoch seconds)
   const [startMainAtOverrides, setStartMainAtOverrides] = useState<Record<string, number>>({});
   const [startSettlingAtOverrides, setStartSettlingAtOverrides] = useState<Record<string, number>>({});
@@ -366,6 +379,7 @@ export const FactoryPage = ({ embedded = false }: FactoryPageProps = {}) => {
   );
   const [factoryAddressOverrides, setFactoryAddressOverrides] = useState<Record<string, string>>({});
   const [singleRealmModeOverrides, setSingleRealmModeOverrides] = useState<Record<string, boolean>>({});
+  const [twoPlayerModeOverrides, setTwoPlayerModeOverrides] = useState<Record<string, boolean>>({});
   const [seasonBridgeCloseAfterEndSecondsOverrides, setSeasonBridgeCloseAfterEndSecondsOverrides] = useState<
     Record<string, string>
   >({});
@@ -384,6 +398,7 @@ export const FactoryPage = ({ embedded = false }: FactoryPageProps = {}) => {
   const [battleDelaySecondsOverrides, setBattleDelaySecondsOverrides] = useState<Record<string, string>>({});
   const [agentMaxCurrentCountOverrides, setAgentMaxCurrentCountOverrides] = useState<Record<string, string>>({});
   const [agentMaxLifetimeCountOverrides, setAgentMaxLifetimeCountOverrides] = useState<Record<string, string>>({});
+  const activeGameMode: GameMode = deployProfileMode;
 
   // Shared Eternum config (static values), manifest will be patched per-world at runtime
   const eternumConfig: EternumConfig = useMemo(() => ETERNUM_CONFIG(), []);
@@ -404,13 +419,17 @@ export const FactoryPage = ({ embedded = false }: FactoryPageProps = {}) => {
     [blitzFeeRecipientOverrides, defaultBlitzFeeRecipient],
   );
 
-  // Check indexer and deployment status for all stored worlds
+  // Check indexer, deployment, and bank status for all stored worlds
   const checkAllWorldStatuses = useCallback(async () => {
     const worlds = getStoredWorldNames();
-    const { indexerStatusMap, deployedStatusMap } = await refreshStatuses(worlds);
+    const { indexerStatusMap, deployedStatusMap, bankStatusMap } = await refreshStatuses(worlds, {
+      checkBanks: activeGameMode === "eternum",
+      bankCount: BANK_COUNT,
+    });
     setWorldIndexerStatus(indexerStatusMap);
     setWorldDeployedStatus(deployedStatusMap);
-  }, [refreshStatuses]);
+    setWorldBankStatus(bankStatusMap);
+  }, [refreshStatuses, activeGameMode]);
 
   const applyConfigPreset = useCallback(
     (preset: ConfigPreset) => {
@@ -740,6 +759,37 @@ export const FactoryPage = ({ embedded = false }: FactoryPageProps = {}) => {
     }
   };
 
+  const handleUpdateIndexerTier = async (worldName: string, tier: "basic" | "pro" | "legendary" | "epic") => {
+    const adminSecret = window.prompt("Enter the factory admin secret to confirm this indexer tier update.");
+    if (!adminSecret?.trim()) {
+      return;
+    }
+
+    setIndexerActionErrors((prev) => ({ ...prev, [worldName]: "" }));
+    setUpdatingIndexerTier((prev) => ({ ...prev, [worldName]: tier }));
+
+    try {
+      await updateIndexerTierService({
+        environment: `${currentChain}.${activeGameMode}` as
+          | "slot.eternum"
+          | "mainnet.eternum"
+          | "slot.blitz"
+          | "mainnet.blitz",
+        gameName: worldName,
+        tier,
+        adminSecret: adminSecret.trim(),
+      });
+      setIndexerActionErrors((prev) => ({ ...prev, [worldName]: "" }));
+    } catch (error: any) {
+      setIndexerActionErrors((prev) => ({
+        ...prev,
+        [worldName]: error?.message ?? "Failed to update indexer tier.",
+      }));
+    } finally {
+      setUpdatingIndexerTier((prev) => ({ ...prev, [worldName]: null }));
+    }
+  };
+
   const buildAllConfigCalls = (calldata: FactoryConfigCalldataParts): FactoryConfigCall[] => [
     { entrypoint: "set_factory_config", calldata: calldata.base },
     { entrypoint: "set_factory_config_contracts", calldata: calldata.contracts },
@@ -1024,37 +1074,39 @@ export const FactoryPage = ({ embedded = false }: FactoryPageProps = {}) => {
                 {/* Deploy Section - Always Visible */}
                 <div className="space-y-6 p-6 bg-gradient-to-br from-black/40 to-black/20 rounded-2xl border-2 border-gold/20 shadow-sm">
                   <div className="space-y-4">
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-gold/90 uppercase tracking-wide">Config Presets</label>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <button
-                          type="button"
-                          onClick={() => applyConfigPreset("sandbox")}
-                          className={`text-left rounded-xl border p-4 transition-all ${
-                            activeConfigPreset === "sandbox"
-                              ? "border-gold/60 bg-gold/15 shadow-[0_0_18px_rgba(223,170,84,0.2)]"
-                              : "border-gold/20 bg-black/40 hover:border-gold/40 hover:bg-gold/10"
-                          }`}
-                        >
-                          <p className="text-sm font-semibold text-gold">SANDBOX (dev mode 72hrs)</p>
-                          <p className="mt-1 text-xs text-gold/60">Sets Dev Mode ON and game duration to 72 hours.</p>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => applyConfigPreset("blitz-slot")}
-                          className={`text-left rounded-xl border p-4 transition-all ${
-                            activeConfigPreset === "blitz-slot"
-                              ? "border-gold/60 bg-gold/15 shadow-[0_0_18px_rgba(223,170,84,0.2)]"
-                              : "border-gold/20 bg-black/40 hover:border-gold/40 hover:bg-gold/10"
-                          }`}
-                        >
-                          <p className="text-sm font-semibold text-gold">BLITZ SLOT (1h 30m game onslot)</p>
-                          <p className="mt-1 text-xs text-gold/60">
-                            Sets Dev Mode OFF, MMR ON, and game duration to 1 hour 30 minutes.
-                          </p>
-                        </button>
+                    {activeGameMode === "blitz" && (
+                      <div className="space-y-2">
+                        <label className="text-sm font-bold text-gold/90 uppercase tracking-wide">Config Presets</label>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <button
+                            type="button"
+                            onClick={() => applyConfigPreset("sandbox")}
+                            className={`text-left rounded-xl border p-4 transition-all ${
+                              activeConfigPreset === "sandbox"
+                                ? "border-gold/60 bg-gold/15 shadow-[0_0_18px_rgba(223,170,84,0.2)]"
+                                : "border-gold/20 bg-black/40 hover:border-gold/40 hover:bg-gold/10"
+                            }`}
+                          >
+                            <p className="text-sm font-semibold text-gold">SANDBOX (dev mode 72hrs)</p>
+                            <p className="mt-1 text-xs text-gold/60">Sets Dev Mode ON and game duration to 72 hours.</p>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => applyConfigPreset("blitz-slot")}
+                            className={`text-left rounded-xl border p-4 transition-all ${
+                              activeConfigPreset === "blitz-slot"
+                                ? "border-gold/60 bg-gold/15 shadow-[0_0_18px_rgba(223,170,84,0.2)]"
+                                : "border-gold/20 bg-black/40 hover:border-gold/40 hover:bg-gold/10"
+                            }`}
+                          >
+                            <p className="text-sm font-semibold text-gold">BLITZ SLOT (1h 30m game onslot)</p>
+                            <p className="mt-1 text-xs text-gold/60">
+                              Sets Dev Mode OFF, MMR ON, and game duration to 1 hour 30 minutes.
+                            </p>
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                    )}
 
                     <div className="space-y-2">
                       <label className="text-sm font-bold text-gold/90 uppercase tracking-wide">Game Name</label>
@@ -1323,15 +1375,40 @@ export const FactoryPage = ({ embedded = false }: FactoryPageProps = {}) => {
                                       <>
                                         {/* Indexer status/actions */}
                                         {worldIndexerStatus[name] ? (
-                                          <a
-                                            href={`${CARTRIDGE_API_BASE}/x/${name}/torii`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-semibold rounded-md border border-emerald-200 hover:border-emerald-300 transition-colors"
-                                          >
-                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                                            Indexer On
-                                          </a>
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <a
+                                              href={`${CARTRIDGE_API_BASE}/x/${name}/torii`}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-semibold rounded-md border border-emerald-200 hover:border-emerald-300 transition-colors"
+                                            >
+                                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                              Indexer On
+                                            </a>
+                                            {(["basic", "pro", "legendary"] as const).map((tier) => {
+                                              const isUpdatingTier = updatingIndexerTier[name] === tier;
+
+                                              return (
+                                                <button
+                                                  key={`${name}-${tier}`}
+                                                  onClick={() => {
+                                                    void handleUpdateIndexerTier(name, tier);
+                                                  }}
+                                                  disabled={Boolean(updatingIndexerTier[name])}
+                                                  className="px-3 py-1 bg-black/40 hover:bg-gold/15 text-gold/80 text-xs font-semibold rounded-md border border-gold/20 hover:border-gold/40 transition-colors disabled:cursor-wait disabled:opacity-60"
+                                                >
+                                                  {isUpdatingTier ? (
+                                                    <span className="inline-flex items-center gap-1.5">
+                                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                                      {tier}
+                                                    </span>
+                                                  ) : (
+                                                    `Set ${tier}`
+                                                  )}
+                                                </button>
+                                              );
+                                            })}
+                                          </div>
                                         ) : creatingIndexer[name] ? (
                                           <span className="flex items-center gap-1.5 px-3 py-1 bg-black/40 text-gold/80 text-xs font-semibold rounded-md border border-gold/20 cursor-wait">
                                             <Loader2 className="w-3 h-3 animate-spin" />
@@ -1352,12 +1429,103 @@ export const FactoryPage = ({ embedded = false }: FactoryPageProps = {}) => {
                                         )}
                                       </>
                                     )}
+
+                                    {/* Step 4: Create Banks (eternum only, after deploy + indexer) */}
+                                    {activeGameMode === "eternum" &&
+                                      worldDeployedStatus[name] &&
+                                      worldIndexerStatus[name] && (
+                                        <>
+                                          {createBanksTx[name]?.status === "running" ? (
+                                            <span className="flex items-center gap-1.5 px-3 py-1 bg-black/40 text-gold/80 text-xs font-semibold rounded-md border border-gold/20 cursor-wait">
+                                              <Loader2 className="w-3 h-3 animate-spin" />
+                                              Creating Banks...
+                                            </span>
+                                          ) : worldBankStatus[name] || createBanksTx[name]?.status === "success" ? (
+                                            <span className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 text-xs font-semibold rounded-md border border-emerald-200">
+                                              <CheckCircle2 className="w-3 h-3" />
+                                              Banks Created
+                                              {createBanksTx[name]?.hash && (
+                                                <a
+                                                  href={getExplorerTxUrl(
+                                                    currentChain as any,
+                                                    createBanksTx[name]!.hash!,
+                                                  )}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  className="text-emerald-600 hover:underline ml-1"
+                                                >
+                                                  Tx
+                                                </a>
+                                              )}
+                                            </span>
+                                          ) : (
+                                            <button
+                                              onClick={async () => {
+                                                if (!account) return;
+                                                setCreateBanksTx((p) => ({
+                                                  ...p,
+                                                  [name]: { status: "running" },
+                                                }));
+                                                try {
+                                                  const profile = await buildWorldProfile(currentChain as Chain, name);
+                                                  const baseManifest = getGameManifest(currentChain as Chain);
+                                                  const patched = patchManifestWithFactory(
+                                                    baseManifest as any,
+                                                    profile.worldAddress,
+                                                    profile.contractsBySelector,
+                                                  );
+                                                  const localProvider = new EternumProvider(
+                                                    patched,
+                                                    env.VITE_PUBLIC_NODE_URL,
+                                                    env.VITE_PUBLIC_VRF_PROVIDER_ADDRESS,
+                                                  );
+
+                                                  const mapCenterOffset = await fetchWorldMapCenterOffset(name);
+                                                  const banks = buildAdminBanksForMapCenterOffset(mapCenterOffset);
+
+                                                  // Contract requires exactly 6 banks in one call
+                                                  const tx = await localProvider.create_banks({
+                                                    signer: account,
+                                                    banks,
+                                                  });
+                                                  setCreateBanksTx((p) => ({
+                                                    ...p,
+                                                    [name]: {
+                                                      status: "success",
+                                                      hash: tx?.transaction_hash,
+                                                    },
+                                                  }));
+                                                  setWorldBankStatus((p) => ({
+                                                    ...p,
+                                                    [name]: true,
+                                                  }));
+                                                } catch (e: any) {
+                                                  setCreateBanksTx((p) => ({
+                                                    ...p,
+                                                    [name]: {
+                                                      status: "error",
+                                                      error: e?.message ?? String(e),
+                                                    },
+                                                  }));
+                                                }
+                                              }}
+                                              disabled={!account}
+                                              className="px-3 py-1 bg-black/40 hover:bg-gold/15 text-gold/80 text-xs font-semibold rounded-md border border-gold/20 hover:border-gold/40 transition-colors"
+                                            >
+                                              Create {BANK_COUNT} Banks
+                                            </button>
+                                          )}
+                                        </>
+                                      )}
                                   </div>
                                   {metadataParts.length > 0 && (
                                     <p className="text-[11px] text-gold/60">Series: {metadataParts.join(" ")}</p>
                                   )}
                                   {indexerActionErrors[name] && !worldIndexerStatus[name] && (
                                     <p className="text-[11px] text-red-600">{indexerActionErrors[name]}</p>
+                                  )}
+                                  {createBanksTx[name]?.status === "error" && (
+                                    <p className="text-[11px] text-red-600">{createBanksTx[name]?.error}</p>
                                   )}
 
                                   {/* No extra status panel; only small wait timer above */}
@@ -1405,6 +1573,24 @@ export const FactoryPage = ({ embedded = false }: FactoryPageProps = {}) => {
                                               )}
                                             </div>
                                           )}
+                                        </div>
+
+                                        {/* Deploy profile indicator (does not control runtime world mode detection) */}
+                                        <div className="space-y-1">
+                                          <label className="text-xs font-semibold text-gold/70">Game Mode</label>
+                                          <div className="flex items-center gap-3">
+                                            <span className="px-4 py-1.5 text-xs font-semibold rounded-md border bg-gold/20 border-gold/40 text-gold">
+                                              {activeGameMode.charAt(0).toUpperCase() + activeGameMode.slice(1)}
+                                            </span>
+                                          </div>
+                                          <p className="text-[10px] text-gold/60">
+                                            Config loaded from{" "}
+                                            <span className="font-mono">
+                                              {activeGameMode}.{env.VITE_PUBLIC_CHAIN}.json
+                                            </span>
+                                            . Runtime mode is detected from each world's{" "}
+                                            <span className="font-mono">WorldConfig.blitz_mode_on</span> flag.
+                                          </p>
                                         </div>
 
                                         {/* startMainAt override */}
@@ -1572,322 +1758,280 @@ export const FactoryPage = ({ embedded = false }: FactoryPageProps = {}) => {
                                               <p className="text-[11px] text-red-600">{startSettlingAtErrors[name]}</p>
                                             )}
                                           </div>
-                                          <div className="space-y-1">
-                                            <label className="text-xs font-semibold text-gold/70">Dev Mode</label>
-                                            <div className="flex items-center gap-2">
-                                              <input
-                                                id={`dev-mode-${name}`}
-                                                type="checkbox"
-                                                checked={
-                                                  Object.prototype.hasOwnProperty.call(devModeOverrides, name)
-                                                    ? !!devModeOverrides[name]
-                                                    : devModeOn
-                                                }
-                                                onChange={(e) =>
-                                                  setDevModeOverrides((p) => ({ ...p, [name]: e.target.checked }))
-                                                }
-                                                className="h-4 w-4 accent-blue-600"
-                                              />
-                                              <label htmlFor={`dev-mode-${name}`} className="text-xs text-gold/90">
-                                                Enable developer mode for this world
-                                              </label>
-                                            </div>
-                                            <p className="text-[10px] text-gold/60">Controls in-game dev features.</p>
-                                          </div>
-                                          <div className="space-y-1">
-                                            <label className="text-xs font-semibold text-gold/70">MMR System</label>
-                                            <div className="flex items-center gap-2">
-                                              <input
-                                                id={`mmr-enabled-${name}`}
-                                                type="checkbox"
-                                                checked={
-                                                  Object.prototype.hasOwnProperty.call(mmrEnabledOverrides, name)
-                                                    ? !!mmrEnabledOverrides[name]
-                                                    : mmrEnabledOn
-                                                }
-                                                onChange={(e) =>
-                                                  setMmrEnabledOverrides((p) => ({ ...p, [name]: e.target.checked }))
-                                                }
-                                                className="h-4 w-4 accent-blue-600"
-                                              />
-                                              <label htmlFor={`mmr-enabled-${name}`} className="text-xs text-gold/90">
-                                                Enable MMR tracking for this world
-                                              </label>
-                                            </div>
-                                            <p className="text-[10px] text-gold/60">
-                                              Tracks player skill ratings across Blitz games.
-                                            </p>
-                                          </div>
                                         </div>
 
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                          <div className="space-y-1">
-                                            <label className="text-xs font-semibold text-gold/70">
-                                              Game Duration (hours)
-                                            </label>
-                                            <input
-                                              type="number"
-                                              min={0}
-                                              value={
-                                                Object.prototype.hasOwnProperty.call(durationHoursOverrides, name)
-                                                  ? Number(durationHoursOverrides[name] || 0)
-                                                  : Number(durationHours || 0)
-                                              }
-                                              onChange={(e) =>
-                                                setDurationHoursOverrides((p) => ({
-                                                  ...p,
-                                                  [name]: Number(e.target.value || 0),
-                                                }))
-                                              }
-                                              className="w-full px-3 py-2 text-sm bg-black/40 border border-gold/20 rounded-md"
-                                            />
-                                            <p className="text-[10px] text-gold/60">
-                                              Applies to season.durationSeconds.
-                                            </p>
-                                          </div>
-                                          <div className="space-y-1">
-                                            <label className="text-xs font-semibold text-gold/70">
-                                              Game Duration (minutes)
-                                            </label>
-                                            <input
-                                              type="number"
-                                              min={0}
-                                              max={59}
-                                              value={
-                                                Object.prototype.hasOwnProperty.call(durationMinutesOverrides, name)
-                                                  ? Number(durationMinutesOverrides[name] || 0)
-                                                  : baseDurationMinutes
-                                              }
-                                              onChange={(e) =>
-                                                setDurationMinutesOverrides((p) => ({
-                                                  ...p,
-                                                  [name]: Math.min(59, Math.max(0, Number(e.target.value || 0))),
-                                                }))
-                                              }
-                                              className="w-full px-3 py-2 text-sm bg-black/40 border border-gold/20 rounded-md"
-                                            />
-                                            <p className="text-[10px] text-gold/60">0–59 minutes (added to hours).</p>
-                                          </div>
-                                          <div className="space-y-1">
-                                            <label className="text-xs font-semibold text-gold/70">
-                                              Factory Address Override
-                                            </label>
-                                            <input
-                                              type="text"
-                                              placeholder={
-                                                factoryAddress || (eternumConfig as any)?.factory_address || "0x..."
-                                              }
-                                              value={
-                                                factoryAddressOverrides[name] ??
-                                                (factoryAddress || (eternumConfig as any)?.factory_address || "")
-                                              }
-                                              onChange={(e) =>
-                                                setFactoryAddressOverrides((p) => ({ ...p, [name]: e.target.value }))
-                                              }
-                                              className="w-full px-3 py-2 text-sm bg-black/40 border border-gold/20 rounded-md font-mono"
-                                            />
-                                            <p className="text-[10px] text-gold/60">
-                                              Used by set_factory_address when configuring this world.
-                                            </p>
-                                          </div>
-                                          <div className="space-y-1">
-                                            <label className="text-xs font-semibold text-gold/70">
-                                              Single Realm Mode
-                                            </label>
-                                            <div className="flex items-center gap-2">
-                                              <input
-                                                id={`single-realm-mode-${name}`}
-                                                type="checkbox"
-                                                checked={
-                                                  Object.prototype.hasOwnProperty.call(singleRealmModeOverrides, name)
-                                                    ? !!singleRealmModeOverrides[name]
-                                                    : !!eternumConfig.settlement?.single_realm_mode
-                                                }
-                                                onChange={(e) =>
-                                                  setSingleRealmModeOverrides((p) => ({
-                                                    ...p,
-                                                    [name]: e.target.checked,
-                                                  }))
-                                                }
-                                                className="h-4 w-4 accent-blue-600"
-                                              />
-                                              <label
-                                                htmlFor={`single-realm-mode-${name}`}
-                                                className="text-xs text-gold/90"
-                                              >
-                                                Enable single realm mode for this world
-                                              </label>
+                                        {/* Blitz-only configuration */}
+                                        {activeGameMode === "blitz" && (
+                                          <>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                              <div className="space-y-1">
+                                                <label className="text-xs font-semibold text-gold/70">Dev Mode</label>
+                                                <div className="flex items-center gap-2">
+                                                  <input
+                                                    id={`dev-mode-${name}`}
+                                                    type="checkbox"
+                                                    checked={
+                                                      Object.prototype.hasOwnProperty.call(devModeOverrides, name)
+                                                        ? !!devModeOverrides[name]
+                                                        : devModeOn
+                                                    }
+                                                    onChange={(e) =>
+                                                      setDevModeOverrides((p) => ({ ...p, [name]: e.target.checked }))
+                                                    }
+                                                    className="h-4 w-4 accent-blue-600"
+                                                  />
+                                                  <label htmlFor={`dev-mode-${name}`} className="text-xs text-gold/90">
+                                                    Enable developer mode for this world
+                                                  </label>
+                                                </div>
+                                                <p className="text-[10px] text-gold/60">
+                                                  Controls in-game dev features.
+                                                </p>
+                                              </div>
+                                              <div className="space-y-1">
+                                                <label className="text-xs font-semibold text-gold/70">MMR System</label>
+                                                <div className="flex items-center gap-2">
+                                                  <input
+                                                    id={`mmr-enabled-${name}`}
+                                                    type="checkbox"
+                                                    checked={
+                                                      Object.prototype.hasOwnProperty.call(mmrEnabledOverrides, name)
+                                                        ? !!mmrEnabledOverrides[name]
+                                                        : mmrEnabledOn
+                                                    }
+                                                    onChange={(e) =>
+                                                      setMmrEnabledOverrides((p) => ({
+                                                        ...p,
+                                                        [name]: e.target.checked,
+                                                      }))
+                                                    }
+                                                    className="h-4 w-4 accent-blue-600"
+                                                  />
+                                                  <label
+                                                    htmlFor={`mmr-enabled-${name}`}
+                                                    className="text-xs text-gold/90"
+                                                  >
+                                                    Enable MMR tracking for this world
+                                                  </label>
+                                                </div>
+                                                <p className="text-[10px] text-gold/60">
+                                                  Tracks player skill ratings across Blitz games.
+                                                </p>
+                                              </div>
                                             </div>
-                                            <p className="text-[10px] text-gold/60">
-                                              Controls settlement spawning behavior.
-                                            </p>
-                                          </div>
-                                        </div>
 
-                                        {/* Blitz Registration Fee Configuration */}
-                                        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                                          <div className="space-y-1">
-                                            <label className="text-xs font-semibold text-gold/70">
-                                              Blitz Registration Fee Amount
-                                            </label>
-                                            <input
-                                              type="text"
-                                              placeholder={defaultBlitzRegistration.amount}
-                                              value={blitzFeeAmountOverrides[name] ?? defaultBlitzRegistration.amount}
-                                              onChange={(e) =>
-                                                setBlitzFeeAmountOverrides((p) => ({ ...p, [name]: e.target.value }))
-                                              }
-                                              className="w-full px-3 py-2 text-sm bg-black/40 border border-gold/20 rounded-md font-mono"
-                                            />
-                                            <p className="text-[10px] text-gold/60">
-                                              Default: {defaultBlitzRegistration.amount} with precision{" "}
-                                              {defaultBlitzRegistration.precision}.
-                                            </p>
-                                          </div>
-                                          <div className="space-y-1">
-                                            <label className="text-xs font-semibold text-gold/70">
-                                              Fee Precision (decimals)
-                                            </label>
-                                            <input
-                                              type="number"
-                                              min={0}
-                                              step={1}
-                                              placeholder={String(defaultBlitzRegistration.precision)}
-                                              value={
-                                                blitzFeePrecisionOverrides[name] ??
-                                                String(defaultBlitzRegistration.precision)
-                                              }
-                                              onChange={(e) =>
-                                                setBlitzFeePrecisionOverrides((p) => ({ ...p, [name]: e.target.value }))
-                                              }
-                                              className="w-full px-3 py-2 text-sm bg-black/40 border border-gold/20 rounded-md font-mono"
-                                            />
-                                            <p className="text-[10px] text-gold/60">
-                                              Default: {defaultBlitzRegistration.precision} decimals.
-                                            </p>
-                                          </div>
-                                          <div className="space-y-1">
-                                            <label className="text-xs font-semibold text-gold/70">
-                                              Blitz Registration Fee Token
-                                            </label>
-                                            <input
-                                              type="text"
-                                              placeholder={defaultBlitzRegistration.token || "0x..."}
-                                              value={
-                                                blitzFeeTokenOverrides[name] ??
-                                                (defaultBlitzRegistration.token ||
-                                                  (eternumConfig as any)?.blitz?.registration?.fee_token ||
-                                                  "")
-                                              }
-                                              onChange={(e) =>
-                                                setBlitzFeeTokenOverrides((p) => ({ ...p, [name]: e.target.value }))
-                                              }
-                                              className="w-full px-3 py-2 text-sm bg-black/40 border border-gold/20 rounded-md font-mono"
-                                            />
-                                            <p className="text-[10px] text-gold/60">
-                                              Default: {defaultBlitzRegistration.token}. Leave empty for default.
-                                            </p>
-                                          </div>
-                                          <div className="space-y-1">
-                                            <label className="text-xs font-semibold text-gold/70">
-                                              Registration Count Max
-                                            </label>
-                                            <input
-                                              type="number"
-                                              min={0}
-                                              step={1}
-                                              placeholder="30"
-                                              value={
-                                                registrationCountMaxOverrides[name] ??
-                                                String(
-                                                  (eternumConfig as any)?.blitz?.registration?.registration_count_max ??
-                                                    30,
-                                                )
-                                              }
-                                              onChange={(e) =>
-                                                setRegistrationCountMaxOverrides((p) => ({
-                                                  ...p,
-                                                  [name]: e.target.value,
-                                                }))
-                                              }
-                                              className="w-full px-3 py-2 text-sm bg-black/40 border border-gold/20 rounded-md font-mono"
-                                            />
-                                            <p className="text-[10px] text-gold/60">Default: 30.</p>
-                                          </div>
-                                        </div>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                              <div className="space-y-1">
+                                                <label className="text-xs font-semibold text-gold/70">
+                                                  Two Player Mode
+                                                </label>
+                                                <div className="flex items-center gap-2">
+                                                  <input
+                                                    id={`two-player-mode-${name}`}
+                                                    type="checkbox"
+                                                    checked={
+                                                      Object.prototype.hasOwnProperty.call(twoPlayerModeOverrides, name)
+                                                        ? !!twoPlayerModeOverrides[name]
+                                                        : !!eternumConfig.settlement?.two_player_mode
+                                                    }
+                                                    onChange={(e) =>
+                                                      setTwoPlayerModeOverrides((p) => ({
+                                                        ...p,
+                                                        [name]: e.target.checked,
+                                                      }))
+                                                    }
+                                                    className="h-4 w-4 accent-blue-600"
+                                                  />
+                                                  <label
+                                                    htmlFor={`two-player-mode-${name}`}
+                                                    className="text-xs text-gold/90"
+                                                  >
+                                                    Enable two player mode for this world
+                                                  </label>
+                                                </div>
+                                                <p className="text-[10px] text-gold/60">
+                                                  Mutually exclusive with single realm mode.
+                                                </p>
+                                              </div>
+                                            </div>
 
-                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                          <div className="space-y-1">
-                                            <label className="text-xs font-semibold text-gold/70">
-                                              Blitz Fee Recipient
-                                            </label>
-                                            <input
-                                              type="text"
-                                              placeholder={defaultBlitzFeeRecipient || "0x..."}
-                                              value={getBlitzFeeRecipientForWorld(name)}
-                                              onChange={(e) =>
-                                                setBlitzFeeRecipientOverrides((p) => ({ ...p, [name]: e.target.value }))
-                                              }
-                                              className="w-full px-3 py-2 text-sm bg-black/40 border border-gold/20 rounded-md font-mono"
-                                            />
-                                          </div>
-                                          <div className="space-y-1">
-                                            <label className="text-xs font-semibold text-gold/70">
-                                              Registration Delay (seconds)
-                                            </label>
-                                            <input
-                                              type="number"
-                                              min={0}
-                                              step={1}
-                                              placeholder={String(
-                                                (eternumConfig as any)?.blitz?.registration
-                                                  ?.registration_delay_seconds ?? 60,
-                                              )}
-                                              value={
-                                                registrationDelaySecondsOverrides[name] ??
-                                                String(
-                                                  (eternumConfig as any)?.blitz?.registration
-                                                    ?.registration_delay_seconds ?? 60,
-                                                )
-                                              }
-                                              onChange={(e) =>
-                                                setRegistrationDelaySecondsOverrides((p) => ({
-                                                  ...p,
-                                                  [name]: e.target.value,
-                                                }))
-                                              }
-                                              className="w-full px-3 py-2 text-sm bg-black/40 border border-gold/20 rounded-md font-mono"
-                                            />
-                                          </div>
-                                          <div className="space-y-1">
-                                            <label className="text-xs font-semibold text-gold/70">
-                                              Registration Period (seconds)
-                                            </label>
-                                            <input
-                                              type="number"
-                                              min={0}
-                                              step={1}
-                                              placeholder={String(
-                                                (eternumConfig as any)?.blitz?.registration
-                                                  ?.registration_period_seconds ?? 600,
-                                              )}
-                                              value={
-                                                registrationPeriodSecondsOverrides[name] ??
-                                                String(
-                                                  (eternumConfig as any)?.blitz?.registration
-                                                    ?.registration_period_seconds ?? 600,
-                                                )
-                                              }
-                                              onChange={(e) =>
-                                                setRegistrationPeriodSecondsOverrides((p) => ({
-                                                  ...p,
-                                                  [name]: e.target.value,
-                                                }))
-                                              }
-                                              className="w-full px-3 py-2 text-sm bg-black/40 border border-gold/20 rounded-md font-mono"
-                                            />
-                                          </div>
-                                        </div>
+                                            {/* Blitz Registration Fee Configuration */}
+                                            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                                              <div className="space-y-1">
+                                                <label className="text-xs font-semibold text-gold/70">
+                                                  Blitz Registration Fee Amount
+                                                </label>
+                                                <input
+                                                  type="text"
+                                                  placeholder={defaultBlitzRegistration.amount}
+                                                  value={
+                                                    blitzFeeAmountOverrides[name] ?? defaultBlitzRegistration.amount
+                                                  }
+                                                  onChange={(e) =>
+                                                    setBlitzFeeAmountOverrides((p) => ({
+                                                      ...p,
+                                                      [name]: e.target.value,
+                                                    }))
+                                                  }
+                                                  className="w-full px-3 py-2 text-sm bg-black/40 border border-gold/20 rounded-md font-mono"
+                                                />
+                                                <p className="text-[10px] text-gold/60">
+                                                  Default: {defaultBlitzRegistration.amount} with precision{" "}
+                                                  {defaultBlitzRegistration.precision}.
+                                                </p>
+                                              </div>
+                                              <div className="space-y-1">
+                                                <label className="text-xs font-semibold text-gold/70">
+                                                  Fee Precision (decimals)
+                                                </label>
+                                                <input
+                                                  type="number"
+                                                  min={0}
+                                                  step={1}
+                                                  placeholder={String(defaultBlitzRegistration.precision)}
+                                                  value={
+                                                    blitzFeePrecisionOverrides[name] ??
+                                                    String(defaultBlitzRegistration.precision)
+                                                  }
+                                                  onChange={(e) =>
+                                                    setBlitzFeePrecisionOverrides((p) => ({
+                                                      ...p,
+                                                      [name]: e.target.value,
+                                                    }))
+                                                  }
+                                                  className="w-full px-3 py-2 text-sm bg-black/40 border border-gold/20 rounded-md font-mono"
+                                                />
+                                                <p className="text-[10px] text-gold/60">
+                                                  Default: {defaultBlitzRegistration.precision} decimals.
+                                                </p>
+                                              </div>
+                                              <div className="space-y-1">
+                                                <label className="text-xs font-semibold text-gold/70">
+                                                  Blitz Registration Fee Token
+                                                </label>
+                                                <input
+                                                  type="text"
+                                                  placeholder={defaultBlitzRegistration.token || "0x..."}
+                                                  value={
+                                                    blitzFeeTokenOverrides[name] ??
+                                                    (defaultBlitzRegistration.token ||
+                                                      (eternumConfig as any)?.blitz?.registration?.fee_token ||
+                                                      "")
+                                                  }
+                                                  onChange={(e) =>
+                                                    setBlitzFeeTokenOverrides((p) => ({ ...p, [name]: e.target.value }))
+                                                  }
+                                                  className="w-full px-3 py-2 text-sm bg-black/40 border border-gold/20 rounded-md font-mono"
+                                                />
+                                                <p className="text-[10px] text-gold/60">
+                                                  Default: {defaultBlitzRegistration.token}. Leave empty for default.
+                                                </p>
+                                              </div>
+                                              <div className="space-y-1">
+                                                <label className="text-xs font-semibold text-gold/70">
+                                                  Registration Count Max
+                                                </label>
+                                                <input
+                                                  type="number"
+                                                  min={0}
+                                                  step={1}
+                                                  placeholder="24"
+                                                  value={
+                                                    registrationCountMaxOverrides[name] ??
+                                                    String(
+                                                      (eternumConfig as any)?.blitz?.registration
+                                                        ?.registration_count_max ?? 24,
+                                                    )
+                                                  }
+                                                  onChange={(e) =>
+                                                    setRegistrationCountMaxOverrides((p) => ({
+                                                      ...p,
+                                                      [name]: e.target.value,
+                                                    }))
+                                                  }
+                                                  className="w-full px-3 py-2 text-sm bg-black/40 border border-gold/20 rounded-md font-mono"
+                                                />
+                                                <p className="text-[10px] text-gold/60">Default: 24.</p>
+                                              </div>
+                                            </div>
+
+                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                              <div className="space-y-1">
+                                                <label className="text-xs font-semibold text-gold/70">
+                                                  Blitz Fee Recipient
+                                                </label>
+                                                <input
+                                                  type="text"
+                                                  placeholder={defaultBlitzFeeRecipient || "0x..."}
+                                                  value={getBlitzFeeRecipientForWorld(name)}
+                                                  onChange={(e) =>
+                                                    setBlitzFeeRecipientOverrides((p) => ({
+                                                      ...p,
+                                                      [name]: e.target.value,
+                                                    }))
+                                                  }
+                                                  className="w-full px-3 py-2 text-sm bg-black/40 border border-gold/20 rounded-md font-mono"
+                                                />
+                                              </div>
+                                              <div className="space-y-1">
+                                                <label className="text-xs font-semibold text-gold/70">
+                                                  Registration Delay (seconds)
+                                                </label>
+                                                <input
+                                                  type="number"
+                                                  min={0}
+                                                  step={1}
+                                                  placeholder={String(
+                                                    (eternumConfig as any)?.blitz?.registration
+                                                      ?.registration_delay_seconds ?? 60,
+                                                  )}
+                                                  value={
+                                                    registrationDelaySecondsOverrides[name] ??
+                                                    String(
+                                                      (eternumConfig as any)?.blitz?.registration
+                                                        ?.registration_delay_seconds ?? 60,
+                                                    )
+                                                  }
+                                                  onChange={(e) =>
+                                                    setRegistrationDelaySecondsOverrides((p) => ({
+                                                      ...p,
+                                                      [name]: e.target.value,
+                                                    }))
+                                                  }
+                                                  className="w-full px-3 py-2 text-sm bg-black/40 border border-gold/20 rounded-md font-mono"
+                                                />
+                                              </div>
+                                              <div className="space-y-1">
+                                                <label className="text-xs font-semibold text-gold/70">
+                                                  Registration Period (seconds)
+                                                </label>
+                                                <input
+                                                  type="number"
+                                                  min={0}
+                                                  step={1}
+                                                  placeholder={String(
+                                                    (eternumConfig as any)?.blitz?.registration
+                                                      ?.registration_period_seconds ?? 600,
+                                                  )}
+                                                  value={
+                                                    registrationPeriodSecondsOverrides[name] ??
+                                                    String(
+                                                      (eternumConfig as any)?.blitz?.registration
+                                                        ?.registration_period_seconds ?? 600,
+                                                    )
+                                                  }
+                                                  onChange={(e) =>
+                                                    setRegistrationPeriodSecondsOverrides((p) => ({
+                                                      ...p,
+                                                      [name]: e.target.value,
+                                                    }))
+                                                  }
+                                                  className="w-full px-3 py-2 text-sm bg-black/40 border border-gold/20 rounded-md font-mono"
+                                                />
+                                              </div>
+                                            </div>
+                                          </>
+                                        )}
 
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                           <div className="space-y-1">
@@ -2223,6 +2367,10 @@ export const FactoryPage = ({ embedded = false }: FactoryPageProps = {}) => {
                                                   singleRealmModeOverrides,
                                                   name,
                                                 );
+                                                const hasTwoPlayerOverride = Object.prototype.hasOwnProperty.call(
+                                                  twoPlayerModeOverrides,
+                                                  name,
+                                                );
                                                 const hasDurationHoursOverride = Object.prototype.hasOwnProperty.call(
                                                   durationHoursOverrides,
                                                   name,
@@ -2246,6 +2394,7 @@ export const FactoryPage = ({ embedded = false }: FactoryPageProps = {}) => {
                                                   overrides: {
                                                     startMainAt: selectedStart,
                                                     startSettlingAt: selectedSettling,
+                                                    gameMode: activeGameMode,
                                                     devModeOn: hasDevOverride ? !!devModeOverrides[name] : undefined,
                                                     mmrEnabled: hasMmrOverride
                                                       ? !!mmrEnabledOverrides[name]
@@ -2266,6 +2415,9 @@ export const FactoryPage = ({ embedded = false }: FactoryPageProps = {}) => {
                                                     factoryAddress: factoryAddressOverrides[name],
                                                     singleRealmMode: hasSingleRealmOverride
                                                       ? !!singleRealmModeOverrides[name]
+                                                      : undefined,
+                                                    twoPlayerMode: hasTwoPlayerOverride
+                                                      ? !!twoPlayerModeOverrides[name]
                                                       : undefined,
                                                     seasonBridgeCloseAfterEndSeconds:
                                                       seasonBridgeCloseAfterEndSecondsOverrides[name],
@@ -2420,7 +2572,7 @@ export const FactoryPage = ({ embedded = false }: FactoryPageProps = {}) => {
                         onChange={(e) => setVersion(e.target.value)}
                         className="w-full px-4 py-3 bg-black/40 border-2 border-gold/20 hover:border-gold/40 focus:border-gold/60 rounded-xl text-gold focus:outline-none transition-all"
                       />
-                      {version !== DEFAULT_VERSION && (
+                      {version !== getDefaultVersion(activeGameMode) && (
                         <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
                           <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
                           <p className="text-xs text-amber-800">

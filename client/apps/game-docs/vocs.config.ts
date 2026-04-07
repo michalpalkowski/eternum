@@ -104,6 +104,7 @@ export default defineConfig({
         { text: "Quick Links", link: "/overview/links" },
         { text: "Disclaimer - MUST READ", link: "/overview/disclaimer" },
         { text: "Resource Addresses", link: "/overview/resource-addresses" },
+        { text: "The Agora (AMM)", link: "/overview/agora" },
       ],
     },
     {
@@ -247,8 +248,9 @@ export default defineConfig({
     {
       text: "Changelog",
       collapsed: true,
-      link: "/changelog/18-february-2026",
+      link: "/changelog/28-march-2026",
       items: [
+        { text: "28 March 2026", link: "/changelog/28-march-2026" },
         { text: "18 February 2026", link: "/changelog/18-february-2026" },
         { text: "31 January 2026", link: "/changelog/31-january-2026" },
         { text: "8 December 2025", link: "/changelog/8-december-2025" },

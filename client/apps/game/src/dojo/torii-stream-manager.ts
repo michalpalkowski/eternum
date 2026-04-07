@@ -1,10 +1,9 @@
 import { SetupResult } from "@bibliothecadao/dojo";
 import { AndComposeClause, MemberClause } from "@dojoengine/sdk";
-import { getEntities } from "@dojoengine/state";
-import type { PatternMatching } from "@dojoengine/torii-client";
+import { PatternMatching } from "@dojoengine/torii-client";
 import type { Clause, ToriiClient } from "@dojoengine/torii-wasm/types";
 import { syncEntitiesDebounced } from "./sync";
-import { timedAsync, perfEvent } from "./perf-diagnostics";
+import type { ToriiSubscriptionSetupTimeoutInfo } from "./torii-subscription-setup";
 
 export interface BoundsModelConfig {
   model: string;
@@ -28,12 +27,18 @@ interface BoundsSwitchResult {
   outcome: BoundsSwitchOutcome;
 }
 
+export interface BoundsSubscriptionSetupTimeoutInfo extends ToriiSubscriptionSetupTimeoutInfo {
+  requestId: number;
+}
+
 interface ToriiStreamManagerConfig {
   client: ToriiClient;
   setup: SetupResult;
   logging?: boolean;
   clauseBuilder?: (descriptor: BoundsDescriptor) => Clause | null;
-  switchTimeoutMs?: number;
+  onUpdate?: () => void;
+  subscriptionSetupTimeoutMs?: number;
+  onSubscriptionSetupTimeout?: (info: BoundsSubscriptionSetupTimeoutInfo) => void;
 }
 
 export interface GlobalModelStreamConfig {
@@ -41,6 +46,8 @@ export interface GlobalModelStreamConfig {
   keyCount?: number;
   patternMatching?: PatternMatching;
 }
+
+const DEFAULT_SUBSCRIPTION_SETUP_TIMEOUT_MS = 8_000;
 
 const defaultClauseBuilder = (descriptor: BoundsDescriptor): Clause | null => {
   const { models, additionalClauses } = descriptor;
@@ -89,27 +96,33 @@ export class ToriiStreamManager {
   private readonly client: ToriiClient;
   private readonly setup: SetupResult;
   private readonly logging: boolean;
+  private readonly onUpdate?: () => void;
   private currentSubscription: { cancel: () => void } | null = null;
   private pendingSwitch: Promise<BoundsSwitchResult> | null = null;
   private switchQueue: Promise<unknown> = Promise.resolve();
   private latestSwitchRequestId = 0;
   private clauseBuilder: (descriptor: BoundsDescriptor) => Clause | null;
   private currentSignature: string | null = null;
-  private readonly maxHydrationEntities = 10_000;
-  private readonly switchTimeoutMs: number;
+  private lastDescriptor: BoundsDescriptor | null = null;
+  private readonly subscriptionSetupTimeoutMs: number;
+  private readonly onSubscriptionSetupTimeout?: (info: BoundsSubscriptionSetupTimeoutInfo) => void;
 
   constructor({
     client,
     setup,
     logging = false,
     clauseBuilder = defaultClauseBuilder,
-    switchTimeoutMs = 30_000,
+    onUpdate,
+    subscriptionSetupTimeoutMs = DEFAULT_SUBSCRIPTION_SETUP_TIMEOUT_MS,
+    onSubscriptionSetupTimeout,
   }: ToriiStreamManagerConfig) {
     this.client = client;
     this.setup = setup;
     this.logging = logging;
     this.clauseBuilder = clauseBuilder;
-    this.switchTimeoutMs = Math.max(1_000, Math.floor(switchTimeoutMs));
+    this.onUpdate = onUpdate;
+    this.subscriptionSetupTimeoutMs = subscriptionSetupTimeoutMs;
+    this.onSubscriptionSetupTimeout = onSubscriptionSetupTimeout;
   }
 
   async start(descriptor: BoundsDescriptor): Promise<BoundsSwitchResult> {
@@ -117,6 +130,8 @@ export class ToriiStreamManager {
   }
 
   async switchBounds(descriptor: BoundsDescriptor): Promise<BoundsSwitchResult> {
+    this.lastDescriptor = descriptor;
+
     const signature = JSON.stringify({
       minCol: descriptor.minCol,
       maxCol: descriptor.maxCol,
@@ -135,77 +150,24 @@ export class ToriiStreamManager {
     const requestId = ++this.latestSwitchRequestId;
 
     const task = this.switchQueue.then(async (): Promise<BoundsSwitchResult> => {
-      let dropLateSubscription = false;
-      let appliedSubscription: { cancel: () => void } | null = null;
-
-      perfEvent("streamManager:switchBounds", { requestId, models: descriptor.models.length });
-
-      const subscriptionPromise = timedAsync("streamManager:syncEntities", () =>
-        syncEntitiesDebounced(this.client, this.setup, clause, this.logging),
-      ).then(
-        (subscription) => {
-          const cancelableSubscription = subscription as { cancel: () => void };
-          if (dropLateSubscription) {
-            cancelableSubscription.cancel();
-          }
-          return cancelableSubscription;
+      const subscription = await syncEntitiesDebounced(this.client, this.setup, clause, this.logging, this.onUpdate, {
+        subscriptionSetupTimeoutMs: this.subscriptionSetupTimeoutMs,
+        onSubscriptionSetupTimeout: (info) => {
+          this.onSubscriptionSetupTimeout?.({ ...info, requestId });
         },
-      );
+      });
 
-      try {
-        const subscription = await this.withTimeout(
-          subscriptionPromise,
-          this.switchTimeoutMs,
-          `sync subscription setup (requestId=${requestId})`,
-        );
-
-        // A newer request superseded this one while it was in flight; drop the stale subscription.
-        if (requestId !== this.latestSwitchRequestId) {
-          subscription.cancel();
-          return { outcome: "stale_dropped" };
-        }
-
-        // Swap active stream only after the replacement subscription is ready.
-        this.cancelCurrentSubscription();
-        this.currentSubscription = subscription;
-        this.currentSignature = signature;
-        appliedSubscription = subscription;
-
-        await this.withTimeout(
-          timedAsync("streamManager:hydrateBounds", () =>
-            this.hydrateBoundsSnapshot(descriptor, clause),
-          ),
-          this.switchTimeoutMs,
-          `bounds snapshot hydration (requestId=${requestId})`,
-        );
-
-        if (requestId !== this.latestSwitchRequestId) {
-          if (this.currentSubscription === subscription) {
-            this.cancelCurrentSubscription();
-            this.currentSignature = null;
-          } else {
-            subscription.cancel();
-          }
-          return { outcome: "stale_dropped" };
-        }
-
-        return { outcome: "applied" };
-      } catch (error) {
-        // Ensure any late subscription does not leak after timeout/failure.
-        dropLateSubscription = true;
-        if (appliedSubscription && this.currentSubscription === appliedSubscription) {
-          this.cancelCurrentSubscription();
-          this.currentSignature = null;
-        }
-        if (!appliedSubscription) {
-          void subscriptionPromise
-            .then((subscription) => {
-              subscription.cancel();
-            })
-            .catch(() => undefined);
-        }
-        throw error;
+      // A newer request superseded this one while it was in flight; drop the stale subscription.
+      if (requestId !== this.latestSwitchRequestId) {
+        subscription.cancel();
+        return { outcome: "stale_dropped" };
       }
+
+      // Swap active stream only after the replacement subscription is ready.
+      this.cancelCurrentSubscription();
+      this.currentSubscription = subscription;
+      this.currentSignature = signature;
+      return { outcome: "applied" };
     });
 
     this.switchQueue = task.then(
@@ -240,51 +202,12 @@ export class ToriiStreamManager {
     this.cancelCurrentSubscription();
   }
 
-  private async hydrateBoundsSnapshot(descriptor: BoundsDescriptor, clause: Clause | null): Promise<void> {
-    if (clause === null) {
-      return;
+  async resubscribe(): Promise<BoundsSwitchResult | null> {
+    this.currentSignature = null;
+    if (this.lastDescriptor) {
+      return this.switchBounds(this.lastDescriptor);
     }
-
-    const models = Array.from(new Set(descriptor.models.map((entry) => entry.model)));
-    if (models.length === 0) {
-      return;
-    }
-
-    await timedAsync(`query:boundsHydration(${models.length}models)`, () =>
-      getEntities(
-        this.client,
-        clause,
-        this.setup.network.contractComponents as any,
-        [],
-        models,
-        this.maxHydrationEntities,
-        false,
-      ),
-    );
-  }
-
-  private async withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-    try {
-      return await Promise.race([
-        promise.finally(() => {
-          if (timeoutId !== null) {
-            clearTimeout(timeoutId);
-            timeoutId = null;
-          }
-        }),
-        new Promise<T>((_, reject) => {
-          timeoutId = setTimeout(() => {
-            reject(new Error(`[ToriiStreamManager] ${label} timed out after ${timeoutMs}ms`));
-          }, timeoutMs);
-        }),
-      ]);
-    } finally {
-      if (timeoutId !== null) {
-        clearTimeout(timeoutId);
-      }
-    }
+    return null;
   }
 }
 

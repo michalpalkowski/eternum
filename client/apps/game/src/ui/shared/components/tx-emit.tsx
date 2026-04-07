@@ -2,7 +2,9 @@ import { TransactionType } from "@bibliothecadao/provider";
 import { useDojo } from "@bibliothecadao/react";
 import { useEffect } from "react";
 import { toast } from "sonner";
+import { AudioManager } from "@/audio/core/AudioManager";
 import { getTxMessage as getBaseMessage, getTxIcon } from "@/ui/components/transaction-center/types";
+import { extractReadableErrorMessage } from "@/utils/error-message";
 
 const getTxMessage = (type: TransactionType): string => {
   const icon = getTxIcon(type);
@@ -30,6 +32,7 @@ export function TransactionNotification() {
       const description = getTxMessage(receipt.type);
       const txCount = receipt.transactionCount ? ` (${receipt.transactionCount} transactions)` : "";
       toast("⏳ Transaction pending", { description: description + txCount });
+      AudioManager.getInstance().play("ui.toast_info");
     };
 
     const handleTransactionComplete = (receipt: any) => {
@@ -37,15 +40,15 @@ export function TransactionNotification() {
       const description = getTxMessage(receipt.type);
       const txCount = receipt.transactionCount ? ` (${receipt.transactionCount} transactions)` : "";
       toast("Completed Action", { description: description + txCount });
+      AudioManager.getInstance().play("ui.tx_success");
     };
 
     const handleTransactionFailed = (error: string | TransactionFailurePayload, meta?: TransactionFailurePayload) => {
-      const message =
-        typeof error === "string" ? error : typeof error?.message === "string" ? error.message : "Transaction failed.";
+      const message = extractReadableErrorMessage(error, extractReadableErrorMessage(meta, "Transaction failed."));
       const type =
         typeof error === "object" && error?.type ? error.type : typeof meta?.type !== "undefined" ? meta.type : null;
       const transactionCount =
-        typeof error === "object" && error?.transactionCount
+        typeof error === "object" && typeof error?.transactionCount === "number"
           ? error.transactionCount
           : typeof meta?.transactionCount === "number"
             ? meta.transactionCount
@@ -55,6 +58,7 @@ export function TransactionNotification() {
       const description = `${action}${txCount} - ${message}`;
       console.error("Transaction failed:", message);
       toast("❌ Transaction failed", { description });
+      AudioManager.getInstance().play("ui.tx_fail");
     };
 
     provider.on("transactionPending", handleTransactionPending);

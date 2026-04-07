@@ -7,7 +7,12 @@ use crate::alias::ID;
 use crate::constants::{UNIVERSAL_DEPLOYER_ADDRESS, WORLD_CONFIG_ID};
 use crate::models::mmr::MMRConfig;
 use crate::models::position::{Coord, CoordImpl, Direction};
+use crate::models::resource::resource::TroopResourceImpl;
+use crate::systems::utils::blitz_profile::{
+    OFFICIAL_60_BLITZ_PROFILE_ID, OFFICIAL_90_BLITZ_PROFILE_ID, iBlitzProfileImpl,
+};
 use crate::utils::interfaces::collectibles::{ICollectibleDispatcher, ICollectibleDispatcherTrait};
+use crate::utils::math::PercentageImpl;
 use crate::utils::random::VRFImpl;
 //
 // GLOBAL CONFIGS
@@ -31,6 +36,7 @@ pub struct WorldConfig {
     pub blitz_settlement_config: BlitzSettlementConfig,
     pub blitz_hypers_settlement_config: BlitzHypersSettlementConfig,
     pub blitz_registration_config: BlitzRegistrationConfig,
+    pub blitz_exploration_config: BlitzExplorationConfig,
     pub tick_config: TickConfig,
     pub bank_config: BankConfig,
     pub resource_bridge_config: ResourceBridgeConfig,
@@ -58,6 +64,9 @@ pub struct WorldConfig {
     pub victory_points_win_config: VictoryPointsWinConfig,
     pub factory_address: ContractAddress,
     pub mmr_config: MMRConfig,
+    pub faith_config: FaithConfig,
+    pub artificer_config: ArtificerConfig,
+    pub bitcoin_mine_config: BitcoinMineConfig,
 }
 
 #[derive(Introspect, Copy, Drop, Serde, DojoStore)]
@@ -227,6 +236,15 @@ pub struct TradeConfig {
     pub max_count: u8,
 }
 
+#[derive(Introspect, Copy, Drop, Serde, DojoStore)]
+pub struct BlitzExplorationConfig {
+    pub reward_profile_id: u8,
+}
+
+#[derive(Introspect, Copy, Drop, Serde, DojoStore)]
+pub struct ArtificerConfig {
+    pub research_cost_for_relic: u128 // Amount of research needed to exchange for a relic
+}
 
 #[derive(Introspect, Copy, Drop, Serde, DojoStore)]
 pub struct SeasonAddressesConfig {
@@ -271,31 +289,43 @@ pub struct StructureCapacityConfig {
     pub hyperstructure_capacity: u64, // grams
     pub fragment_mine_capacity: u64, // grams
     pub bank_structure_capacity: u64,
+    pub holysite_capacity: u64, // grams
+    pub camp_capacity: u64, // grams
+    pub bitcoin_mine_capacity: u64 // grams
 }
 
 // speed
 #[derive(Introspect, Copy, Drop, Serde, DojoStore)]
 pub struct SpeedConfig {
     pub donkey_sec_per_km: u16,
+    pub donkey_sec_per_km_troops: u16,
 }
 
 #[generate_trait]
 pub impl SpeedImpl of SpeedTrait {
-    fn for_donkey(ref world: WorldStorage) -> u16 {
+    fn for_donkey(ref world: WorldStorage, resources: Span<(u8, u128)>) -> u16 {
         let speed_config: SpeedConfig = WorldConfigUtilImpl::get_member(world, selector!("speed_config"));
-        speed_config.donkey_sec_per_km
+        if TroopResourceImpl::contains_troops(resources) {
+            speed_config.donkey_sec_per_km_troops
+        } else {
+            speed_config.donkey_sec_per_km
+        }
     }
 }
 
-#[derive(Introspect, Copy, Drop, Serde, DojoStore)]
+#[derive(IntrospectPacked, Copy, Drop, Serde, DojoStore)]
 pub struct MapConfig {
     pub reward_resource_amount: u16,
     pub shards_mines_win_probability: u16,
     pub shards_mines_fail_probability: u16,
     pub agent_discovery_prob: u16,
     pub agent_discovery_fail_prob: u16,
-    pub village_win_probability: u16,
-    pub village_fail_probability: u16,
+    pub camp_win_probability: u16,
+    pub camp_fail_probability: u16,
+    pub holysite_win_probability: u16,
+    pub holysite_fail_probability: u16,
+    pub bitcoin_mine_win_probability: u16, // 1/50 = 2% = 200 (out of 10000)
+    pub bitcoin_mine_fail_probability: u16, // 9800
     pub hyps_win_prob: u32,
     pub hyps_fail_prob: u32,
     // fail probability increase per hex distance from center
@@ -315,10 +345,34 @@ pub struct QuestConfig {
 }
 
 #[derive(Introspect, Copy, Drop, Serde, DojoStore)]
+pub struct FaithConfig {
+    pub enabled: bool,
+    pub wonder_base_fp_per_sec: u16,
+    pub holy_site_fp_per_sec: u16,
+    pub realm_fp_per_sec: u16,
+    pub village_fp_per_sec: u16,
+    pub owner_share_percent: u16,
+    pub reward_token: starknet::ContractAddress,
+}
+
+#[derive(Introspect, Copy, Drop, Serde, DojoStore)]
+pub struct BitcoinMineConfig {
+    pub enabled: bool,
+    pub prize_per_phase: u128, // Amount of SATOSHI awarded per phase
+    pub min_labor_per_contribution: u128 // Minimum labor required per contribution
+}
+
+#[derive(IntrospectPacked, Copy, Drop, Serde, DojoStore)]
 pub struct SettlementConfig {
     pub center: u32,
-    pub base_distance: u32,
-    pub subsequent_distance: u32,
+    pub base_distance: u8,
+    pub layers_skipped: u8,
+    pub layer_max: u8,
+    pub layer_capacity_increment: u8,
+    pub layer_capacity_bps: u16,
+    pub spires_layer_distance: u8,
+    pub spires_max_count: u16,
+    pub spires_settled_count: u16,
 }
 
 #[derive(Introspect, Copy, Drop, Serde, DojoStore)]
@@ -329,113 +383,218 @@ pub struct RealmCountConfig {
 
 #[generate_trait]
 pub impl SettlementConfigImpl of SettlementConfigTrait {
-    fn log_layer_capacity() { // // Get the current realm count
-    // let realm_count: u16 =  8000;
-    // // Calculate the maximum layer based on realm count
-    // // We need to find n where 3n² - 3n + 1 >= realm_count
-    // // Solving the quadratic equation: 3n² - 3n - (realm_count - 1) >= 0
-
-    // // Start from layer 1 and find the first layer that can accommodate all realms
-    // let mut layer: u32 = 1;
-    // let mut capacity: u32 = 5; // Layer 1 capacity
-    // println!("Layer: 1, Capacity: 5, Added Capacity: 5");
-
-    // while capacity < realm_count.into() {
-    //     layer += 1;
-    //     // Each new layer adds 6 * layer realms
-    //     capacity += 6 * layer;
-    //     println!("Layer: {}, Capacity: {}, Added Capacity: {}", layer, capacity, 6 * layer);
-
-    // };
-
-    // println!("Max layer: {}", layer);
+    fn _num_hex_directions() -> u32 {
+        6
     }
 
-    // Calculate the maximum layer on the concentric hexagon
-    // that can be built on based on realm count
-    fn max_layer(realm_count: u32) -> u32 {
-        // each layer's capacity can be obtained by calling the function
-        // above (fn log_layer_capacity)
-
-        if realm_count <= 1500 {
-            return 26; // 2106 capacity
-        }
-
-        if realm_count <= 2500 {
-            return 32; // 3168 capacity
-        }
-
-        if realm_count <= 3500 {
-            return 37; // 4218 capacity
-        }
-
-        if realm_count <= 4500 {
-            return 41; // 5166 capacity
-        }
-
-        if realm_count <= 5500 {
-            return 45; // 6210 capacity
-        }
-
-        if realm_count <= 6500 {
-            return 49; // 7350 capacity
-        }
-
-        return 52; // 8268 capacity
+    // Calculate sum of x*y + x*(y-1) + x*(y-2) + ... + x*0
+    // Formula: x * (y + 1) * y / 2
+    // Used to calculate total capacity up to a certain layer
+    fn _calculate_sum(x: u32, y: u32) -> u32 {
+        (x * (y + 1) * y) / 2
     }
 
-    fn max_points(layer: u32) -> u32 {
+
+    fn _max_spots(layer_number: u32, layers_skipped: u32) -> u32 {
+        // this gets the max number of points that can fit
+        // in from layer 1 to layer y where each layer
+        // has capacity of _num_hex_directions() * layer_number
+
+        // we also need to account for layers skipped
+
+        assert!(layer_number >= layers_skipped, "Layer number must be greater than or equal to layers skipped");
+        if layer_number == layers_skipped {
+            return 0;
+        }
+        let a = Self::_calculate_sum(Self::_num_hex_directions(), layer_number);
+        let b = Self::_calculate_sum(Self::_num_hex_directions(), layers_skipped);
+        a - b
+    }
+
+    fn _spire_layer_number(layer_number: u32, spires_layer_distance: u8) -> u32 {
+        layer_number / spires_layer_distance.into()
+    }
+
+    fn _spire_center_point_count() -> u32 {
+        1
+    }
+
+    fn _max_spire_spots(layer_number: u32, spires_layer_distance: u8) -> u16 {
+        (Self::_spire_center_point_count()
+            + Self::_max_spots(Self::_spire_layer_number(layer_number, spires_layer_distance), 0))
+            .try_into()
+            .unwrap()
+    }
+
+    fn _max_point_index(layer: u32) -> u32 {
         layer - 1
     }
 
     // todo: test aggresively
     fn generate_coord(
-        self: SettlementConfig, max_layer: u32, side: u32, layer: u32, point: u32, map_center: Coord,
+        self: SettlementConfig, spire: bool, side: u32, mut layer: u32, point_index: u32, map_center: Coord,
     ) -> Coord {
         assert!(side < 6, "Side must be less than 6"); // 0 - 5
-        assert!(layer > 0, "Layer must be greater than 0");
-        assert!(layer <= max_layer, "Layer must be less than max layer");
-        assert!(point <= Self::max_points(layer), "Point must be less than max side points");
+        assert!(layer > 0, "Layer must be greater than 0"); // 1 - layer_max
+
+        let mut base_distance: u32 = self.base_distance.into();
+        if spire {
+            let max_spire_layer = Self::_spire_layer_number(self.layer_max.into(), self.spires_layer_distance);
+            assert!(layer <= max_spire_layer.into(), "Layer must be less than max layer for spires");
+
+            // scale the map such that layer 1 of spires is
+            // like layer 6 (self.spires_layer_distance) for realms
+            // so we scale down the layer number and scale up the base distance.
+            // we basically zoom out and rescale the map for spires.
+            // we expect the layer to be scaled down already
+
+            base_distance = self.base_distance.into() * self.spires_layer_distance.into();
+        } else {
+            assert!(layer <= self.layer_max.into(), "Layer must be less than max layer");
+            assert!(layer > self.layers_skipped.into(), "Layer must be greater than layers skipped");
+        }
+
+        assert!(point_index <= Self::_max_point_index(layer), "Point must be less than max side points");
 
         let mut start_coord: Coord = map_center;
+
         let start_directions: Array<(Direction, Direction)> = array![
-            (Direction::East, Direction::NorthWest), (Direction::East, Direction::SouthWest),
-            (Direction::West, Direction::NorthEast), (Direction::West, Direction::SouthEast),
-            (Direction::SouthEast, Direction::West), (Direction::NorthEast, Direction::West),
+            (Direction::East, Direction::SouthWest), (Direction::SouthEast, Direction::West),
+            (Direction::SouthWest, Direction::NorthWest), (Direction::West, Direction::NorthEast),
+            (Direction::NorthWest, Direction::East), (Direction::NorthEast, Direction::SouthEast),
         ];
         let (start_direction, triangle_direction) = *start_directions.at(side);
-        assert!(self.base_distance % 2 == 0, "base distance must be exactly divisble by 2 so the map isnt skewed");
 
         // get the coord of the first structure on layer 1 of the selected side
         let side_first_structure__layer_one: Coord = start_coord
-            .neighbor_after_distance(start_direction, self.base_distance)
-            .neighbor_after_distance(triangle_direction, self.base_distance / 2);
+            .neighbor_after_distance(start_direction, base_distance);
 
         // get the coord of the first structure on selected layer of the selected side
         let side_first_structure__layer_x = side_first_structure__layer_one
-            .neighbor_after_distance(start_direction, self.subsequent_distance * (layer - 1));
+            .neighbor_after_distance(start_direction, base_distance * (layer - 1));
 
         let destination_coord: Coord = side_first_structure__layer_x
-            .neighbor_after_distance(triangle_direction, self.subsequent_distance * point);
+            .neighbor_after_distance(triangle_direction, base_distance * point_index);
         return destination_coord;
+    }
+
+    fn update_max_layer_and_spires(ref self: SettlementConfig, realm_count: u64) {
+        // max realm spots
+        let mut current_max_realm_spots_capacity = Self::_max_spots(self.layer_max.into(), self.layers_skipped.into())
+            // add back the center spire spot that will be taken in _max_spire_spots
+            // because it is not counted in realms spots
+            + Self::_spire_center_point_count()
+            - Self::_max_spire_spots(self.layer_max.into(), self.spires_layer_distance).into();
+
+        let capacity_threshold = PercentageImpl::get(
+            current_max_realm_spots_capacity.into(), self.layer_capacity_bps.into(),
+        );
+        if realm_count > capacity_threshold {
+            self.layer_max += self.layer_capacity_increment;
+            self.spires_max_count = Self::_max_spire_spots(self.layer_max.into(), self.spires_layer_distance);
+        }
     }
 }
 
-#[derive(Introspect, Copy, Drop, Serde, DojoStore)]
+#[derive(IntrospectPacked, Copy, Drop, Serde, DojoStore)]
 pub struct BlitzSettlementConfig {
     pub base_distance: u32,
     pub side: u32,
     pub step: u32,
     pub point: u32,
     pub single_realm_mode: bool,
+    pub two_player_mode: bool,
+}
+
+#[derive(Copy, Drop)]
+pub struct BlitzMapDistanceProfile {
+    pub base_distance: u32,
+    pub step_tile_distance: u32,
+    pub ring_tile_distance: u32,
+    pub mirror_first_step_tile_distance: u32,
+    pub mirror_second_step_tile_distance: u32,
+    pub realm_tile_radius: u32,
+    pub center_tile_radius: u32,
+}
+
+#[generate_trait]
+pub impl BlitzMapDistanceProfileImpl of BlitzMapDistanceProfileTrait {
+    fn resolve_by_blitz_profile_id(reward_profile_id: u8) -> BlitzMapDistanceProfile {
+        let resolved_reward_profile_id = iBlitzProfileImpl::resolve_blitz_profile_id(reward_profile_id);
+
+        if resolved_reward_profile_id == OFFICIAL_60_BLITZ_PROFILE_ID {
+            return Self::official_60();
+        }
+
+        assert!(resolved_reward_profile_id == OFFICIAL_90_BLITZ_PROFILE_ID, "unknown blitz map distance profile");
+        Self::official_90()
+    }
+
+    fn official_60() -> BlitzMapDistanceProfile {
+        BlitzMapDistanceProfile {
+            base_distance: 6,
+            step_tile_distance: 12,
+            ring_tile_distance: 12,
+            mirror_first_step_tile_distance: 9,
+            mirror_second_step_tile_distance: 3,
+            realm_tile_radius: 3,
+            center_tile_radius: 2,
+        }
+    }
+
+    fn official_90() -> BlitzMapDistanceProfile {
+        BlitzMapDistanceProfile {
+            base_distance: 8,
+            step_tile_distance: 15,
+            ring_tile_distance: 15,
+            mirror_first_step_tile_distance: 11,
+            mirror_second_step_tile_distance: 4,
+            realm_tile_radius: 3,
+            center_tile_radius: 2,
+        }
+    }
+
+    fn hyperstructure_realm_scan_distance(self: BlitzMapDistanceProfile, single_realm_mode: bool) -> u32 {
+        let center_offset = if single_realm_mode {
+            self.center_tile_radius
+        } else {
+            0
+        };
+        self.base_distance + center_offset
+    }
 }
 
 #[generate_trait]
 pub impl BlitzSettlementConfigImpl of BlitzSettlementConfigTrait {
-    fn new(base_distance: u32, single_realm_mode: bool) -> BlitzSettlementConfig {
-        BlitzSettlementConfig { base_distance, single_realm_mode, side: 0, step: 1, point: 1 }
+    fn new(base_distance: u32, single_realm_mode: bool, two_player_mode: bool) -> BlitzSettlementConfig {
+        assert!(
+            !(single_realm_mode && two_player_mode),
+            "Eternum: single_realm_mode and two_player_mode cannot both be set",
+        );
+        BlitzSettlementConfig { base_distance, single_realm_mode, two_player_mode, side: 0, step: 1, point: 1 }
     }
 
+    fn next(ref self: BlitzSettlementConfig) {
+        if self.two_player_mode {
+            Blitz2PlayerSettlementConfigImpl::next(ref self);
+        } else {
+            BlitzMultplePlayerSettlementConfigImpl::next(ref self);
+        }
+    }
+
+    fn generate_coords(self: BlitzSettlementConfig, map_center: Coord, reward_profile_id: u8) -> Array<Coord> {
+        if self.two_player_mode {
+            return Blitz2PlayerSettlementConfigImpl::generate_coords(self, map_center);
+        } else {
+            let distance_profile = BlitzMapDistanceProfileImpl::resolve_by_blitz_profile_id(reward_profile_id);
+            return BlitzMultplePlayerSettlementConfigImpl::generate_coords(self, map_center, distance_profile);
+        }
+    }
+}
+
+
+#[generate_trait]
+pub impl BlitzMultplePlayerSettlementConfigImpl of BlitzMultplePlayerSettlementConfigTrait {
     fn next(ref self: BlitzSettlementConfig) {
         if self.side == 5 {
             if self.point == self.max_points() {
@@ -454,29 +613,11 @@ pub impl BlitzSettlementConfigImpl of BlitzSettlementConfigTrait {
         self.step * 2
     }
 
-    fn step_tile_distance() -> u32 {
-        15
-    }
-
-    fn realm_tile_radius() -> u32 {
-        3
-    }
-
-    fn center_tile_radius() -> u32 {
-        2 // must be divisible by 2
-    }
-
-    fn mirror_first_step_tile_distance() -> u32 {
-        11
-    }
-
-    fn mirror_second_step_tile_distance() -> u32 {
-        4
-    }
-
     // Html & JS interactive implementation reference: contracts/game/ext/formulas/blitz_hex_map.html
 
-    fn generate_coords(ref self: BlitzSettlementConfig, map_center: Coord) -> Array<Coord> {
+    fn generate_coords(
+        self: BlitzSettlementConfig, map_center: Coord, distance_profile: BlitzMapDistanceProfile,
+    ) -> Array<Coord> {
         let mut start_coord: Coord = map_center;
         let start_directions: Array<(Direction, Direction)> = array![
             (Direction::NorthEast, Direction::West), (Direction::West, Direction::SouthEast),
@@ -484,31 +625,35 @@ pub impl BlitzSettlementConfigImpl of BlitzSettlementConfigTrait {
             (Direction::SouthWest, Direction::East), (Direction::East, Direction::NorthWest),
         ];
         let (start_direction, triangle_direction) = *start_directions.at(self.side);
-        assert!(self.base_distance % 2 == 0, "base distance must be exactly divisble by 2 so the map isnt skewed");
+        let base_distance = distance_profile.base_distance;
+        let step_tile_distance = distance_profile.step_tile_distance;
+        let realm_tile_radius = distance_profile.realm_tile_radius;
+        let center_tile_radius = distance_profile.center_tile_radius;
+        assert!(base_distance % 2 == 0, "base distance must be exactly divisble by 2 so the map isnt skewed");
 
         // get the coord of the first structure on step 1 of the selected side
         let side_first_structure__step_one: Coord = start_coord
-            .neighbor_after_distance(start_direction, self.base_distance)
-            .neighbor_after_distance(triangle_direction, self.base_distance / 2);
+            .neighbor_after_distance(start_direction, base_distance)
+            .neighbor_after_distance(triangle_direction, base_distance / 2);
 
         // get the coord of the first structure on selected layer of the selected side
         let side_first_structure__step_x = side_first_structure__step_one
-            .neighbor_after_distance(start_direction, Self::step_tile_distance() * (self.step - 1));
+            .neighbor_after_distance(start_direction, step_tile_distance * (self.step - 1));
 
         let is_mirrored = self.point > self.max_points() / 2;
         if !is_mirrored {
             let destination_start_coord: Coord = side_first_structure__step_x
-                .neighbor_after_distance(triangle_direction, Self::step_tile_distance() * (self.point - 1));
+                .neighbor_after_distance(triangle_direction, step_tile_distance * (self.point - 1));
 
             // coords a, b and c form a triangle
             let a = destination_start_coord;
-            let b = destination_start_coord.neighbor_after_distance(start_direction, Self::realm_tile_radius());
-            let c = b.neighbor_after_distance(triangle_direction, Self::realm_tile_radius());
+            let b = destination_start_coord.neighbor_after_distance(start_direction, realm_tile_radius);
+            let c = b.neighbor_after_distance(triangle_direction, realm_tile_radius);
 
             // coord middle is the middle of the triangle
             let middle = a
-                .neighbor_after_distance(start_direction, Self::center_tile_radius())
-                .neighbor_after_distance(triangle_direction, Self::center_tile_radius() / 2);
+                .neighbor_after_distance(start_direction, center_tile_radius)
+                .neighbor_after_distance(triangle_direction, center_tile_radius / 2);
 
             if self.single_realm_mode {
                 return array![middle];
@@ -518,19 +663,19 @@ pub impl BlitzSettlementConfigImpl of BlitzSettlementConfigTrait {
         } else {
             let start_point = self.max_points() - self.point + 1;
             let destination_start_coord: Coord = side_first_structure__step_x
-                .neighbor_after_distance(triangle_direction, Self::step_tile_distance() * (start_point - 1));
+                .neighbor_after_distance(triangle_direction, step_tile_distance * (start_point - 1));
 
             // coords a, b and c form a triangle
             let a = destination_start_coord
-                .neighbor_after_distance(start_direction, Self::mirror_first_step_tile_distance())
-                .neighbor_after_distance(triangle_direction, Self::mirror_second_step_tile_distance());
-            let b = a.neighbor_after_distance(triangle_direction, Self::realm_tile_radius());
-            let c = b.neighbor_after_distance(start_direction, Self::realm_tile_radius());
+                .neighbor_after_distance(start_direction, distance_profile.mirror_first_step_tile_distance)
+                .neighbor_after_distance(triangle_direction, distance_profile.mirror_second_step_tile_distance);
+            let b = a.neighbor_after_distance(triangle_direction, realm_tile_radius);
+            let c = b.neighbor_after_distance(start_direction, realm_tile_radius);
 
             // coord middle is the middle of the triangle
             let middle = a
-                .neighbor_after_distance(triangle_direction, Self::center_tile_radius())
-                .neighbor_after_distance(start_direction, Self::center_tile_radius() / 2);
+                .neighbor_after_distance(triangle_direction, center_tile_radius)
+                .neighbor_after_distance(start_direction, center_tile_radius / 2);
 
             if self.single_realm_mode {
                 return array![middle];
@@ -541,8 +686,38 @@ pub impl BlitzSettlementConfigImpl of BlitzSettlementConfigTrait {
     }
 }
 
+#[generate_trait]
+pub impl Blitz2PlayerSettlementConfigImpl of Blitz2PlayerSettlementConfigTrait {
+    fn next(ref config: BlitzSettlementConfig) {
+        config.side += 1;
+    }
+    // Html & JS interactive implementation reference: contracts/game/ext/formulas/blitz_hex_map.html
+    fn generate_coords(config: BlitzSettlementConfig, map_center: Coord) -> Array<Coord> {
+        assert!(config.side < 2, "Eternum: 2 players already settled on the map");
+        if config.side == 0 {
+            let a1: Coord = map_center.neighbor_after_distance(Direction::West, 8);
+            let a2: Coord = map_center
+                .neighbor_after_distance(Direction::West, 4)
+                .neighbor_after_distance(Direction::SouthWest, 2);
+            let a3: Coord = map_center
+                .neighbor_after_distance(Direction::West, 4)
+                .neighbor_after_distance(Direction::NorthWest, 2);
+            return (array![a1, a2, a3]);
+        } else {
+            let b1: Coord = map_center.neighbor_after_distance(Direction::East, 8);
+            let b2: Coord = map_center
+                .neighbor_after_distance(Direction::East, 4)
+                .neighbor_after_distance(Direction::SouthEast, 2);
+            let b3: Coord = map_center
+                .neighbor_after_distance(Direction::East, 4)
+                .neighbor_after_distance(Direction::NorthEast, 2);
+            return (array![b1, b2, b3]);
+        }
+    }
+}
 
-#[derive(Introspect, Copy, Drop, Serde, DojoStore)]
+
+#[derive(IntrospectPacked, Copy, Drop, Serde, DojoStore)]
 pub struct BlitzHypersSettlementConfig {
     pub max_ring_count: u8,
     pub current_ring_count: u8,
@@ -555,49 +730,155 @@ pub impl BlitzHypersSettlementConfigImpl of BlitzHypersSettlementConfigTrait {
     fn new() -> BlitzHypersSettlementConfig {
         BlitzHypersSettlementConfig { max_ring_count: 0, current_ring_count: 0, side: 5, point: 1 }
     }
+    fn is_valid_ring(self: BlitzHypersSettlementConfig, two_player_mode: bool) -> bool {
+        if two_player_mode {
+            Blitz2PlayerHypersSettlementConfigImpl::is_valid_ring(self)
+        } else {
+            BlitzMultiplePlayerHypersSettlementConfigImpl::is_valid_ring(self)
+        }
+    }
 
-    fn is_valid_ring(ref self: BlitzHypersSettlementConfig) -> bool {
-        if self.current_ring_count > self.max_ring_count {
+    fn next(ref self: BlitzHypersSettlementConfig, two_player_mode: bool) {
+        if two_player_mode {
+            Blitz2PlayerHypersSettlementConfigImpl::next(ref self);
+        } else {
+            BlitzMultiplePlayerHypersSettlementConfigImpl::next(ref self);
+        }
+    }
+
+    fn next_coord(
+        self: BlitzHypersSettlementConfig, map_center: Coord, two_player_mode: bool, reward_profile_id: u8,
+    ) -> Coord {
+        if two_player_mode {
+            return Blitz2PlayerHypersSettlementConfigImpl::next_coord(self, map_center);
+        } else {
+            let distance_profile = BlitzMapDistanceProfileImpl::resolve_by_blitz_profile_id(reward_profile_id);
+            return BlitzMultiplePlayerHypersSettlementConfigImpl::next_coord(self, map_center, distance_profile);
+        }
+    }
+
+    fn check_increase_max(ref world: WorldStorage, registration_count: u128, two_player_mode: bool) {
+        if two_player_mode {
+            Blitz2PlayerHypersSettlementConfigImpl::check_increase_max(ref world, registration_count);
+        } else {
+            BlitzMultiplePlayerHypersSettlementConfigImpl::check_increase_max(ref world, registration_count);
+        }
+    }
+}
+
+
+#[generate_trait]
+pub impl BlitzMultiplePlayerHypersSettlementConfigImpl of BlitzMultiplePlayerHypersSettlementConfigTrait {
+    fn is_valid_ring(config: BlitzHypersSettlementConfig) -> bool {
+        if config.current_ring_count > config.max_ring_count {
             return false;
         }
         return true;
     }
 
-    fn next(ref self: BlitzHypersSettlementConfig) {
-        if self.point >= self.current_ring_count.into() {
-            self.point = 1;
-            if self.side == 5 {
-                self.side = 0;
-                self.current_ring_count += 1;
+    fn next(ref config: BlitzHypersSettlementConfig) {
+        if config.point >= config.current_ring_count {
+            config.point = 1;
+            if config.side == 5 {
+                config.side = 0;
+                config.current_ring_count += 1;
             } else {
-                self.side += 1;
+                config.side += 1;
             }
         } else {
-            self.point += 1;
+            config.point += 1;
         }
     }
 
-    fn ring_tile_distance() -> u32 {
-        15
-    }
-
     // Html & JS interactive implementation reference: contracts/game/ext/formulas/blitz_hex_map.html
-    fn next_coord(self: BlitzHypersSettlementConfig, map_center: Coord) -> Coord {
+    fn next_coord(
+        config: BlitzHypersSettlementConfig, map_center: Coord, distance_profile: BlitzMapDistanceProfile,
+    ) -> Coord {
         let mut start_coord: Coord = map_center;
         let start_directions: Array<(Direction, Direction)> = array![
             (Direction::East, Direction::NorthWest), (Direction::SouthEast, Direction::NorthEast),
             (Direction::SouthWest, Direction::East), (Direction::West, Direction::SouthEast),
             (Direction::NorthWest, Direction::SouthWest), (Direction::NorthEast, Direction::West),
         ];
-        let (start_direction, triangle_direction) = *start_directions.at(self.side);
+        let (start_direction, triangle_direction) = *start_directions.at(config.side);
         return start_coord
-            .neighbor_after_distance(start_direction, Self::ring_tile_distance() * self.current_ring_count.into())
-            .neighbor_after_distance(triangle_direction, Self::ring_tile_distance() * (self.point.into() - 1));
+            .neighbor_after_distance(
+                start_direction, distance_profile.ring_tile_distance * config.current_ring_count.into(),
+            )
+            .neighbor_after_distance(
+                triangle_direction, distance_profile.ring_tile_distance * (config.point.into() - 1),
+            );
+    }
+
+
+    fn check_increase_max(ref world: WorldStorage, registration_count: u128) {
+        // increase hyperstructure ring count
+        // [when (r_squared <= Math.floor(P/6) && P % 6 != 0) OR (r_squared == 0)]
+        // Where P is num registered players
+        // and R is hyperstructure ring count
+
+        let blitz_hyperstructure_settlement_config_selector: felt252 = selector!("blitz_hypers_settlement_config");
+        let mut blitz_hyperstructure_settlement_config: BlitzHypersSettlementConfig = WorldConfigUtilImpl::get_member(
+            world, blitz_hyperstructure_settlement_config_selector,
+        );
+        let max_ring_count = blitz_hyperstructure_settlement_config.max_ring_count;
+        let max_ring_count_squared: u128 = max_ring_count.into() * max_ring_count.into();
+        if max_ring_count_squared.is_zero()
+            || (max_ring_count_squared <= registration_count / 6 && registration_count % 6 != 0) {
+            blitz_hyperstructure_settlement_config.max_ring_count += 1;
+            WorldConfigUtilImpl::set_member(
+                ref world, blitz_hyperstructure_settlement_config_selector, blitz_hyperstructure_settlement_config,
+            );
+        }
+    }
+}
+
+#[generate_trait]
+pub impl Blitz2PlayerHypersSettlementConfigImpl of Blitz2PlayerHypersSettlementConfigTrait {
+    fn is_valid_ring(config: BlitzHypersSettlementConfig) -> bool {
+        if config.current_ring_count > config.max_ring_count {
+            return false;
+        }
+        return true;
+    }
+
+    fn next(ref config: BlitzHypersSettlementConfig) {
+        config.current_ring_count += 1;
+    }
+
+    fn line_tile_distance() -> u32 {
+        6
+    }
+
+    // Html & JS interactive implementation reference: contracts/game/ext/formulas/blitz_hex_map.html
+    fn next_coord(config: BlitzHypersSettlementConfig, map_center: Coord) -> Coord {
+        if config.current_ring_count.is_zero() {
+            return map_center;
+        }
+
+        let start_directions: Array<(Direction, Direction)> = array![
+            (Direction::NorthEast, Direction::West), (Direction::SouthEast, Direction::West),
+        ];
+        let (start_direction, triangle_direction) = *start_directions.at(config.current_ring_count.into() - 1);
+        return map_center
+            .neighbor_after_distance(start_direction, Self::line_tile_distance())
+            .neighbor_after_distance(triangle_direction, Self::line_tile_distance() / 2);
+    }
+
+    fn check_increase_max(ref world: WorldStorage, registration_count: u128) {
+        let blitz_hyperstructure_settlement_config_selector: felt252 = selector!("blitz_hypers_settlement_config");
+        let mut blitz_hyperstructure_settlement_config: BlitzHypersSettlementConfig = WorldConfigUtilImpl::get_member(
+            world, blitz_hyperstructure_settlement_config_selector,
+        );
+        blitz_hyperstructure_settlement_config.max_ring_count = 2; // max 3 hypers for 2 player mode [0,1,2]
+        WorldConfigUtilImpl::set_member(
+            ref world, blitz_hyperstructure_settlement_config_selector, blitz_hyperstructure_settlement_config,
+        );
     }
 }
 
 
-#[derive(Introspect, Copy, Drop, Serde, DojoStore)]
+#[derive(IntrospectPacked, Copy, Drop, Serde, DojoStore)]
 pub struct BlitzRegistrationConfig {
     pub fee_amount: u256,
     pub fee_token: ContractAddress,
@@ -698,6 +979,7 @@ pub struct VictoryPointsWinConfig {
 pub struct TickConfig {
     pub armies_tick_in_seconds: u64,
     pub delivery_tick_in_seconds: u64,
+    pub bitcoin_phase_in_seconds: u64 // 600 = 10 minutes
 }
 
 
@@ -808,6 +1090,11 @@ pub impl TickImpl of TickTrait {
     fn get_delivery_tick_interval(ref world: WorldStorage) -> TickInterval {
         let tick_config: TickConfig = Self::_tick_config(ref world);
         return TickInterval { tick_interval: tick_config.delivery_tick_in_seconds };
+    }
+
+    fn get_bitcoin_phase_interval(ref world: WorldStorage) -> TickInterval {
+        let tick_config: TickConfig = Self::_tick_config(ref world);
+        return TickInterval { tick_interval: tick_config.bitcoin_phase_in_seconds };
     }
 
     fn interval(self: TickInterval) -> u64 {
@@ -1039,4 +1326,3 @@ pub struct BlitzCosmeticAttrsRegister {
     pub player: ContractAddress,
     pub attrs: Span<u128>,
 }
-

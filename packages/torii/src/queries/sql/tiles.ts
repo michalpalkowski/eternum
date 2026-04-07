@@ -33,4 +33,15 @@ export const TILES_QUERIES = {
     WHERE col BETWEEN {minCol} AND {maxCol}
       AND row BETWEEN {minRow} AND {maxRow};
   `,
+
+  TILES_IN_BOUNDS: `
+    SELECT
+        data
+    FROM \`s1_eternum-TileOpt\`
+    WHERE col >= {minX}
+      AND col <= {maxX}
+      AND row >= {minY}
+      AND row <= {maxY}
+    ORDER BY alt, col, row;
+  `,
 } as const;

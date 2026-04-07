@@ -1,67 +1,207 @@
 import { useMemo, useState } from "react";
 
+import { GLOBAL_TORII_BY_CHAIN } from "@/config/global-chain";
 import { useAccountStore } from "@/hooks/store/use-account-store";
 import { MarketClass } from "@/pm/class";
 import { useDojoSdk } from "@/pm/hooks/dojo/use-dojo-sdk";
-import { useUser } from "@/pm/hooks/dojo/user";
+import { useTokens } from "@/pm/hooks/dojo/use-tokens";
 import { useClaimablePayout } from "@/pm/hooks/markets/use-claimable-payout";
 import { useProtocolFees } from "@/pm/hooks/markets/use-protocol-fees";
+import { getPmSqlApiForUrl } from "@/pm/hooks/queries";
+import { getPredictionMarketChain } from "@/pm/prediction-market-config";
 import { formatUnits } from "@/pm/utils";
 import { getContractByName } from "@dojoengine/core";
+import { useAccount } from "@starknet-react/core";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Call, uint256 } from "starknet";
+import { addAddressPadding, Call, uint256 } from "starknet";
+
+type MarketDataChain = "slot" | "mainnet";
+const CLAIM_TX_TIMEOUT_MS = 120_000;
+const CLAIM_CONFIRM_TIMEOUT_MS = 45_000;
+
+const withTimeout = async <T>(promise: Promise<T>, label: string, timeoutMs: number): Promise<T> => {
+  return await new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`));
+    }, timeoutMs);
+
+    promise
+      .then((result) => {
+        clearTimeout(timeout);
+        resolve(result);
+      })
+      .catch((error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+  });
+};
+
+const waitForClaimConfirmation = async (
+  account: {
+    waitForTransaction?: (txHash: string) => Promise<unknown>;
+    provider?: {
+      waitForTransactionWithCheck?: (txHash: string) => Promise<unknown>;
+      waitForTransaction?: (txHash: string) => Promise<unknown>;
+    };
+  },
+  txHash: string,
+) => {
+  const waitWithCheck =
+    account.provider && typeof account.provider.waitForTransactionWithCheck === "function"
+      ? account.provider.waitForTransactionWithCheck.bind(account.provider)
+      : null;
+  const waitFromAccount =
+    typeof account.waitForTransaction === "function" ? account.waitForTransaction.bind(account) : null;
+  const waitFromProvider =
+    account.provider && typeof account.provider.waitForTransaction === "function"
+      ? account.provider.waitForTransaction.bind(account.provider)
+      : null;
+
+  const waitFn = waitWithCheck ?? waitFromAccount ?? waitFromProvider;
+  if (!waitFn) return false;
+
+  await withTimeout(waitFn(txHash), "Claim transaction confirmation", CLAIM_CONFIRM_TIMEOUT_MS);
+  return true;
+};
 
 const toUint256 = (val: bigint) => {
   const asUint = uint256.bnToUint256(val);
   return { low: asUint.low, high: asUint.high };
 };
 
-export const useMarketRedeem = (market?: MarketClass) => {
-  const account = useAccountStore((state) => state.account);
+type UseMarketRedeemOptions = {
+  enabled?: boolean;
+};
+
+const coerceBigIntValue = (value: unknown): bigint | null => {
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? BigInt(Math.trunc(value)) : null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    try {
+      return BigInt(trimmed);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value === "boolean") return value ? 1n : 0n;
+  return null;
+};
+
+const toNonZeroBigIntString = (value: unknown): string | null => {
+  const parsed = coerceBigIntValue(value);
+  return parsed != null && parsed > 0n ? parsed.toString() : null;
+};
+
+const buildAccountAddressFilters = (accountAddress?: string | null) => {
+  if (!accountAddress) return undefined;
+
+  const variants = new Set<string>();
+  variants.add(accountAddress);
+  try {
+    variants.add(`0x${BigInt(accountAddress).toString(16)}`);
+  } catch {
+    // Ignore invalid variant derivation and keep the original address.
+  }
+  try {
+    variants.add(addAddressPadding(accountAddress.toLowerCase()));
+  } catch {
+    // Ignore invalid padding conversion and keep available variants.
+  }
+  return Array.from(variants);
+};
+
+export const useMarketRedeem = (
+  market?: MarketClass,
+  chainOverride?: MarketDataChain,
+  options: UseMarketRedeemOptions = {},
+) => {
+  const storeAccount = useAccountStore((state) => state.account);
+  const { account: connectedAccount, address: connectedAddress } = useAccount();
+  const account = storeAccount ?? connectedAccount ?? null;
+  const accountAddress = account?.address ?? connectedAddress;
+  const chain = chainOverride ?? getPredictionMarketChain();
   const { config } = useDojoSdk();
   const [isRedeeming, setIsRedeeming] = useState(false);
+  const [suppressClaimUi, setSuppressClaimUi] = useState(false);
+  const queryClient = useQueryClient();
+  const claimsEnabled = options.enabled ?? true;
+  const hasResolvedMarket = Boolean(market?.isResolved());
+  const validMarketId = useMemo(() => toNonZeroBigIntString(market?.market_id), [market?.market_id]);
+  const normalizedAccountAddress = useMemo(() => {
+    if (!accountAddress) return null;
+    try {
+      const parsed = BigInt(accountAddress);
+      if (parsed <= 0n) return null;
+      return addAddressPadding(`0x${parsed.toString(16)}`).toLowerCase();
+    } catch {
+      return null;
+    }
+  }, [accountAddress]);
+  const accountAddressFilters = useMemo(() => {
+    if (!(claimsEnabled && hasResolvedMarket)) return undefined;
+    return buildAccountAddressFilters(accountAddress);
+  }, [accountAddress, claimsEnabled, hasResolvedMarket]);
 
-  const { claimableAmount, hasRedeemablePositions } = useClaimablePayout(market as MarketClass, account?.address);
+  const { claimableAmount, hasRedeemablePositions } = useClaimablePayout(market, accountAddress, chainOverride, {
+    enabled: claimsEnabled && hasResolvedMarket,
+  });
 
   // Vault fees calculation
   const vaultFeesAddress = useMemo(
     () => getContractByName(config.manifest, "pm", "VaultFees")?.address,
     [config.manifest],
   );
+  const { balances: vaultFeeBalances } = useTokens(
+    {
+      accountAddresses: accountAddressFilters,
+      contractAddresses: vaultFeesAddress ? [vaultFeesAddress] : [],
+    },
+    true,
+  );
 
-  const {
-    tokens: { getBalances, balances: allBalances },
-  } = useUser();
+  const { fees: vaultFees } = useProtocolFees(validMarketId, claimsEnabled && hasResolvedMarket);
 
-  const vaultFeeBalances = useMemo(() => {
-    if (!vaultFeesAddress) return [];
-    return getBalances([vaultFeesAddress]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allBalances, getBalances, vaultFeesAddress]);
+  const { data: addressProtocolFees } = useQuery({
+    queryKey: ["pm", "protocol-fees", "address", chain, accountAddress],
+    enabled: claimsEnabled && hasResolvedMarket && Boolean(accountAddress),
+    queryFn: async () => {
+      if (!normalizedAccountAddress) return null;
+      return getPmSqlApiForUrl(GLOBAL_TORII_BY_CHAIN[chain]).fetchProtocolFeesById(normalizedAccountAddress);
+    },
+    staleTime: 30 * 1000,
+  });
 
-  const { fees: vaultFees } = useProtocolFees(market?.market_id || "");
+  const { claimableMarketFeeShare, claimableAddressFee } = useMemo(() => {
+    if (!(claimsEnabled && hasResolvedMarket) || !market || !validMarketId) {
+      return { claimableMarketFeeShare: 0n, claimableAddressFee: 0n };
+    }
 
-  const { vaultFeeBalance, claimableVaultFee } = useMemo(() => {
-    if (!market) return { vaultFeeBalance: null, claimableVaultFee: 0n };
+    const userAccumulated = BigInt(addressProtocolFees?.accumulated_fee || 0);
+    const userClaimed = BigInt(addressProtocolFees?.claimed_fee || 0);
+    const claimableAddressFee = userAccumulated > userClaimed ? userAccumulated - userClaimed : 0n;
 
     const relatedBalance = vaultFeeBalances.find((t) => BigInt(t.token_id || 0) === BigInt(market.market_id));
-    if (!relatedBalance) return { vaultFeeBalance: null, claimableVaultFee: 0n };
+    if (!relatedBalance) return { claimableMarketFeeShare: 0n, claimableAddressFee };
 
     const vaultFeesDenominator = market.vaultFeesDenominator;
     const balance = BigInt(relatedBalance?.balance || 0);
     const denominator = BigInt(vaultFeesDenominator?.value || 1);
     const fees = vaultFees && vaultFees[0] ? BigInt(vaultFees[0].accumulated_fee) : 0n;
 
-    const share = (balance * 10_000n) / denominator;
-    const value = (share * fees) / 10_000n;
+    const share = denominator > 0n ? (balance * 10_000n) / denominator : 0n;
+    const claimableMarketFeeShare = (share * fees) / 10_000n;
 
-    return { vaultFeeBalance: relatedBalance, claimableVaultFee: value };
-  }, [market, vaultFeeBalances, vaultFees]);
+    return { claimableMarketFeeShare, claimableAddressFee };
+  }, [addressProtocolFees, claimsEnabled, hasResolvedMarket, market, validMarketId, vaultFeeBalances, vaultFees]);
 
   // Combined claimable amount (position payout + vault fees)
   const totalClaimableAmount = useMemo(() => {
-    return claimableAmount + claimableVaultFee;
-  }, [claimableAmount, claimableVaultFee]);
+    return claimableAmount + claimableMarketFeeShare + claimableAddressFee;
+  }, [claimableAmount, claimableMarketFeeShare, claimableAddressFee]);
 
   const claimableDisplay = useMemo(() => {
     const decimals = Number(market?.collateralToken?.decimals ?? 18);
@@ -69,7 +209,9 @@ export const useMarketRedeem = (market?: MarketClass) => {
     return Number(formatted || 0) > 0 ? formatted : "0";
   }, [totalClaimableAmount, market?.collateralToken?.decimals]);
 
-  const hasClaimableVaultFees = claimableVaultFee > 0n && vaultFeeBalance !== null;
+  const hasClaimableVaultFees = claimableMarketFeeShare > 0n;
+  const hasClaimableAddressFees = claimableAddressFee > 0n;
+  const canAttemptPositionRedeem = Boolean(claimsEnabled && hasResolvedMarket && accountAddress);
 
   const redeem = async () => {
     if (!market) return;
@@ -92,20 +234,19 @@ export const useMarketRedeem = (market?: MarketClass) => {
       return;
     }
 
-    // Check if user has anything to claim (either positions or vault fees)
-    if (!hasRedeemablePositions && !hasClaimableVaultFees) {
-      toast.error("No redeemable positions or vault fees detected in your wallet.");
-      return;
-    }
-
     try {
       setIsRedeeming(true);
 
       const calls: Call[] = [];
       const marketIdU256 = toUint256(BigInt(market.market_id));
 
-      // Add position redeem calls if user has redeemable positions
-      if (hasRedeemablePositions) {
+      // Only include position redeem calls when we detect redeemable positions.
+      // Fallback to force position redeem only when there are no fee claims to process,
+      // otherwise "Nothing to redeem" reverts can block fee-only claims.
+      const shouldIncludePositionRedeem =
+        hasRedeemablePositions || (canAttemptPositionRedeem && !hasClaimableVaultFees && !hasClaimableAddressFees);
+
+      if (shouldIncludePositionRedeem) {
         const positionIds = market.position_ids;
         if (positionIds && positionIds.length > 0) {
           const parentCollectionId = toUint256(0n);
@@ -170,30 +311,85 @@ export const useMarketRedeem = (market?: MarketClass) => {
         calls.push(approveVaultFeesCall, claimVaultFeesCall);
       }
 
+      if (hasClaimableAddressFees) {
+        const claimAddressFeesCall: Call = {
+          contractAddress: marketContractAddress,
+          entrypoint: "claim_address_fee",
+          calldata: [1, market.collateral_token],
+        };
+
+        calls.push(claimAddressFeesCall);
+      }
+
       if (calls.length === 0) {
         toast.error("No claims to process.");
         return;
       }
 
-      await account.execute(calls);
-      toast.success("Claim submitted.");
+      const tx = await withTimeout(account.execute(calls), "Claim transaction submission", CLAIM_TX_TIMEOUT_MS);
+      const txHash =
+        typeof tx === "object" &&
+        tx !== null &&
+        "transaction_hash" in tx &&
+        typeof (tx as { transaction_hash?: unknown }).transaction_hash === "string"
+          ? ((tx as { transaction_hash: string }).transaction_hash as string)
+          : null;
+
+      if (txHash) {
+        try {
+          const confirmed = await waitForClaimConfirmation(
+            account as {
+              waitForTransaction?: (txHash: string) => Promise<unknown>;
+              provider?: {
+                waitForTransactionWithCheck?: (txHash: string) => Promise<unknown>;
+                waitForTransaction?: (txHash: string) => Promise<unknown>;
+              };
+            },
+            txHash,
+          );
+          toast.success(confirmed ? "Claim confirmed." : "Claim submitted.");
+        } catch (confirmError) {
+          toast.success("Claim submitted. Confirmation is delayed; refresh shortly.");
+        }
+      } else {
+        toast.success("Claim submitted.");
+      }
+
+      // Hide stale claim CTA immediately after a successful claim submit/confirm
+      // while indexers catch up, then force data refresh through query invalidation.
+      setSuppressClaimUi(true);
+      setTimeout(() => setSuppressClaimUi(false), 20_000);
+      await Promise.allSettled([
+        queryClient.invalidateQueries({ queryKey: ["pm", "claimable-payout"] }),
+        queryClient.invalidateQueries({ queryKey: ["pm", "protocol-fees"] }),
+        queryClient.invalidateQueries({ queryKey: ["pm", "market"] }),
+      ]);
     } catch (error) {
       console.error(error);
-      toast.error("Failed to submit claim transaction.");
+      const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+      if (message.includes("nothing to redeem") || message.includes("nothin to redeem")) {
+        setSuppressClaimUi(true);
+        setTimeout(() => setSuppressClaimUi(false), 5 * 60_000);
+      }
+      toast.error(error instanceof Error ? error.message : "Failed to submit claim transaction.");
     } finally {
       setIsRedeeming(false);
     }
   };
 
-  // User can claim if they have either redeemable positions or vault fees
-  const hasAnythingToClaim = hasRedeemablePositions || hasClaimableVaultFees;
+  // UI gating should only expose claim actions when we have concrete claimable signal,
+  // otherwise users can hit "Nothing to redeem" after already claiming.
+  const hasAnythingToClaimBase = hasRedeemablePositions || hasClaimableVaultFees || hasClaimableAddressFees;
+  const hasAnythingToClaim = hasAnythingToClaimBase && !suppressClaimUi;
+  const displayClaimable = suppressClaimUi ? "0" : claimableDisplay;
 
   return {
     redeem,
     isRedeeming,
-    claimableDisplay,
+    claimableDisplay: displayClaimable,
     hasRedeemablePositions,
     hasClaimableVaultFees,
+    hasClaimableAddressFees,
     hasAnythingToClaim,
   };
 };

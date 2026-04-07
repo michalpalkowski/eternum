@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useMemo, useState, type ReactNode } from "react";
 
+import type { PredictionMarketChain } from "@/pm/manifest-loader";
 import { ControllersProvider } from "@/pm/hooks/controllers/use-controllers";
 import { UserProvider } from "@/pm/hooks/dojo/user";
-import { getPredictionMarketConfig } from "@/pm/prediction-market-config";
+import { getPredictionMarketChain, getPredictionMarketConfigForChain } from "@/pm/prediction-market-config";
 import { useConfig } from "@/pm/providers";
+import { GLOBAL_TORII_BY_CHAIN } from "@/config/global-chain";
 import Panel from "@/ui/design-system/atoms/panel";
 import {
   DojoSdkProviderInitialized,
@@ -27,8 +29,8 @@ const pmQueryClient = new QueryClient({
     queries: {
       staleTime: 30 * 1000, // 30 seconds
       gcTime: 5 * 60 * 1000, // 5 minutes
-      refetchOnWindowFocus: true,
-      retry: 2,
+      refetchOnWindowFocus: false,
+      retry: 1,
     },
   },
 });
@@ -39,11 +41,25 @@ const MARKET_FILTERS_ALL: MarketFiltersParams = {
   oracle: "All",
 };
 
-export const MarketsProviders = ({ children }: { children: ReactNode }) => {
-  const config = getPredictionMarketConfig();
+export const MarketsProviders = ({
+  children,
+  chain,
+  loadingFallback,
+}: {
+  children: ReactNode;
+  chain?: PredictionMarketChain;
+  loadingFallback?: ReactNode;
+}) => {
+  const resolvedChain = chain ?? getPredictionMarketChain();
+  const config = getPredictionMarketConfigForChain(resolvedChain);
   return (
     <QueryClientProvider client={pmQueryClient}>
-      <DojoSdkProviderInitialized toriiUrl={config.toriiUrl} worldAddress={config.worldAddress}>
+      <DojoSdkProviderInitialized
+        chain={resolvedChain}
+        toriiUrl={GLOBAL_TORII_BY_CHAIN[resolvedChain] ?? config.toriiUrl}
+        worldAddress={config.worldAddress}
+        fallback={loadingFallback}
+      >
         <UserProvider>
           <ControllersProvider>{children}</ControllersProvider>
         </UserProvider>

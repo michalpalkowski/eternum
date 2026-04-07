@@ -1,5 +1,7 @@
+import { AudioManager } from "@/audio/core/AudioManager";
 import { useAccountStore } from "@/hooks/store/use-account-store";
 import { useUIStore } from "@/hooks/store/use-ui-store";
+import { isVillageLikeStructureCategory } from "@/lib/structure-type-utils";
 import { getGameModeConfig } from "@/config/game-modes";
 import type { GameModeConfig } from "@/config/game-modes";
 import {
@@ -32,7 +34,9 @@ import { createPausedLabel, gltfLoader } from "@/three/utils/utils";
 import { LeftView } from "@/types";
 import { BuildingSystemUpdate, Position, StructureProgress, getBlockTimestamp } from "@bibliothecadao/eternum";
 
-import { IS_FLAT_MODE } from "@/ui/config";
+import { HexceptionAmbienceSystem } from "@/three/systems/hexception-ambience-system";
+import type { QualityLevel } from "@/three/systems/hexception-ambience-system";
+import { GRAPHICS_SETTING, IS_FLAT_MODE } from "@/ui/config";
 import { HEXCEPTION_GRID_READY_EVENT } from "@/ui/layouts/game-loading-overlay.utils";
 
 import { ProductionModal } from "@/ui/features/settlement";
@@ -156,7 +160,9 @@ export default class HexceptionScene extends HexagonScene {
   private structureIndex: number = 0;
   private playerStructures: Structure[] = [];
   private mode: GameModeConfig;
+  private ambienceSystem: HexceptionAmbienceSystem | null = null;
   private structureUpdateSubscription: any | null = null;
+  private buildingUpdateUnsubscribe: (() => void) | null = null;
   private isInitialized = false;
   private lastRealmKey?: string;
   // Store Zustand unsubscribe functions to clean up on destroy
@@ -182,11 +188,16 @@ export default class HexceptionScene extends HexagonScene {
     this.pillars.count = 0;
     this.scene.add(this.pillars);
 
+    const quality: QualityLevel = (GRAPHICS_SETTING as QualityLevel) || "HIGH";
+    this.ambienceSystem = new HexceptionAmbienceSystem(this.scene, quality);
+
     this.loadBuildingModels();
     this.loadBiomeModels(900);
 
     this.tileManager = new TileManager(this.dojo.components, this.dojo.systemCalls, { col: 0, row: 0 });
 
+    // Keep the initial local-view grid boot eager so the entry overlay receives
+    // the first hexception:grid-ready event during player handoff.
     this.setup();
 
     this.inputManager.addListener("contextmenu", (raycaster) => {
@@ -276,6 +287,10 @@ export default class HexceptionScene extends HexagonScene {
               this.highlights.map((hex) => ({
                 hex: { col: hex.col, row: hex.row },
                 actionType: ActionType.Build,
+                kind: "destination",
+                isEndpoint: true,
+                isSharedRoute: false,
+                pathDepth: 1,
               })),
             );
           } else {
@@ -402,6 +417,7 @@ export default class HexceptionScene extends HexagonScene {
   }
 
   setup() {
+    this.bootstrapSceneOwnership();
     const col = this.locationManager.getCol();
     const row = this.locationManager.getRow();
     const contractPosition = new Position({ x: col, y: row }).getContract();
@@ -440,13 +456,18 @@ export default class HexceptionScene extends HexagonScene {
       // clear all animation mixers
       this.buildingMixers.clear();
 
+      // Unsubscribe previous building update listener before re-registering
+      this.buildingUpdateUnsubscribe?.();
+
       // subscribe to building updates (create and destroy)
-      this.worldUpdateListener.Buildings.onBuildingUpdate(
+      this.buildingUpdateUnsubscribe = this.worldUpdateListener.Buildings.onBuildingUpdate(
         { col: this.centerColRow[0], row: this.centerColRow[1] },
         (update: BuildingSystemUpdate) => {
           const { innerCol, innerRow, buildingType } = update;
           if (buildingType === BuildingType.None && innerCol && innerRow) {
             this.removeBuilding(innerCol, innerRow);
+          } else if (buildingType !== BuildingType.None) {
+            playBuildingSound(buildingType);
           }
           this.updateHexceptionGrid(this.hexceptionRadius);
         },
@@ -455,6 +476,9 @@ export default class HexceptionScene extends HexagonScene {
       this.removeCastleFromScene();
       this.updateHexceptionGrid(this.hexceptionRadius);
     }
+
+    // Setup ambience system at grid center (origin for the main hex)
+    this.ambienceSystem?.setup(new Vector3(0, 0, 0), this.hexceptionRadius);
 
     this.controls.maxDistance = IS_FLAT_MODE ? 36 : 20;
     this.controls.enablePan = false;
@@ -485,7 +509,7 @@ export default class HexceptionScene extends HexagonScene {
     this.lastRealmKey = realmKey;
   }
 
-  onSwitchOff() {
+  onSwitchOff(_nextSceneName?: SceneName) {
     this.labels.forEach((label) => {
       this.scene.remove(label.label);
     });
@@ -498,6 +522,11 @@ export default class HexceptionScene extends HexagonScene {
 
   destroy() {
     this.clearHoverLabel();
+    this.hoverLabelManager.dispose();
+
+    // Clean up building update subscription
+    this.buildingUpdateUnsubscribe?.();
+    this.buildingUpdateUnsubscribe = null;
 
     // CRITICAL: Clean up all Zustand store subscriptions to prevent memory leaks
     console.log("🧹 Cleaning up Zustand subscriptions:", this.storeUnsubscribes.length);
@@ -572,6 +601,10 @@ export default class HexceptionScene extends HexagonScene {
       this.buildingPreview.dispose();
     }
 
+    // Dispose ambience system
+    this.ambienceSystem?.dispose();
+    this.ambienceSystem = null;
+
     super.destroy();
   }
 
@@ -609,11 +642,15 @@ export default class HexceptionScene extends HexagonScene {
             normalizedCoords,
             useSimpleCost,
           );
+          AudioManager.getInstance().play("ui.build_place");
         } catch (error) {
           console.log("catched error so removing building", error);
           this.removeBuilding(normalizedCoords.col, normalizedCoords.row);
         }
         this.updateHexceptionGrid(this.hexceptionRadius);
+      } else {
+        // Hex is occupied — invalid placement
+        AudioManager.getInstance().play("ui.build_invalid");
       }
     } else {
       // if not building mode
@@ -747,6 +784,7 @@ export default class HexceptionScene extends HexagonScene {
         case StructureType.Hyperstructure:
           return "Hyperstructure";
         case StructureType.Village:
+        case StructureType.Camp:
           return this.mode.labels.village;
         default:
           return "Castle";
@@ -917,11 +955,11 @@ export default class HexceptionScene extends HexagonScene {
             buildingGroup = BUILDINGS_GROUPS.REALMS;
           }
 
-          if (mainStructureType === StructureType.Village) {
-            // Only apply Village model to the central building (castle position)
+          if (isVillageLikeStructureCategory(mainStructureType)) {
+            // Village-like structures use their dedicated center model instead of realm castle stages.
             if (building.col === BUILDINGS_CENTER[0] && building.row === BUILDINGS_CENTER[1]) {
               buildingGroup = BUILDINGS_GROUPS.VILLAGE;
-              buildingType = StructureType.Village;
+              buildingType = mainStructureType as StructureType.Village | StructureType.Camp;
             }
           }
 
@@ -1352,6 +1390,11 @@ export default class HexceptionScene extends HexagonScene {
     this.buildingMixers.forEach((mixer) => {
       mixer.update(deltaTime);
     });
+
+    // Update ambience system with time progress and delta
+    const cycleProgress = this.state.cycleProgress || 0;
+    this.ambienceSystem?.setTimeProgress(cycleProgress);
+    this.ambienceSystem?.update(deltaTime);
   }
 
   public hasActiveLabelAnimations(): boolean {

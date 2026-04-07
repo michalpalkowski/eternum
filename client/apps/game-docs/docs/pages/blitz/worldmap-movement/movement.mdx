@@ -10,8 +10,8 @@ import { ExplorationRewards } from "@/components/blitz-components/ExplorationRew
 
 Stamina is expended whenever an army moves between hexes, explores previously unrevealed areas, or launches an attack
 against enemy forces. Each of these actions has a specific stamina cost, making strategic planning essential to
-maximizing an army's effectiveness. Armies regenerate stamina at a consistent rate of +20 stamina per Phase (one
-minute), totaling +120 stamina per Eternum Day. Each troop type possesses different maximum stamina capacities, outlined
+maximizing an army's effectiveness. Armies regenerate stamina at a consistent rate of +30 stamina per Phase (one
+minute), totaling +180 stamina per Eternum Day. Each troop type possesses different maximum stamina capacities, outlined
 in the table below:
 
 <BlitzTroopMovementTable />
@@ -73,6 +73,8 @@ ownership:
 - Field armies can only transfer into guard slots of their own structure.
 - Guard armies can only transfer into field armies from the same structure (guard armies on Realms, Camps, Essence
   Rifts, or Hyperstructures cannot reinforce field armies from other structures).
+
+Camps can create field armies, while Essence Rifts and Hyperstructures can only store troops and deploy guards.
 
 To transfer troops from one army to another, or to a structure, the player first needs to select its army on the
 worldmap using left-click, then right-click on the target and select the Transfer Troops tab. Troops can be transferred

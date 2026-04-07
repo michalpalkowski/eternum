@@ -1,3 +1,4 @@
+import { useUISound } from "@/audio/hooks/useUISound";
 import Button from "@/ui/design-system/atoms/button";
 import { HintModalButton } from "@/ui/design-system/molecules/hint-modal-button";
 import clsx from "clsx";
@@ -15,15 +16,26 @@ type FilterPopupProps = {
   onOutsideClick?: () => void;
 };
 
+export const resolvePopupWidth = (width?: string) => {
+  if (!width) {
+    return undefined;
+  }
+
+  const normalizedWidth = width.trim();
+  return /^\d+(\.\d+)?$/.test(normalizedWidth) ? `${normalizedWidth}px` : normalizedWidth;
+};
+
 export const SecondaryPopup = ({
   children,
   className,
   containerClassName,
   name,
-  width = "400px",
+  width,
   onOutsideClick,
 }: FilterPopupProps) => {
+  const playPopupOpen = useUISound("ui.modal_open");
   const nodeRef = useRef<HTMLDivElement>(null);
+  const resolvedWidth = resolvePopupWidth(width);
 
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [loaded, setLoaded] = useState(false);
@@ -68,6 +80,10 @@ export const SecondaryPopup = ({
   };
 
   useEffect(() => {
+    playPopupOpen();
+  }, []);
+
+  useEffect(() => {
     if (name) {
       const pos = localStorage.getItem(name);
       if (pos) {
@@ -109,9 +125,10 @@ export const SecondaryPopup = ({
     <motion.div
       className={clsx("flex justify-center", containerClassName)}
       initial={{ opacity: 0 }}
-      animate={{ opacity: 1, width }}
+      animate={resolvedWidth ? { opacity: 1, width: resolvedWidth } : { opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ type: "ease-in-out", stiffness: 3, duration: 0.2 }}
+      style={resolvedWidth ? { width: resolvedWidth } : undefined}
     >
       {loaded && (
         <Draggable
@@ -130,7 +147,7 @@ export const SecondaryPopup = ({
               "fixed popup z-50 flex flex-col translate-x-6 top-[200px] left-[450px] panel-wood panel-wood-corners bg-dark-wood",
               className,
             )}
-            style={{ width: `${width}px` }}
+            style={resolvedWidth ? { width: resolvedWidth } : undefined}
           >
             {/* Ornate corner elements for panel-wood-corners */}
             <div className="corner-bl z-100"></div>

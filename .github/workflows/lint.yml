@@ -5,7 +5,6 @@ on:
     paths-ignore:
       - "contracts/**"
       - "**/manifest.json"
-      - "config/**"
       - ".github/**"
       - "pnpm-lock.yaml"
 
@@ -43,4 +42,8 @@ jobs:
 
       - name: Run Prettier
         if: steps.changed-files.outputs.has_files == 'true'
-        run: xargs -r pnpm prettier --check < /tmp/prettier-files.txt
+        run: |
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            pnpm prettier --check "$file"
+          done < /tmp/prettier-files.txt

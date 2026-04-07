@@ -85,6 +85,7 @@ export const getStructuresDataFromTorii = async (
   const playerStructuresModels = [
     "s1_eternum-Structure",
     "s1_eternum-Resource",
+    "s1_eternum-VillageTroop",
     "s1_eternum-StructureBuildings",
     "s1_eternum-ResourceArrival",
     "s1_eternum-ProductionBoostBonus",
@@ -627,6 +628,30 @@ export const getMapFromToriiExact = async <S extends Schema>(
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
   }
+};
+
+export const getExplorerTroopsFromToriiExact = async <S extends Schema>(
+  client: ToriiClient,
+  components: Component<S, Metadata, undefined>[],
+  minCol: number,
+  maxCol: number,
+  minRow: number,
+  maxRow: number,
+) => {
+  return getEntities(
+    client,
+    AndComposeClause([
+      MemberClause("s1_eternum-ExplorerTroops", "coord.x", "Gte", minCol),
+      MemberClause("s1_eternum-ExplorerTroops", "coord.x", "Lte", maxCol),
+      MemberClause("s1_eternum-ExplorerTroops", "coord.y", "Gte", minRow),
+      MemberClause("s1_eternum-ExplorerTroops", "coord.y", "Lte", maxRow),
+    ]).build(),
+    components as any,
+    [],
+    ["s1_eternum-ExplorerTroops"],
+    EVENT_QUERY_LIMIT,
+    false,
+  );
 };
 
 export const getQuestsFromTorii = async (client: ToriiClient, components: Component<Schema, Metadata, undefined>[]) => {

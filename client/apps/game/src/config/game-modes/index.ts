@@ -9,8 +9,9 @@ import {
   getResourceTiers,
 } from "@bibliothecadao/types";
 import { buildingModelPaths, getStructureModelPaths } from "@/three/constants/scene-constants";
+import { resolveGameModeFromBlitzFlag } from "./resolved-mode";
 
-export type GameModeId = "standard" | "blitz";
+export type GameModeId = "eternum" | "blitz";
 
 export type VillageIconKey = "castle" | "tent";
 
@@ -42,11 +43,11 @@ export interface GameModeConfig {
     showTransferResourcesToTroops: boolean;
     showExplorerCapacity: boolean;
     showHyperstructureProgress: boolean;
-    onboardingVariant: "standard" | "blitz";
+    onboardingVariant: "eternum" | "blitz";
     villageIconKey: VillageIconKey;
     showTradeMenu: boolean;
     showBridgeMenu: boolean;
-    hyperstructuresMenuVariant: "standard" | "blitz";
+    hyperstructuresMenuVariant: "eternum" | "blitz";
     showBankToggle: boolean;
     showQuestToggle: boolean;
     showGuildsTab: boolean;
@@ -82,7 +83,6 @@ export interface GameModeConfig {
     structureModelPaths: ReturnType<typeof getStructureModelPaths>;
     buildingModelPaths: ReturnType<typeof buildingModelPaths>;
   };
-  matches: () => boolean;
 }
 
 const BASE_BUILDING_EXCLUSIONS = new Set<string>([
@@ -96,7 +96,7 @@ const BASE_BUILDING_EXCLUSIONS = new Set<string>([
   "Storehouse",
 ]);
 
-const BLITZ_BUILDING_EXCLUSIONS = new Set<string>(["ResourceFish"]);
+const BLITZ_BUILDING_EXCLUSIONS = new Set<string>(["ResourceFish", "ResourceResearch"]);
 
 const BLITZ_UNMANAGEABLE_RESOURCES = new Set<ResourcesIds>([ResourcesIds.Labor, ResourcesIds.Wheat]);
 
@@ -170,11 +170,10 @@ const blitzConfig: GameModeConfig = {
     structureModelPaths: getStructureModelPaths(true),
     buildingModelPaths: buildingModelPaths(true),
   },
-  matches: () => Boolean(configManager.getBlitzConfig()?.blitz_mode_on),
 };
 
-const standardConfig: GameModeConfig = {
-  id: "standard",
+const eternumConfig: GameModeConfig = {
+  id: "eternum",
   displayName: "Eternum",
   labels: {
     realm: "Realm",
@@ -199,11 +198,11 @@ const standardConfig: GameModeConfig = {
     showTransferResourcesToTroops: true,
     showExplorerCapacity: true,
     showHyperstructureProgress: true,
-    onboardingVariant: "standard",
+    onboardingVariant: "eternum",
     villageIconKey: "castle",
     showTradeMenu: true,
     showBridgeMenu: true,
-    hyperstructuresMenuVariant: "standard",
+    hyperstructuresMenuVariant: "eternum",
     showBankToggle: true,
     showQuestToggle: true,
     showGuildsTab: true,
@@ -228,26 +227,36 @@ const standardConfig: GameModeConfig = {
     structureModelPaths: getStructureModelPaths(false),
     buildingModelPaths: buildingModelPaths(false),
   },
-  matches: () => true,
 };
 
-const GAME_MODE_ORDER: GameModeConfig[] = [blitzConfig, standardConfig];
 const GAME_MODE_BY_ID: Record<GameModeId, GameModeConfig> = {
   blitz: blitzConfig,
-  standard: standardConfig,
+  eternum: eternumConfig,
 };
 
-const resolveGameModeConfig = (): GameModeConfig => {
-  for (const mode of GAME_MODE_ORDER) {
-    if (mode.matches()) {
-      return mode;
-    }
+type GameModeConfigOptions = {
+  modeId?: GameModeId;
+  blitzModeOn?: unknown;
+};
+
+const resolveRuntimeGameModeId = (blitzModeOn: unknown): GameModeId => {
+  const resolvedMode = resolveGameModeFromBlitzFlag(blitzModeOn);
+  if (resolvedMode === "blitz" || resolvedMode === "eternum") {
+    return resolvedMode;
   }
-  return standardConfig;
+  return "eternum";
 };
 
-export const getGameModeConfig = (): GameModeConfig => resolveGameModeConfig();
+const resolveGameModeConfig = (options: GameModeConfigOptions = {}): GameModeConfig => {
+  if (options.modeId) {
+    return GAME_MODE_BY_ID[options.modeId];
+  }
 
-export const getGameModeId = (): GameModeId => getGameModeConfig().id;
+  const worldBlitzModeOnFlag = options.blitzModeOn ?? configManager.getBlitzConfig()?.blitz_mode_on;
+  return GAME_MODE_BY_ID[resolveRuntimeGameModeId(worldBlitzModeOnFlag)];
+};
 
-const getGameModeConfigById = (id: GameModeId): GameModeConfig => GAME_MODE_BY_ID[id];
+export const getGameModeConfig = (options: GameModeConfigOptions = {}): GameModeConfig =>
+  resolveGameModeConfig(options);
+
+export const getGameModeId = (options: GameModeConfigOptions = {}): GameModeId => getGameModeConfig(options).id;

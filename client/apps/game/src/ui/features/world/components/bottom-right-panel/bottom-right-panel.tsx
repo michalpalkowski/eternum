@@ -1,7 +1,9 @@
+import { useGameModeConfig } from "@/config/game-modes/use-game-mode-config";
 import { BottomPanelTabId, useUIStore } from "@/hooks/store/use-ui-store";
 import { debouncedGetEntitiesFromTorii } from "@/dojo/debounced-queries";
 import { getStructuresDataFromTorii } from "@/dojo/queries";
 import { useEntityResync } from "@/hooks/helpers/use-entity-resync";
+import { isVillageLikeStructureCategory, normalizeStructureCategory } from "@/lib/structure-type-utils";
 import { FELT_CENTER } from "@/ui/config";
 import { cn } from "@/ui/design-system/atoms/lib/utils";
 import Button from "@/ui/design-system/atoms/button";
@@ -28,6 +30,8 @@ import {
   BuildingTypeToString,
   ID,
   ResourcesIds,
+  StructureType,
+  TileOccupier,
   findResourceById,
 } from "@bibliothecadao/types";
 import { Component, getComponentValue, Metadata, Schema } from "@dojoengine/recs";
@@ -123,13 +127,13 @@ const PanelFrame = ({ title, children, headerAction, className, attached = false
     )}
     style={{ height: BOTTOM_PANEL_HEIGHT }}
   >
-    <header className="flex items-center justify-between gap-2 border-b border-gold/20 px-3 py-1.5">
+    <header className="flex items-center justify-between gap-2 border-b border-gold/20 px-2 py-1 lg:px-3 lg:py-1.5">
       <p className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-[0.35em] text-gold/70">
         {title}
       </p>
       {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
     </header>
-    <div className="flex-1 min-h-0 overflow-hidden px-2.5 py-2">{children}</div>
+    <div className="flex-1 min-h-0 overflow-hidden px-1.5 py-1 lg:px-2.5 lg:py-2">{children}</div>
   </section>
 );
 
@@ -201,35 +205,42 @@ const MapTilePanel = () => {
     return tile.occupier_id !== 0;
   }, [tile]);
 
+  const occupierType = useMemo(() => tile?.occupier_type ?? 0, [tile]);
+
+  const isSpire = useMemo(() => {
+    return occupierType === TileOccupier.Spire;
+  }, [occupierType]);
+
   const isStructure = useMemo(() => {
-    return isTileOccupierStructure(tile?.occupier_type || 0);
-  }, [tile]);
+    return Boolean(tile?.occupier_is_structure) || isTileOccupierStructure(occupierType);
+  }, [occupierType, tile?.occupier_is_structure]);
 
   const isChest = useMemo(() => {
-    return isTileOccupierChest(tile?.occupier_type || 0);
-  }, [tile]);
+    return isTileOccupierChest(occupierType);
+  }, [occupierType]);
 
   const isQuest = useMemo(() => {
-    return isTileOccupierQuest(tile?.occupier_type || 0);
-  }, [tile]);
+    return isTileOccupierQuest(occupierType);
+  }, [occupierType]);
 
   const tileTypeLabel = useMemo(() => {
     if (!tile) return "Hex Tile";
     if (!hasOccupier) return "Biome Tile";
+    if (isSpire) return "Spire Tile";
     if (isStructure) return "Structure Tile";
     if (isChest) return "Relic Tile";
     if (isQuest) return "Quest Tile";
     return "Army Tile";
-  }, [tile, hasOccupier, isStructure, isChest, isQuest]);
+  }, [tile, hasOccupier, isSpire, isStructure, isChest, isQuest]);
 
   const panelTitle = selectedHex
     ? `${tileTypeLabel} · (${selectedHex.col - FELT_CENTER()}, ${selectedHex.row - FELT_CENTER()})`
     : "No Tile Selected";
 
   const syncableEntityType = useMemo<SyncableEntityType | null>(() => {
-    if (!tile || !hasOccupier || isChest || isQuest) return null;
+    if (!tile || !hasOccupier || isSpire || isChest || isQuest) return null;
     return isStructure ? "structure" : "explorer";
-  }, [hasOccupier, isChest, isQuest, isStructure, tile]);
+  }, [hasOccupier, isChest, isQuest, isSpire, isStructure, tile]);
 
   const syncableEntityId = useMemo<ID | null>(() => {
     if (!tile || !syncableEntityType) return null;
@@ -338,14 +349,16 @@ const LocalTilePanel = () => {
   const setTooltip = useUIStore((state) => state.setTooltip);
   const toggleModal = useUIStore((state) => state.toggleModal);
   const currentDefaultTick = getBlockTimestamp().currentDefaultTick;
+  const mode = useGameModeConfig();
 
-  const structureBase = useMemo(() => {
+  const selectedStructure = useMemo(() => {
     const structure = playerStructures.find((entry) => entry.entityId === structureEntityId);
     const base = structure?.structure?.base;
     if (base && base.coord_x !== undefined && base.coord_y !== undefined) {
       return {
         outerCol: Number(base.coord_x),
         outerRow: Number(base.coord_y),
+        category: normalizeStructureCategory(base.category),
       };
     }
 
@@ -363,6 +376,7 @@ const LocalTilePanel = () => {
       return {
         outerCol: Number(liveBase.coord_x),
         outerRow: Number(liveBase.coord_y),
+        category: normalizeStructureCategory(liveBase.category),
       };
     }
 
@@ -374,33 +388,33 @@ const LocalTilePanel = () => {
     if (!Number.isFinite(entityId) || entityId <= 0) return null;
     const syncPosition = selectedBuildingHex
       ? { col: selectedBuildingHex.outerCol, row: selectedBuildingHex.outerRow }
-      : structureBase
-        ? { col: structureBase.outerCol, row: structureBase.outerRow }
+      : selectedStructure
+        ? { col: selectedStructure.outerCol, row: selectedStructure.outerRow }
         : null;
     if (!syncPosition) return null;
     return {
       entityId: entityId as ID,
       position: syncPosition,
     };
-  }, [selectedBuildingHex, structureBase, structureEntityId]);
+  }, [selectedBuildingHex, selectedStructure, structureEntityId]);
   const structureSyncKey = structureSyncTarget ? `structure:${String(structureSyncTarget.entityId)}` : null;
   const isSyncingStructure = isSyncing(structureSyncKey);
 
   useEffect(() => {
-    if (!structureBase) return;
+    if (!selectedStructure) return;
     if (
       !selectedBuildingHex ||
-      selectedBuildingHex.outerCol !== structureBase.outerCol ||
-      selectedBuildingHex.outerRow !== structureBase.outerRow
+      selectedBuildingHex.outerCol !== selectedStructure.outerCol ||
+      selectedBuildingHex.outerRow !== selectedStructure.outerRow
     ) {
       setSelectedBuildingHex({
-        outerCol: structureBase.outerCol,
-        outerRow: structureBase.outerRow,
+        outerCol: selectedStructure.outerCol,
+        outerRow: selectedStructure.outerRow,
         innerCol: BUILDINGS_CENTER[0],
         innerRow: BUILDINGS_CENTER[1],
       });
     }
-  }, [selectedBuildingHex, setSelectedBuildingHex, structureBase]);
+  }, [selectedBuildingHex, selectedStructure, setSelectedBuildingHex]);
 
   const building = useMemo(() => {
     if (!selectedBuildingHex || !buildingComponent) return null;
@@ -424,9 +438,17 @@ const LocalTilePanel = () => {
     selectedBuildingHex.innerCol === BUILDINGS_CENTER[0] &&
     selectedBuildingHex.innerRow === BUILDINGS_CENTER[1];
 
+  const selectedStructureCategory = selectedStructure?.category ?? null;
   const hasBuilding = buildingCategory !== null && buildingCategory !== BuildingType.None;
   const buildingName = (() => {
-    if (isCastleTile) return "Castle";
+    if (isCastleTile) {
+      if (selectedStructureCategory === StructureType.Realm) return "Castle";
+      if (isVillageLikeStructureCategory(selectedStructureCategory)) return mode.labels.village;
+      if (selectedStructureCategory === StructureType.FragmentMine) return mode.labels.fragmentMine;
+      if (selectedStructureCategory === StructureType.Hyperstructure) return "Hyperstructure";
+      if (selectedStructureCategory === StructureType.Bank) return "Bank";
+      return "Structure";
+    }
     if (hasBuilding) {
       return BuildingTypeToString[buildingCategory as keyof typeof BuildingTypeToString] ?? "Building";
     }
@@ -985,7 +1007,7 @@ export const BottomRightPanel = memo(() => {
       aria-hidden={!shouldShow}
       style={{ bottom: BOTTOM_PANEL_MARGIN }}
     >
-      <div className="relative w-full min-h-[44px] md:ml-auto md:w-[44%] lg:w-[36%] xl:w-[32%]">
+      <div className="relative w-full min-h-[44px] md:ml-auto md:w-[55%] lg:w-[44%] xl:w-[36%] 2xl:w-[32%]">
         <PanelTabs
           tabs={availableTabs}
           activeTab={activeTab}

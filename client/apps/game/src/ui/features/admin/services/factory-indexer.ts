@@ -1,6 +1,11 @@
 import { CARTRIDGE_API_BASE, TORII_CREATOR_URL } from "../constants";
 import { getFactorySqlBaseUrl } from "../constants";
 import { resolveWorldAddressFromFactory } from "@/runtime/world/factory-resolver";
+import {
+  updateFactoryIndexerTier as updateFactoryIndexerTierViaWorker,
+  type FactoryWorkerEnvironmentId,
+  type FactoryWorkerIndexerTier,
+} from "@/ui/features/factory-v2/api/factory-worker";
 import type { Chain } from "@contracts";
 
 interface ToriiConfigPayload {
@@ -43,7 +48,39 @@ export const createIndexer = async (payload: ToriiConfigPayload): Promise<void> 
   }
 };
 
+export const updateIndexerTier = async ({
+  environment,
+  gameName,
+  tier,
+  adminSecret,
+}: {
+  environment: FactoryWorkerEnvironmentId;
+  gameName: string;
+  tier: FactoryWorkerIndexerTier;
+  adminSecret: string;
+}): Promise<void> => {
+  await updateFactoryIndexerTierViaWorker({ environment, gameName, tier, adminSecret });
+};
+
 export const getWorldDeployedAddress = async (chain: Chain, worldName: string): Promise<string | null> => {
   const base = getFactorySqlBaseUrl(chain);
   return resolveWorldAddressFromFactory(base, worldName);
+};
+
+/**
+ * Check if banks have been created for a world by querying its torii SQL endpoint.
+ * Bank structures have category = 3 in the Structure model.
+ */
+export const checkBanksExist = async (worldName: string, expectedCount: number): Promise<boolean> => {
+  const url = `${CARTRIDGE_API_BASE}/x/${worldName}/torii/sql?query=${encodeURIComponent(
+    "SELECT COUNT(*) as count FROM [s1_eternum-Structure] WHERE category = 3",
+  )}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return false;
+    const rows = (await res.json()) as Record<string, unknown>[];
+    return Number(rows?.[0]?.count ?? 0) >= expectedCount;
+  } catch {
+    return false;
+  }
 };

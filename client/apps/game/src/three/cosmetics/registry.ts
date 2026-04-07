@@ -150,6 +150,7 @@ const DEFAULT_ATTACHMENT_ENTRIES: CosmeticRegistryEntry[] = [
       },
       trait: CosmeticTraitType.TroopPrimary,
     },
+    ownershipKeys: ["0x205010901"],
   },
   {
     id: "attachment:back:common-quiver",
@@ -173,6 +174,7 @@ const DEFAULT_ATTACHMENT_ENTRIES: CosmeticRegistryEntry[] = [
       },
       trait: CosmeticTraitType.TroopSecondary,
     },
+    ownershipKeys: ["0x206010a01"],
   },
   {
     id: "attachment:paladin:winter-primary",
@@ -196,6 +198,7 @@ const DEFAULT_ATTACHMENT_ENTRIES: CosmeticRegistryEntry[] = [
       },
       trait: CosmeticTraitType.TroopPrimary,
     },
+    ownershipKeys: ["0x305020701"],
   },
   {
     id: "attachment:paladin:winter-secondary",
@@ -219,6 +222,7 @@ const DEFAULT_ATTACHMENT_ENTRIES: CosmeticRegistryEntry[] = [
       },
       trait: CosmeticTraitType.TroopSecondary,
     },
+    ownershipKeys: ["0x306020801"],
   },
   {
     id: "attachment:army:aura-legacy",
@@ -242,6 +246,7 @@ const DEFAULT_ATTACHMENT_ENTRIES: CosmeticRegistryEntry[] = [
       },
       trait: CosmeticTraitType.TroopAura,
     },
+    ownershipKeys: ["0x4050301"],
   },
   {
     id: "attachment:structure:common-platform",
@@ -265,6 +270,7 @@ const DEFAULT_ATTACHMENT_ENTRIES: CosmeticRegistryEntry[] = [
       },
       trait: CosmeticTraitType.TroopBase,
     },
+    ownershipKeys: ["0x8010b01"],
   },
   {
     id: "attachment:structure:aura-legacy",
@@ -288,6 +294,7 @@ const DEFAULT_ATTACHMENT_ENTRIES: CosmeticRegistryEntry[] = [
       },
       trait: CosmeticTraitType.RealmAura,
     },
+    ownershipKeys: ["0x2040401"],
   },
   {
     id: "attachment:structure:aura-winter-spike",
@@ -311,6 +318,7 @@ const DEFAULT_ATTACHMENT_ENTRIES: CosmeticRegistryEntry[] = [
       },
       trait: CosmeticTraitType.RealmAura,
     },
+    ownershipKeys: ["0x2030601"],
   },
 ];
 
@@ -327,6 +335,7 @@ const DEFAULT_EXTRA_ARMY_SKINS: CosmeticRegistryEntry[] = [
       },
       trait: CosmeticTraitType.TroopArmor,
     },
+    ownershipKeys: ["0x107050201"],
   },
 ];
 
@@ -343,6 +352,7 @@ const DEFAULT_EXTRA_STRUCTURE_SKINS: CosmeticRegistryEntry[] = [
       },
       trait: CosmeticTraitType.RealmSkin,
     },
+    ownershipKeys: ["0x3040101"],
   },
   {
     id: "structure:realm:castle-winter-l3",
@@ -356,6 +366,7 @@ const DEFAULT_EXTRA_STRUCTURE_SKINS: CosmeticRegistryEntry[] = [
       },
       trait: CosmeticTraitType.RealmSkin,
     },
+    ownershipKeys: ["0x3030501"],
   },
 ];
 

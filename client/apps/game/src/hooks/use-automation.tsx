@@ -7,22 +7,25 @@ import {
   type RealmProductionPlan,
   type RealmResourceSnapshot,
 } from "@/ui/features/infrastructure/automation/model/automation-processor";
+import { useOwnedProductionStructureInfos } from "@/hooks/helpers/use-owned-structure-info";
 import {
   useAutomationStore,
   DEFAULT_RESOURCE_AUTOMATION_PERCENTAGES,
   DONKEY_DEFAULT_RESOURCE_PERCENT,
   type ResourceAutomationPercentages,
   type RealmAutomationExecutionSummary,
+  type RealmAutomationConfig,
 } from "./store/use-automation-store";
 import { useUIStore } from "@/hooks/store/use-ui-store";
 import { calculatePresetAllocations, getAutomationOverallocation } from "@/utils/automation-presets";
 import { useGameModeConfig } from "@/config/game-modes/use-game-mode-config";
-import { useDojo, usePlayerOwnedRealmsInfo, usePlayerOwnedVillagesInfo } from "@bibliothecadao/react";
+import { useDojo } from "@bibliothecadao/react";
 import { getBlockTimestamp, getConservativeBlockTimestamp, configManager } from "@bibliothecadao/eternum";
-import { ResourcesIds, StructureType } from "@bibliothecadao/types";
+import { ResourcesIds } from "@bibliothecadao/types";
 import { useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { Account as StarknetAccount } from "starknet";
+import { isVillageLikeStructureCategory } from "@/ui/lib/structure-capabilities";
 
 const resolveResourceLabel = (resourceId: number): string => {
   const label = ResourcesIds[resourceId as ResourcesIds];
@@ -87,9 +90,9 @@ export const useAutomation = () => {
     account: { account: starknetSignerAccount },
   } = useDojo();
 
-  const realms = useAutomationStore((state) => state.realms);
   const setNextRunTimestamp = useAutomationStore((state) => state.setNextRunTimestamp);
   const recordExecution = useAutomationStore((state) => state.recordExecution);
+  const recordStatus = useAutomationStore((state) => state.recordStatus);
   const setRealmPreset = useAutomationStore((state) => state.setRealmPreset);
   const getRealmConfig = useAutomationStore((state) => state.getRealmConfig);
   const upsertRealm = useAutomationStore((state) => state.upsertRealm);
@@ -99,8 +102,7 @@ export const useAutomation = () => {
   const processingRef = useRef(false);
   const processRealmsRef = useRef<() => Promise<boolean>>(async () => false);
   const setNextRunTimestampRef = useRef(setNextRunTimestamp);
-  const playerRealms = usePlayerOwnedRealmsInfo();
-  const playerVillages = usePlayerOwnedVillagesInfo();
+  const playerStructures = useOwnedProductionStructureInfos();
   const gameEndAt = useUIStore((state) => state.gameEndAt);
   const mode = useGameModeConfig();
   const realmResourcesSignatureRef = useRef<string>("");
@@ -156,7 +158,7 @@ export const useAutomation = () => {
       syncedRealmIdsRef.current.clear();
       return;
     }
-    const managedStructures = [...playerRealms, ...playerVillages];
+    const managedStructures = playerStructures;
     const activeIds = new Set(managedStructures.map((structure) => String(structure.entityId)));
 
     if (managedStructures.length === 0) {
@@ -164,7 +166,7 @@ export const useAutomation = () => {
     }
 
     managedStructures.forEach((structure) => {
-      const entityType = structure.structure?.category === StructureType.Village ? "village" : "realm";
+      const entityType = isVillageLikeStructureCategory(structure.structure?.category) ? "village" : "realm";
       const name = mode.structure.getName(structure.structure).name;
       const realmId = String(structure.entityId);
       syncedRealmIdsRef.current.add(realmId);
@@ -185,7 +187,7 @@ export const useAutomation = () => {
         removeRealm(realmId);
       }
     });
-  }, [hydrated, playerRealms, playerVillages, removeRealm, upsertRealm, mode]);
+  }, [hydrated, playerStructures, removeRealm, upsertRealm, mode]);
 
   const processRealms = useCallback(async (): Promise<boolean> => {
     if (processingRef.current) return false;
@@ -205,7 +207,7 @@ export const useAutomation = () => {
       return false;
     }
 
-    const realmList = Object.values(realms).filter(
+    const realmList = Object.values(useAutomationStore.getState().realms).filter(
       (realm) => realm.entityType === "realm" || realm.entityType === "village",
     );
     if (realmList.length === 0) {
@@ -259,6 +261,12 @@ export const useAutomation = () => {
           console.log("[Automation] Skipping automation run due to idle preset", {
             realmId: activeRealmConfig.realmId,
             realmName: realmLabel,
+          });
+          recordStatus(activeRealmConfig.realmId, {
+            status: "skipped",
+            message: "Idle preset",
+            attemptedAt: Date.now(),
+            consecutiveFailures: 0,
           });
           continue;
         }
@@ -340,6 +348,12 @@ export const useAutomation = () => {
 
         if (!planHasExecutableCalls(plan)) {
           console.log("[Automation] No executable automation calls detected", planLogPayload);
+          recordStatus(activeRealmConfig.realmId, {
+            status: "skipped",
+            message: "No executable calls",
+            attemptedAt: Date.now(),
+            consecutiveFailures: 0,
+          });
           continue;
         }
 
@@ -352,27 +366,35 @@ export const useAutomation = () => {
         });
       }
 
-      // Phase 2: Execute all plans in parallel (enqueue all at once before any user actions can interleave)
+      // Phase 2: Execute all plans in parallel (each realm gets its own independent transaction)
+      console.log(
+        `[Automation] Planning complete: ${executablePlans.length} executable out of ${realmList.length} realms`,
+      );
       if (executablePlans.length > 0) {
         console.log(`[Automation] Executing ${executablePlans.length} production plans in parallel`);
 
         const results = await Promise.allSettled(
           executablePlans.map(async ({ plan, realmConfig, realmLabel, planLogPayload }) => {
-            console.log("[Automation] Executing production plan", planLogPayload);
-            const callset = plan.callset;
-            await execute_realm_production_plan({
-              signer: starknetSignerAccount as StarknetAccount,
-              realm_entity_id: plan.realmId,
-              resource_to_resource: callset.resourceToResource.map((item) => ({
-                resource_id: item.resourceId,
-                cycles: item.cycles,
-              })),
-              labor_to_resource: callset.laborToResource.map((item) => ({
-                resource_id: item.resourceId,
-                cycles: item.cycles,
-              })),
-            });
-            return { plan, realmConfig, realmLabel, planLogPayload };
+            try {
+              console.log("[Automation] Executing production plan", planLogPayload);
+              const callset = plan.callset;
+              await execute_realm_production_plan({
+                signer: starknetSignerAccount as StarknetAccount,
+                realm_entity_id: plan.realmId,
+                skipQueue: true,
+                resource_to_resource: callset.resourceToResource.map((item) => ({
+                  resource_id: item.resourceId,
+                  cycles: item.cycles,
+                })),
+                labor_to_resource: callset.laborToResource.map((item) => ({
+                  resource_id: item.resourceId,
+                  cycles: item.cycles,
+                })),
+              });
+              return { plan, realmConfig, realmLabel, planLogPayload };
+            } catch (error) {
+              throw { error, realmConfig, realmLabel };
+            }
           }),
         );
 
@@ -382,6 +404,12 @@ export const useAutomation = () => {
             const { plan, realmConfig, realmLabel, planLogPayload } = result.value;
             const summary = buildExecutionSummary(plan, Date.now());
             recordExecution(realmConfig.realmId, summary);
+            recordStatus(realmConfig.realmId, {
+              status: "success",
+              message: undefined,
+              attemptedAt: Date.now(),
+              consecutiveFailures: 0,
+            });
             console.log("[Automation] Automation execution complete", {
               realmId: plan.realmId,
               realmName: realmLabel,
@@ -406,10 +434,29 @@ export const useAutomation = () => {
               toast.success(`Automation executed for ${realmConfig.realmName ?? `Realm ${plan.realmId}`}.`);
             }
           } else {
-            // Extract realm info from the error if possible
-            const errorMessage = result.reason instanceof Error ? result.reason.message : String(result.reason);
-            console.error(`Automation: Failed to execute plan`, errorMessage);
-            toast.error(`Automation failed. Check console for details.`);
+            const rejection = result.reason as {
+              error?: unknown;
+              realmConfig?: (typeof executablePlans)[0]["realmConfig"];
+              realmLabel?: string;
+            };
+            const rawError = rejection?.error ?? result.reason;
+            const errorMessage = rawError instanceof Error ? rawError.message : String(rawError);
+            const realmConfig = rejection?.realmConfig;
+            const realmLabel = rejection?.realmLabel ?? "Unknown realm";
+
+            console.error(`Automation: Failed to execute plan for ${realmLabel}`, errorMessage);
+
+            if (realmConfig) {
+              const prev = getRealmConfig(realmConfig.realmId);
+              recordStatus(realmConfig.realmId, {
+                status: "failed",
+                message: errorMessage,
+                attemptedAt: Date.now(),
+                consecutiveFailures: (prev?.lastStatus?.consecutiveFailures ?? 0) + 1,
+              });
+            }
+
+            toast.error(`Automation failed for ${realmLabel}: ${errorMessage}`);
           }
         }
       }
@@ -420,9 +467,9 @@ export const useAutomation = () => {
     return anyExecuted;
   }, [
     components,
-    realms,
     execute_realm_production_plan,
     recordExecution,
+    recordStatus,
     starknetSignerAccount,
     setRealmPreset,
     getRealmConfig,
@@ -489,36 +536,39 @@ export const useAutomation = () => {
   }, [setNextRunTimestamp]);
 
   useEffect(() => {
-    if (isGameOver()) {
-      stopAutomation();
-      return;
-    }
+    const computeSignature = (realms: Record<string, RealmAutomationConfig>) =>
+      Object.entries(realms)
+        .filter(([, realm]) => realm.entityType === "realm" || realm.entityType === "village")
+        .map(([realmId, realm]) => {
+          const customKeys = Object.keys(realm.customPercentages ?? {})
+            .toSorted()
+            .join(",");
+          const presetId = realm.presetId ?? "smart";
+          return `${realmId}:${presetId}:${customKeys}`;
+        })
+        .toSorted()
+        .join("|");
 
-    const signature = Object.entries(realms)
-      .filter(([, realm]) => realm.entityType === "realm" || realm.entityType === "village")
-      .map(([realmId, realm]) => {
-        const customKeys = Object.keys(realm.customPercentages ?? {})
-          .toSorted()
-          .join(",");
-        const presetId = realm.presetId ?? "smart";
-        return `${realmId}:${presetId}:${customKeys}`;
-      })
-      .toSorted()
-      .join("|");
+    const unsub = useAutomationStore.subscribe((state, prevState) => {
+      if (state.realms === prevState.realms) return;
+      if (isGameOver()) return;
 
-    if (signature !== realmResourcesSignatureRef.current) {
-      realmResourcesSignatureRef.current = signature;
-      const currentBlockMs = getBlockTimestamp().currentBlockTimestamp * 1000;
-      if (currentBlockMs >= automationEnabledAtRef.current) {
-        lastRunBlockTimestampRef.current = currentBlockMs;
-        automationEnabledAtRef.current = currentBlockMs + PROCESS_INTERVAL_MS;
-        nextRunBlockTimestampRef.current = automationEnabledAtRef.current;
-        setNextRunTimestampRef.current(nextRunBlockTimestampRef.current);
-        void processRealmsRef.current();
+      const newSignature = computeSignature(state.realms);
+      if (newSignature !== realmResourcesSignatureRef.current) {
+        realmResourcesSignatureRef.current = newSignature;
+        const currentBlockMs = getBlockTimestamp().currentBlockTimestamp * 1000;
+        if (currentBlockMs >= automationEnabledAtRef.current) {
+          lastRunBlockTimestampRef.current = currentBlockMs;
+          automationEnabledAtRef.current = currentBlockMs + PROCESS_INTERVAL_MS;
+          nextRunBlockTimestampRef.current = automationEnabledAtRef.current;
+          setNextRunTimestampRef.current(nextRunBlockTimestampRef.current);
+          void processRealmsRef.current();
+        }
+        scheduleNextCheckRef.current?.();
       }
-      scheduleNextCheckRef.current?.();
-    }
-  }, [realms, isGameOver, stopAutomation]);
+    });
+    return unsub;
+  }, [isGameOver]);
 
   useEffect(() => {
     if (isGameOver()) {

@@ -2,7 +2,7 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import { CairoCustomEnum } from "starknet";
 import { useMemo } from "react";
 
-import type { RegisteredToken } from "@/pm/bindings";
+import type { ConditionResolution, RegisteredToken } from "@/pm/bindings";
 import { MarketClass } from "@/pm/class";
 import { MarketStatusFilter, MarketTypeFilter, getPmSqlApiForUrl, type MarketWithDetailsRow } from "@/pm/hooks/queries";
 import { useConfig } from "@/pm/providers";
@@ -12,6 +12,7 @@ import { GLOBAL_TORII_BY_CHAIN } from "@/config/global-chain";
 type MarketDataChain = "slot" | "mainnet";
 export type MarketChainFilter = "all" | MarketDataChain;
 export type MarketStatusKey = "all" | "live" | "awaiting" | "resolved";
+export type MarketSortKey = "creation-date" | "end-time" | "volume" | "pool-size";
 
 type SourceStatus = {
   ok: boolean;
@@ -24,6 +25,8 @@ export type EnrichedMarket = {
   market: MarketClass;
   volumeRaw: bigint;
   volumeDisplay: string;
+  tvlRaw: bigint;
+  tvlDisplay: string;
 };
 
 const STATUS_TO_FILTER: Record<MarketStatusKey, MarketStatusFilter> = {
@@ -62,6 +65,25 @@ const toErrorMessage = (error: unknown): string => {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === "string") return error;
   return "Unknown data source error";
+};
+
+const normalizeHexAddress = (value: unknown): string | null => {
+  if (value == null) return null;
+
+  try {
+    const normalized = `0x${BigInt(String(value)).toString(16)}`.toLowerCase();
+    return normalized;
+  } catch {
+    return null;
+  }
+};
+
+const getMarketPrizeAddress = (market: MarketClass): string | null => {
+  if (!Array.isArray(market.oracle_params) || market.oracle_params.length < 2) {
+    return null;
+  }
+
+  return normalizeHexAddress(market.oracle_params[1]);
 };
 
 const getSelectedChains = (chainFilter: MarketChainFilter): MarketDataChain[] =>
@@ -173,16 +195,38 @@ const transformToMarketClass = (
     value: BigInt(entry.value),
   }));
 
+  const conditionResolution = (() => {
+    if (!row.resolution_payout_numerators) return undefined;
+
+    try {
+      const rawPayouts = JSON.parse(row.resolution_payout_numerators);
+      const payoutNumerators = Array.isArray(rawPayouts)
+        ? rawPayouts.map((value) => BigInt(value as string | number))
+        : [];
+
+      return {
+        condition_id: row.condition_id,
+        oracle: row.oracle,
+        question_id: row.question_id,
+        outcome_slot_count: BigInt(row.outcome_slot_count),
+        payout_numerators: payoutNumerators,
+      } as unknown as ConditionResolution;
+    } catch {
+      return undefined;
+    }
+  })();
+
   return new MarketClass({
     market: market as never,
     marketCreated: marketCreated as never,
     collateralToken,
     vaultDenominator: vaultDenominator as never,
     vaultNumerators: vaultNumerators as never[],
+    conditionResolution,
   });
 };
 
-const formatVolumeDisplay = (amountRaw: bigint, decimals: number) => {
+const formatTokenAmountDisplay = (amountRaw: bigint, decimals: number) => {
   const normalized = formatUnits(amountRaw, decimals, 6).replace(/,/g, "");
   const amount = Number(normalized);
   if (!Number.isFinite(amount) || amount <= 0) return "0";
@@ -251,22 +295,74 @@ const fetchChainMarkets = async ({
 
       const volumeRaw = volumeByMarketId.get(row.market_id) ?? 0n;
       const decimals = Number(market.collateralToken?.decimals ?? 18);
+      const tvlRaw = toBigInt(market.vaultDenominator?.value ?? 0);
 
       return {
         key: `${chain}:${row.market_id}`,
         chain,
         market,
         volumeRaw,
-        volumeDisplay: formatVolumeDisplay(volumeRaw, decimals),
+        volumeDisplay: formatTokenAmountDisplay(volumeRaw, decimals),
+        tvlRaw,
+        tvlDisplay: formatTokenAmountDisplay(tvlRaw, decimals),
       } satisfies EnrichedMarket;
     })
     .filter((item): item is EnrichedMarket => Boolean(item));
 };
 
-const mergeAndSortByVolume = (markets: EnrichedMarket[]) =>
+const getMarketStatusPriority = (market: MarketClass) => {
+  if (!market.isResolved() && !market.isEnded()) return 0; // Live / open trading.
+  if (!market.isResolved() && !market.isResolvable()) return 1; // Trading ended, awaiting resolve window.
+  if (!market.isResolved() && market.isResolvable()) return 2; // Awaiting resolution.
+  return 3; // Resolved.
+};
+
+const compareBigIntDescending = (left: bigint, right: bigint) => {
+  if (left === right) return 0;
+  return left > right ? -1 : 1;
+};
+
+const compareNumberDescending = (left: number, right: number) => right - left;
+
+const compareNumberAscending = (left: number, right: number) => left - right;
+
+const resolveSortableEndTime = (market: MarketClass) => {
+  if (!market.end_at || market.end_at <= 0) return Number.MAX_SAFE_INTEGER;
+  return market.end_at;
+};
+
+const getMarketSortDifference = (left: EnrichedMarket, right: EnrichedMarket, sort: MarketSortKey) => {
+  switch (sort) {
+    case "end-time":
+      return compareNumberAscending(resolveSortableEndTime(left.market), resolveSortableEndTime(right.market));
+    case "volume":
+      return compareBigIntDescending(left.volumeRaw, right.volumeRaw);
+    case "pool-size":
+      return compareBigIntDescending(left.tvlRaw, right.tvlRaw);
+    case "creation-date":
+    default:
+      return compareNumberDescending(Number(left.market.created_at ?? 0), Number(right.market.created_at ?? 0));
+  }
+};
+
+const mergeAndSortMarkets = (markets: EnrichedMarket[], status: MarketStatusKey, sort: MarketSortKey) =>
   markets.toSorted((a, b) => {
-    if (a.volumeRaw !== b.volumeRaw) return a.volumeRaw > b.volumeRaw ? -1 : 1;
-    return Number(b.market.created_at ?? 0) - Number(a.market.created_at ?? 0);
+    if (status === "all") {
+      const statusDifference = getMarketStatusPriority(a.market) - getMarketStatusPriority(b.market);
+      if (statusDifference !== 0) return statusDifference;
+    }
+
+    const sortDifference = getMarketSortDifference(a, b, sort);
+    if (sortDifference !== 0) return sortDifference;
+
+    const createdAtDifference = compareNumberDescending(
+      Number(a.market.created_at ?? 0),
+      Number(b.market.created_at ?? 0),
+    );
+    if (createdAtDifference !== 0) return createdAtDifference;
+    if (a.volumeRaw !== b.volumeRaw) return compareBigIntDescending(a.volumeRaw, b.volumeRaw);
+    if (a.tvlRaw !== b.tvlRaw) return compareBigIntDescending(a.tvlRaw, b.tvlRaw);
+    return a.key.localeCompare(b.key);
   });
 
 const createEmptySourceStatus = (chains: MarketDataChain[]): Record<MarketDataChain, SourceStatus> => {
@@ -350,25 +446,42 @@ export function useMultiChainMarketCounts(chainFilter: MarketChainFilter) {
 
 export function useMultiChainMarkets({
   status,
+  sort,
   chainFilter,
   limit,
   offset,
+  blockedOracleAddresses = [],
 }: {
   status: MarketStatusKey;
+  sort: MarketSortKey;
   chainFilter: MarketChainFilter;
   limit: number;
   offset: number;
+  blockedOracleAddresses?: string[];
 }) {
   const { getRegisteredToken } = useConfig();
   const queryClient = useQueryClient();
   const selectedChains = useMemo(() => getSelectedChains(chainFilter), [chainFilter]);
+  const blockedOracleAddressesKey = useMemo(
+    () =>
+      blockedOracleAddresses
+        .map((address) => address.toLowerCase())
+        .toSorted()
+        .join(","),
+    [blockedOracleAddresses],
+  );
 
   const query = useQuery({
-    queryKey: ["pm", "multi-chain", "markets", status, chainFilter],
+    queryKey: ["pm", "multi-chain", "markets", status, sort, chainFilter, blockedOracleAddressesKey],
     queryFn: async () => {
       const now = Math.ceil(Date.now() / 1000);
       const sourceStatus = createEmptySourceStatus(selectedChains);
       const statusFilter = STATUS_TO_FILTER[status];
+      const blockedOracleSet = new Set(
+        blockedOracleAddresses
+          .map((address) => normalizeHexAddress(address))
+          .filter((address): address is string => !!address),
+      );
 
       const results = await Promise.allSettled(
         selectedChains.map((chain) =>
@@ -393,8 +506,25 @@ export function useMultiChainMarkets({
         sourceStatus[chain] = { ok: false, error: toErrorMessage(result.reason) };
       });
 
+      const filteredMarkets =
+        blockedOracleSet.size === 0
+          ? merged
+          : merged.filter((entry) => {
+              const oracle = normalizeHexAddress(entry.market.oracle);
+              if (oracle && blockedOracleSet.has(oracle)) {
+                return false;
+              }
+
+              const marketPrizeAddress = getMarketPrizeAddress(entry.market);
+              if (marketPrizeAddress && blockedOracleSet.has(marketPrizeAddress)) {
+                return false;
+              }
+
+              return true;
+            });
+
       return {
-        markets: mergeAndSortByVolume(merged),
+        markets: mergeAndSortMarkets(filteredMarkets, status, sort),
         sourceStatus,
       };
     },

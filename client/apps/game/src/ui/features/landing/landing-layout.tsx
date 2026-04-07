@@ -1,11 +1,14 @@
 import { useUIStore } from "@/hooks/store/use-ui-store";
+import { useBootDocumentState } from "@/ui/modules/boot-loader";
 import { cn } from "@/ui/design-system/atoms/lib/utils";
 import { Controller } from "@/ui/modules/controller/controller";
 import { BlankOverlayContainer } from "@/ui/shared/containers/blank-overlay-container";
 import { useCallback, useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { DynamicBackground } from "./components/background/dynamic-background";
+import { DashboardNetworkSwitch } from "./components/dashboard-network-switch";
 import { LandingHeader } from "./components/landing-header";
+import { LandingMusicPlayer } from "./components/landing-music-player";
 import { LandingSettings } from "./components/landing-settings";
 import { LandingSidebar } from "./components/landing-sidebar";
 import { MobileBottomNav } from "./components/mobile-bottom-nav";
@@ -16,6 +19,7 @@ const ROUTE_BACKGROUNDS: Record<string, string> = {
   "/": "01",
   "/profile": "05",
   "/markets": "04",
+  "/amm": "04",
   "/leaderboard": "07",
 };
 
@@ -44,6 +48,8 @@ export const LandingLayout = () => {
  * Inner layout content that can access the landing context.
  */
 const LandingLayoutContent = () => {
+  useBootDocumentState("app-ready");
+
   const location = useLocation();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { backgroundId, resetBackground } = useLandingContext();
@@ -70,7 +76,15 @@ const LandingLayoutContent = () => {
       <LandingSidebar onSettingsClick={handleSettingsClick} />
 
       {/* Top header with wallet */}
-      <LandingHeader walletButton={<Controller />} onSettingsClick={handleSettingsClick} />
+      <LandingHeader
+        walletButton={
+          <>
+            <DashboardNetworkSwitch className="hidden md:flex" />
+            <Controller />
+          </>
+        }
+        onSettingsClick={handleSettingsClick}
+      />
 
       {/* Main content area */}
       <main
@@ -92,6 +106,7 @@ const LandingLayoutContent = () => {
       </main>
 
       {/* Bottom navigation (mobile only) */}
+      <LandingMusicPlayer />
       <MobileBottomNav />
 
       {/* Settings modal */}

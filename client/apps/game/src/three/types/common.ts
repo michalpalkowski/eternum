@@ -1,4 +1,5 @@
 import { Position } from "@bibliothecadao/eternum";
+import type { IncomingTroopArrival } from "@bibliothecadao/eternum";
 
 import { BuildingType, ID, StructureType, TroopTier, TroopType } from "@bibliothecadao/types";
 import type { CosmeticAttachmentTemplate } from "../cosmetics/types";
@@ -6,6 +7,7 @@ import type { CosmeticAttachmentTemplate } from "../cosmetics/types";
 export enum SceneName {
   WorldMap = "map",
   Hexception = "hex",
+  FastTravel = "travel",
 }
 
 export enum HyperstructureTypesNames {
@@ -28,10 +30,12 @@ export interface StructureInfo {
   hasWonder: boolean;
   cosmeticId?: string;
   cosmeticAssetPaths?: string[];
+  usesFallbackCosmeticSkin?: boolean;
   attachments?: CosmeticAttachmentTemplate[];
   // Enhanced data from MapDataStore
   guardArmies?: Array<{ slot: number; category: string | null; tier: number; count: number; stamina: number }>;
   activeProductions?: Array<{ buildingCount: number; buildingType: BuildingType }>;
+  incomingTroopArrivals?: IncomingTroopArrival[];
   hyperstructureRealmCount?: number;
   attackedFromDegrees?: number; // Degrees from which this structure has been attacked
   attackedTowardDegrees?: number; // Degrees in which this structure has attacked someone
@@ -52,6 +56,7 @@ export interface ArmyData {
   isDaydreamsAgent: boolean;
   cosmeticId?: string;
   cosmeticAssetPaths?: string[];
+  usesFallbackCosmeticSkin?: boolean;
   attachments?: CosmeticAttachmentTemplate[];
   // Enhanced data from MapDataStore
   troopCount: number;

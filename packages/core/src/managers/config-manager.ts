@@ -736,6 +736,26 @@ export class ClientConfigManager {
     }, 0);
   }
 
+  getVillageSettlementImmunityTickCount() {
+    return this.getValueOrDefault(() => {
+      const battleConfig = getComponentValue(
+        this.components.WorldConfig,
+        getEntityIdFromKeys([WORLD_CONFIG_ID]),
+      )?.battle_config;
+      return Number(battleConfig?.village_immunity_ticks ?? 0);
+    }, 0);
+  }
+
+  getVillagePostRaidImmunityTickCount() {
+    return this.getValueOrDefault(() => {
+      const battleConfig = getComponentValue(
+        this.components.WorldConfig,
+        getEntityIdFromKeys([WORLD_CONFIG_ID]),
+      )?.battle_config;
+      return Number(battleConfig?.village_raid_immunity_ticks ?? 0);
+    }, 0);
+  }
+
   getMinTravelStaminaCost() {
     return this.getValueOrDefault(() => {
       const staminaConfig = this.getWorldConfig()?.troop_stamina_config;
@@ -750,6 +770,9 @@ export class ClientConfigManager {
       [StructureType.FragmentMine]: 1,
       [StructureType.Hyperstructure]: 4,
       [StructureType.Bank]: 4,
+      [StructureType.HolySite]: 1,
+      [StructureType.Camp]: 1,
+      [StructureType.BitcoinMine]: 1,
     };
   }
 
@@ -905,16 +928,25 @@ export class ClientConfigManager {
         const blitzSettlementConfig = config.blitz_settlement_config;
         const blitzRegistrationConfig = config.blitz_registration_config;
         const blitzHypersSettlementConfig = config.blitz_hypers_settlement_config;
+        const settlementConfig = config.settlement_config;
+        const twoPlayerMode = Boolean(blitzSettlementConfig.two_player_mode);
         const blitzHyperStructureCount =
           getComponentValue(this.components.HyperstructureGlobals, getEntityIdFromKeys([BigInt(WORLD_CONFIG_ID)]))
             ?.created_count || 0;
 
         // get number of hyperstructures left to create
-        let numHyperStructuresLeft = 1;
-        for (let i = 1; i <= blitzHypersSettlementConfig.max_ring_count; i++) {
-          numHyperStructuresLeft += 6 * i;
+        let numHyperStructuresLeft = twoPlayerMode ? Number(blitzHypersSettlementConfig.max_ring_count) + 1 : 1;
+        if (!twoPlayerMode) {
+          for (let i = 1; i <= blitzHypersSettlementConfig.max_ring_count; i++) {
+            numHyperStructuresLeft += 6 * i;
+          }
         }
         numHyperStructuresLeft -= blitzHyperStructureCount;
+
+        // get number of spires left to create
+        const spiresMaxCount = Number(settlementConfig?.spires_max_count ?? 0);
+        const spiresSettledCount = Number(settlementConfig?.spires_settled_count ?? 0);
+        const numSpiresLeft = Math.max(spiresMaxCount - spiresSettledCount, 0);
 
         return {
           blitz_mode_on: config?.blitz_mode_on ?? false,
@@ -924,6 +956,10 @@ export class ClientConfigManager {
             step: Number(blitzSettlementConfig.step),
             point: Number(blitzSettlementConfig.point),
             single_realm_mode: Boolean(blitzSettlementConfig.single_realm_mode),
+            two_player_mode: twoPlayerMode,
+          },
+          blitz_exploration_config: {
+            reward_profile_id: Number(config.blitz_exploration_config?.reward_profile_id ?? 0),
           },
           blitz_registration_config: {
             fee_amount: BigInt(blitzRegistrationConfig.fee_amount),
@@ -944,6 +980,8 @@ export class ClientConfigManager {
             assigned_positions_count: Number(blitzRegistrationConfig.assigned_positions_count),
           },
           blitz_num_hyperstructures_left: Math.max(numHyperStructuresLeft, 0),
+          num_spires_left: numSpiresLeft,
+          spires_settled_count: spiresSettledCount,
         };
       },
       {
@@ -954,6 +992,10 @@ export class ClientConfigManager {
           step: 0,
           point: 0,
           single_realm_mode: false,
+          two_player_mode: false,
+        },
+        blitz_exploration_config: {
+          reward_profile_id: 0,
         },
         blitz_registration_config: {
           fee_amount: BigInt(0),
@@ -974,6 +1016,8 @@ export class ClientConfigManager {
           assigned_positions_count: 0,
         },
         blitz_num_hyperstructures_left: 0,
+        num_spires_left: 0,
+        spires_settled_count: 0,
       },
     );
   }
@@ -1178,6 +1222,27 @@ export class ClientConfigManager {
         startMainAt: 0,
         endAt: 0,
         bridgeCloseAfterEndSeconds: 0,
+      },
+    );
+  }
+
+  getArtificerConfig() {
+    return this.getValueOrDefault(
+      () => {
+        const worldConfig = getComponentValue(this.components.WorldConfig, getEntityIdFromKeys([WORLD_CONFIG_ID])) as
+          | {
+              artificer_config?: {
+                research_cost_for_relic?: number | string | bigint;
+              };
+            }
+          | undefined;
+
+        return {
+          research_cost_for_relic: Number(worldConfig?.artificer_config?.research_cost_for_relic ?? 0),
+        };
+      },
+      {
+        research_cost_for_relic: 0,
       },
     );
   }

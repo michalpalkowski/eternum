@@ -1,19 +1,36 @@
 import { Position } from "@bibliothecadao/eternum";
+import { getGameModeId } from "@/config/game-modes";
+
 import { Structure } from "@bibliothecadao/types";
+import { resolveNavigationSceneTarget } from "../scene-navigation-boundary";
+import {
+  resolveEnterFastTravelTransition,
+  resolveExitFastTravelTransition,
+} from "../scenes/fast-travel-navigation-policy";
+import type { FastTravelHexCoords } from "../scenes/fast-travel-hydration";
+import type { FastTravelSpireMapping } from "../scenes/fast-travel-spire-mapping";
+import { SceneName } from "../types";
 
-import { buildPlaySceneUrl } from "@/sharding/location-url";
+const isFastTravelEnabled = (): boolean => getGameModeId() !== "blitz";
 
-const dispatchPopState = () => {
-  const popStateEvent =
-    typeof PopStateEvent === "function" ? new PopStateEvent("popstate") : new Event("popstate");
-  window.dispatchEvent(popStateEvent);
-};
+function buildSceneLocationUrl(col: number, row: number, targetScene: SceneName): string {
+  const url = new Position({ x: col, y: row });
 
-const applyNavigationUrl = (url: string) => {
-  window.history.pushState({}, "", url);
-  dispatchPopState();
+  if (targetScene === SceneName.Hexception) {
+    return url.toHexLocationUrl();
+  }
+
+  if (targetScene === SceneName.FastTravel) {
+    return `/${SceneName.FastTravel}?col=${col}&row=${row}`;
+  }
+
+  return url.toMapLocationUrl();
+}
+
+function dispatchSceneNavigation(navigationUrl: string): void {
+  window.history.pushState({}, "", navigationUrl);
   window.dispatchEvent(new Event("urlChanged"));
-};
+}
 
 /**
  * Navigate to a structure by updating the URL and dispatching a URL change event
@@ -22,8 +39,21 @@ const applyNavigationUrl = (url: string) => {
  * @param structure - The structure to navigate to
  * @param scene - Optional scene to navigate to ('hex' or 'map'). Defaults to current scene.
  */
-export function navigateToStructure(col: number, row: number, scene?: "hex" | "map") {
-  navigateToPosition(col, row, scene);
+export function navigateToStructure(col: number, row: number, scene?: "hex" | "map" | "travel") {
+  const targetScene = resolveNavigationSceneTarget({
+    requestedScene:
+      scene === "hex"
+        ? SceneName.Hexception
+        : scene === "map"
+          ? SceneName.WorldMap
+          : scene === "travel"
+            ? SceneName.FastTravel
+            : undefined,
+    currentPath: window.location.pathname,
+    fastTravelEnabled: isFastTravelEnabled(),
+  });
+
+  dispatchSceneNavigation(buildSceneLocationUrl(col, row, targetScene));
 }
 
 /**
@@ -33,27 +63,21 @@ export function navigateToStructure(col: number, row: number, scene?: "hex" | "m
  * @param row - Row coordinate
  * @param scene - Optional scene to navigate to ('hex' or 'map'). Defaults to current scene.
  */
-function navigateToPosition(col: number, row: number, scene?: "hex" | "map") {
-  const position = new Position({ x: col, y: row });
-  const normalized = position.getNormalized();
+function navigateToPosition(col: number, row: number, scene?: "hex" | "map" | "travel") {
+  const targetScene = resolveNavigationSceneTarget({
+    requestedScene:
+      scene === "hex"
+        ? SceneName.Hexception
+        : scene === "map"
+          ? SceneName.WorldMap
+          : scene === "travel"
+            ? SceneName.FastTravel
+            : undefined,
+    currentPath: window.location.pathname,
+    fastTravelEnabled: isFastTravelEnabled(),
+  });
 
-  // Determine which URL method to use based on scene parameter or current URL
-  let navigationUrl: string;
-  if (scene === "hex") {
-    navigationUrl = buildPlaySceneUrl("hex", normalized.x, normalized.y);
-  } else if (scene === "map") {
-    navigationUrl = buildPlaySceneUrl("map", normalized.x, normalized.y);
-  } else {
-    // If no scene specified, stay in the current scene
-    const currentPath = window.location.pathname;
-    if (currentPath.includes("/hex")) {
-      navigationUrl = buildPlaySceneUrl("hex", normalized.x, normalized.y);
-    } else {
-      navigationUrl = buildPlaySceneUrl("map", normalized.x, normalized.y);
-    }
-  }
-
-  applyNavigationUrl(navigationUrl);
+  dispatchSceneNavigation(buildSceneLocationUrl(col, row, targetScene));
 }
 
 /**
@@ -67,7 +91,7 @@ function navigateToPosition(col: number, row: number, scene?: "hex" | "map") {
 export function selectNextStructure(
   playerStructures: Structure[],
   currentIndex: number,
-  scene?: "hex" | "map",
+  scene?: "hex" | "map" | "travel",
 ): number {
   if (playerStructures.length === 0) return currentIndex;
 
@@ -81,6 +105,40 @@ export function selectNextStructure(
   );
 
   return nextIndex;
+}
+
+function navigateIntoFastTravelSpire(
+  worldHexCoords: FastTravelHexCoords,
+  spireMappings: readonly FastTravelSpireMapping[],
+): boolean {
+  const transition = resolveEnterFastTravelTransition({
+    worldHexCoords,
+    spireMappings,
+  });
+
+  if (!transition) {
+    return false;
+  }
+
+  navigateToPosition(transition.col, transition.row, "travel");
+  return true;
+}
+
+function navigateOutOfFastTravelSpire(
+  travelHexCoords: FastTravelHexCoords,
+  spireMappings: readonly FastTravelSpireMapping[],
+): boolean {
+  const transition = resolveExitFastTravelTransition({
+    travelHexCoords,
+    spireMappings,
+  });
+
+  if (!transition) {
+    return false;
+  }
+
+  navigateToPosition(transition.col, transition.row, "map");
+  return true;
 }
 
 /**
@@ -100,28 +158,25 @@ export function toggleMapHexView() {
     return;
   }
 
-  const parsedCol = Number(col);
-  const parsedRow = Number(row);
-  if (!Number.isFinite(parsedCol) || !Number.isFinite(parsedRow)) {
-    console.warn("Invalid coordinates in URL, cannot toggle view");
-    return;
-  }
-
-  // Determine new scene based on current path
-  let nextScene: "hex" | "map";
+  // Determine new path based on current path
+  let newPath: string;
   if (currentPath.includes("/hex")) {
-    nextScene = "map";
+    newPath = "/map";
   } else if (currentPath.includes("/map")) {
-    nextScene = "hex";
+    newPath = "/hex";
   } else {
     console.warn("Current path is neither /hex nor /map, cannot toggle");
     return;
   }
 
-  // Construct new URL with same coordinates and existing shard context
-  const newUrl = buildPlaySceneUrl(nextScene, parsedCol, parsedRow);
+  // Construct new URL with same coordinates
+  const newUrl = `${newPath}?col=${col}&row=${row}`;
 
-  applyNavigationUrl(newUrl);
+  // Update browser URL
+  window.history.pushState({}, "", newUrl);
 
-  console.log(`Toggled view from ${currentPath} to ${nextScene}`);
+  // Dispatch URL changed event to trigger scene updates
+  window.dispatchEvent(new Event("urlChanged"));
+
+  console.log(`Toggled view from ${currentPath} to ${newPath}`);
 }

@@ -102,7 +102,7 @@ const createControllerConnector = (resolvedChainId: string) => {
     new Set(
       [
         mainChainRpcUrl,
-        `${cartridgeApiBase}/x/eternum-blitz-slot-3/katana/rpc/v0_9`,
+        `${cartridgeApiBase}/x/eternum-blitz-slot-4/katana/rpc/v0_9`,
         `${cartridgeApiBase}/x/starknet/sepolia/rpc/v0_9`,
         `${cartridgeApiBase}/x/starknet/mainnet/rpc/v0_9`,
       ]

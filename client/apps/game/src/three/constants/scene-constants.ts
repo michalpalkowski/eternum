@@ -90,6 +90,9 @@ export const structureTypeToBuildingType: Record<StructureType, BuildingType> = 
   [StructureType.FragmentMine]: BuildingType.ResourceAncientFragment,
   [StructureType.Hyperstructure]: BuildingType.ResourceLabor,
   [StructureType.Village]: BuildingType.ResourceLabor,
+  [StructureType.HolySite]: BuildingType.ResourceLabor,
+  [StructureType.Camp]: BuildingType.ResourceLabor,
+  [StructureType.BitcoinMine]: BuildingType.ResourceLabor,
 };
 
 export const castleLevelToRealmCastle: Record<RealmLevels, RealmLevelNames> = {
@@ -122,7 +125,8 @@ export type BUILDINGS_CATEGORIES_TYPES =
   | RealmLevelNames
   | HyperstructureTypesNames
   | typeof WONDER_REALM
-  | StructureType.Village;
+  | StructureType.Village
+  | StructureType.Camp;
 
 export const buildingModelPaths = (isBlitz: boolean) => {
   return {
@@ -148,6 +152,7 @@ export const buildingModelPaths = (isBlitz: boolean) => {
       [BuildingType.Storehouse]: BUILDINGS_MODELS_PATH + BuildingFilenames.Storehouse,
       [BuildingType.WorkersHut]: BUILDINGS_MODELS_PATH + BuildingFilenames.WorkersHut,
       [BuildingType.ResourceDragonhide]: BUILDINGS_MODELS_PATH + BuildingFilenames.Dragonhide,
+      [BuildingType.ResourceResearch]: BUILDINGS_MODELS_PATH + BuildingFilenames.Castle,
     },
     [BUILDINGS_GROUPS.RESOURCES_MINING]: {
       [ResourceMiningTypes.Forge]: BUILDINGS_MODELS_PATH + BuildingFilenames.Forge,
@@ -165,6 +170,7 @@ export const buildingModelPaths = (isBlitz: boolean) => {
       [StructureType.Village]: isBlitz
         ? BUILDINGS_MODELS_PATH + BuildingFilenames.Camp
         : BUILDINGS_MODELS_PATH + BuildingFilenames.Village,
+      [StructureType.Camp]: BUILDINGS_MODELS_PATH + BuildingFilenames.Camp,
     },
     [BUILDINGS_GROUPS.HYPERSTRUCTURE]: {
       [HyperstructureTypesNames.STAGE_1]: BUILDINGS_MODELS_PATH + BuildingFilenames.HyperstructureInit,
@@ -177,22 +183,10 @@ export const buildingModelPaths = (isBlitz: boolean) => {
   };
 };
 
-const biomesWithAltVersions: Set<BiomeType> = new Set([
-  BiomeType.TemperateDeciduousForest,
-  BiomeType.Grassland,
-  BiomeType.Shrubland,
-]);
-
 export function getBiomeVariant(biome: BiomeType | "Outline" | "Empty", col: number, row: number): string {
-  if (biome !== "Outline" && biome !== "Empty" && biomesWithAltVersions.has(biome as BiomeType)) {
-    const hash = Math.sin(col * 12.9898 + row * 78.233) * 43758.5453;
-    const random = hash - Math.floor(hash);
-
-    if (random < 0.5) {
-      return `${biome}Alt`;
-    }
-  }
-
+  // Preserve a stable biome surface and avoid per-tile lighting variance from alt biome meshes.
+  void col;
+  void row;
   return biome as string;
 }
 
@@ -245,6 +239,9 @@ export function getStructureModelPaths(isBlitz: boolean): Record<StructureType, 
     [StructureType.Village]: isBlitz
       ? [BUILDINGS_MODELS_PATH + BuildingFilenames.Camp]
       : [BUILDINGS_MODELS_PATH + BuildingFilenames.Village],
+    [StructureType.HolySite]: [BUILDINGS_MODELS_PATH + BuildingFilenames.Castle],
+    [StructureType.Camp]: [BUILDINGS_MODELS_PATH + BuildingFilenames.Camp],
+    [StructureType.BitcoinMine]: [BUILDINGS_MODELS_PATH + BuildingFilenames.Mine],
   };
 }
 

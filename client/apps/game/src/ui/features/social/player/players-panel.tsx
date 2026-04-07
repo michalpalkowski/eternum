@@ -1,5 +1,4 @@
-import { useGameModeConfig } from "@/config/game-modes/use-game-mode-config";
-import { useUIStore } from "@/hooks/store/use-ui-store";
+import { useGameModeConfig, useResolvedWorldGameMode } from "@/config/game-modes/use-game-mode-config";
 import Button from "@/ui/design-system/atoms/button";
 import { RefreshButton } from "@/ui/design-system/atoms/refresh-button";
 import TextInput from "@/ui/design-system/atoms/text-input";
@@ -10,11 +9,18 @@ import {
 } from "@/services/leaderboard/use-landing-leaderboard-store";
 import { VICTORY_POINT_VALUES, formatHyperstructureControlVpRange } from "@/config/victory-points";
 import { EndSeasonButton, PlayerCustom, PlayerList, RegisterPointsButton } from "@/ui/features/social";
+import {
+  buildFinalizedBlitzStandingLookup,
+  buildRegisteredPointsLookup,
+  normalizeLeaderboardAddress,
+  resolveFinalizedBlitzStanding,
+} from "./finalized-blitz-leaderboard";
 import { getEntityIdFromKeys, normalizeDiacriticalMarks } from "@/ui/utils/utils";
-import { getGuildFromPlayerAddress, toHexString } from "@bibliothecadao/eternum";
+import { getGuildFromPlayerAddress } from "@bibliothecadao/eternum";
 import { useDojo } from "@bibliothecadao/react";
 import { ContractAddress, BANDITS_NAME, PlayerInfo } from "@bibliothecadao/types";
-import { getComponentValue, HasValue, runQuery } from "@dojoengine/recs";
+import { getComponentValue, Has, HasValue, runQuery } from "@dojoengine/recs";
+import { useEntityQuery } from "@dojoengine/react";
 import ChevronDown from "lucide-react/dist/esm/icons/chevron-down";
 import ChevronUp from "lucide-react/dist/esm/icons/chevron-up";
 import Search from "lucide-react/dist/esm/icons/search";
@@ -22,12 +28,6 @@ import { KeyboardEvent, useCallback, useEffect, useMemo, useState } from "react"
 
 // TODO: big limit for now, we need to paginate this
 const SOCIAL_LEADERBOARD_LIMIT = 1000;
-
-const normalizeAddress = (address: bigint | string): string => {
-  return toHexString(typeof address === "string" ? BigInt(address) : address)
-    .toLowerCase()
-    .padStart(66, "0");
-};
 
 export const PlayersPanel = ({
   players,
@@ -47,6 +47,8 @@ export const PlayersPanel = ({
   const { Structure, GuildWhitelist } = components;
 
   const userGuild = getGuildFromPlayerAddress(ContractAddress(account.address), components);
+  const resolvedWorldMode = useResolvedWorldGameMode();
+  const isBlitzMode = resolvedWorldMode === "blitz";
 
   const leaderboardEntries = useLandingLeaderboardStore((state) => state.entries);
   const fetchLeaderboardEntries = useLandingLeaderboardStore((state) => state.fetchLeaderboard);
@@ -58,8 +60,46 @@ export const PlayersPanel = ({
   const [inputValue, setInputValue] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [showPointsBreakdown, setShowPointsBreakdown] = useState(false);
-  const seasonWinner = useUIStore((state) => state.gameWinner);
   const mode = useGameModeConfig();
+  const finalEntities = useEntityQuery([Has(components.PlayersRankFinal)]);
+  const playerRankEntities = useEntityQuery([Has(components.PlayerRank)]);
+  const registeredPointsEntities = useEntityQuery([Has(components.PlayerRegisteredPoints)]);
+
+  const finalTrialId = useMemo(() => {
+    const finalTrial = finalEntities[0] ? getComponentValue(components.PlayersRankFinal, finalEntities[0]) : undefined;
+    return finalTrial?.trial_id as bigint | undefined;
+  }, [components.PlayersRankFinal, finalEntities]);
+
+  const registeredPointsLookup = useMemo(() => {
+    const registeredPointRows = registeredPointsEntities
+      .map((entityId) => getComponentValue(components.PlayerRegisteredPoints, entityId))
+      .filter((row): row is NonNullable<typeof row> => Boolean(row))
+      .map((row) => ({
+        address: row.address as unknown as bigint,
+        registeredPoints: row.registered_points as bigint,
+      }));
+
+    return buildRegisteredPointsLookup(registeredPointRows);
+  }, [components.PlayerRegisteredPoints, registeredPointsEntities]);
+
+  const finalizedBlitzStandingLookup = useMemo(() => {
+    if (!isBlitzMode) {
+      return new Map();
+    }
+
+    const playerRankRows = playerRankEntities
+      .map((entityId) => getComponentValue(components.PlayerRank, entityId))
+      .filter((row): row is NonNullable<typeof row> => Boolean(row))
+      .map((row) => ({
+        playerAddress: row.player as unknown as bigint,
+        rank: row.rank as bigint | number,
+        trialId: row.trial_id as bigint,
+      }));
+
+    return buildFinalizedBlitzStandingLookup(playerRankRows, finalTrialId, registeredPointsLookup);
+  }, [components.PlayerRank, finalTrialId, isBlitzMode, playerRankEntities, registeredPointsLookup]);
+
+  const shouldUseFinalizedBlitzStandings = isBlitzMode && finalizedBlitzStandingLookup.size > 0;
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -91,8 +131,14 @@ export const PlayersPanel = ({
 
   useEffect(() => {
     void fetchLeaderboardEntries({ limit: SOCIAL_LEADERBOARD_LIMIT });
+
+    const interval = window.setInterval(() => {
+      void fetchLeaderboardEntries({ limit: SOCIAL_LEADERBOARD_LIMIT });
+    }, 60_000);
+
+    return () => window.clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only fetch on initial mount - store handles caching/staleness
+  }, []); // Fetch on mount and auto-refresh every 60s
 
   const playersWithStructures: PlayerCustom[] = useMemo(() => {
     // Sort players by points in descending order
@@ -131,14 +177,13 @@ export const PlayersPanel = ({
         };
       });
     return playersWithStructures;
-  }, [isLoading, players, components, account.address, mode]);
+  }, [GuildWhitelist, Structure, account.address, components, mode, players, userGuild]);
 
   const leaderboardEntryMap = useMemo(() => {
     const map = new Map<string, LandingLeaderboardEntry>();
 
     leaderboardEntries.forEach((entry) => {
-      console.log("setting for address", entry.address.toLowerCase(), "name", entry.displayName);
-      map.set(normalizeAddress(entry.address), entry);
+      map.set(normalizeLeaderboardAddress(entry.address), entry);
     });
 
     return map;
@@ -146,16 +191,23 @@ export const PlayersPanel = ({
 
   const playersWithLeaderboardStats = useMemo(() => {
     return playersWithStructures.map((player) => {
-      const normalizedAddress = normalizeAddress(player.address);
-      console.log("getting for address", normalizedAddress);
+      const normalizedAddress = normalizeLeaderboardAddress(player.address);
       const entry = leaderboardEntryMap.get(normalizedAddress) ?? null;
+      const finalizedStanding = finalizedBlitzStandingLookup.get(normalizedAddress) ?? null;
+      // Prize claims follow the finalized registered-point ranking, so the in-game list
+      // needs to stop using live shareholder accrual once that ranking exists.
+      const resolvedStanding = resolveFinalizedBlitzStanding(finalizedStanding, shouldUseFinalizedBlitzStandings);
 
       return {
         ...player,
         leaderboardEntry: entry,
+        leaderboardRankOverride: resolvedStanding?.rankOverride,
+        leaderboardPointsOverride: resolvedStanding?.pointsOverride,
+        includesLiveShareholderPoints:
+          resolvedStanding?.includesLiveShareholderPoints ?? Boolean(entry?.unregisteredPoints),
       };
     });
-  }, [playersWithStructures, leaderboardEntryMap]);
+  }, [finalizedBlitzStandingLookup, leaderboardEntryMap, playersWithStructures, shouldUseFinalizedBlitzStandings]);
 
   const filteredPlayers = useMemo(() => {
     const normalizedTerm = normalizeDiacriticalMarks(searchTerm.toLowerCase());
@@ -167,7 +219,7 @@ export const PlayersPanel = ({
         const nameMatch = normalizeDiacriticalMarks(player.name.toLowerCase()).includes(normalizedTerm);
         if (nameMatch) return true;
 
-        const addressMatch = normalizeAddress(player.address).includes(normalizedTerm);
+        const addressMatch = normalizeLeaderboardAddress(player.address).includes(normalizedTerm);
         if (addressMatch) return true;
 
         return player.structures.some(

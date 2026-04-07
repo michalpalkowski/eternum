@@ -4,8 +4,8 @@ import { toast } from "sonner";
 import { CairoCustomEnum, Call, CallData, uint256, type Abi, type RawArgsObject, type Uint256 } from "starknet";
 
 import { useAccountStore } from "@/hooks/store/use-account-store";
-import { getPmSqlApi } from "@/pm/hooks/queries";
-import { getPredictionMarketConfig } from "@/pm/prediction-market-config";
+import { findMarketByPrizeAddressAcrossChains } from "@/pm/hooks/queries";
+import { getPredictionMarketChain, getPredictionMarketConfig } from "@/pm/prediction-market-config";
 import { normalizeHex } from "@/runtime/world/normalize";
 import { LordsAbi } from "@bibliothecadao/eternum";
 
@@ -44,9 +44,16 @@ const MARKET_CHECK_POLL_INTERVAL = 10_000; // 10 seconds
 const checkMarketExists = async (oracleAddress: string): Promise<boolean> => {
   try {
     const normalizedAddress = normalizeHex(oracleAddress);
-    const api = getPmSqlApi();
-    const market = await api.fetchMarketByPrizeAddress(normalizedAddress);
-    return market !== null;
+    const preferredChain = getPredictionMarketChain();
+    const { marketRow } = await findMarketByPrizeAddressAcrossChains({
+      preferredChain,
+      prizeAddress: normalizedAddress,
+      onChainError: ({ chain, error }) => {
+        console.warn(`[checkMarketExists] Failed to query ${chain} market source`, error);
+      },
+    });
+
+    return Boolean(marketRow);
   } catch (e) {
     console.warn("[checkMarketExists] Error checking market:", e);
     // On error, return false to allow creation attempt (contract will reject if duplicate)

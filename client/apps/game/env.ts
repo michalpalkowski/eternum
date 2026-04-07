@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  DEFAULT_STANDALONE_AMMV2_INDEXER_URL,
+  DEFAULT_STANDALONE_AMMV2_LORDS_ADDRESS,
+  DEFAULT_STANDALONE_AMMV2_ROUTER_ADDRESS,
+} from "@bibliothecadao/ammv2-sdk";
 import { getSelectedChain } from "./src/runtime/world/store";
 
 const _rawEnv = import.meta.env as Record<string, string | undefined>;
@@ -6,6 +11,10 @@ type ParsedEnv = z.infer<typeof envSchema>;
 type RuntimeEnv = ParsedEnv & {
   VITE_PUBLIC_REALTIME_URL: string;
 };
+
+function resolveLegacyAmmRouterAddress(rawEnv: Record<string, string | undefined>) {
+  return rawEnv.VITE_PUBLIC_AMM_ROUTER_ADDRESS ?? rawEnv.VITE_PUBLIC_AMM_ADDRESS;
+}
 
 const envSchema = z.object({
   // Master account
@@ -23,7 +32,7 @@ const envSchema = z.object({
   VITE_PUBLIC_CLIENT_FEE_RECIPIENT: z.string().startsWith("0x"),
 
   // API endpoints
-  VITE_PUBLIC_TORII: z.string().url().optional().default("https://api.cartridge.gg/x/eternum-blitz-slot-3/torii"),
+  VITE_PUBLIC_TORII: z.string().url().optional().default("https://api.cartridge.gg/x/eternum-blitz-slot-4/torii"),
   // gRPC-web endpoint for Torii subscriptions (SubscribeEntities, SubscribeEventMessages).
   // Falls back to VITE_PUBLIC_TORII when unset — works for Slot/local where HTTP and gRPC
   // share the same port. Set separately for nginx deployments with split ports (8080/8090).
@@ -33,7 +42,7 @@ const envSchema = z.object({
     .string()
     .url()
     .optional()
-    .default("https://api.cartridge.gg/x/eternum-blitz-slot-3/katana/rpc/v0_9"),
+    .default("https://api.cartridge.gg/x/eternum-blitz-slot-4/katana/rpc/v0_9"),
   VITE_PUBLIC_TORII_RELAY: z
     .string()
     .optional()
@@ -61,6 +70,21 @@ const envSchema = z.object({
     .url()
     .optional()
     .default("https://api.cartridge.gg/x/eternum-marketplace-sepolia-1/torii"),
+
+  // AMM
+  VITE_PUBLIC_AMM_ROUTER_ADDRESS: z
+    .union([z.string().startsWith("0x"), z.literal("")])
+    .optional()
+    .default(DEFAULT_STANDALONE_AMMV2_ROUTER_ADDRESS),
+  VITE_PUBLIC_AMM_ADDRESS: z.union([z.string().startsWith("0x"), z.literal("")]).optional(),
+  VITE_PUBLIC_AMM_LORDS_ADDRESS: z
+    .union([z.string().startsWith("0x"), z.literal("")])
+    .optional()
+    .default(DEFAULT_STANDALONE_AMMV2_LORDS_ADDRESS),
+  VITE_PUBLIC_AMM_INDEXER_URL: z
+    .union([z.string().url(), z.literal("")])
+    .optional()
+    .default(DEFAULT_STANDALONE_AMMV2_INDEXER_URL),
 
   // Action Dispatcher
   VITE_PUBLIC_ACTION_DISPATCHER_URL: z.string().url().optional(),
@@ -205,7 +229,10 @@ const envSchema = z.object({
 
 let env: RuntimeEnv;
 try {
-  const parsed = envSchema.parse(import.meta.env);
+  const parsed = envSchema.parse({
+    ...import.meta.env,
+    VITE_PUBLIC_AMM_ROUTER_ADDRESS: resolveLegacyAmmRouterAddress(_rawEnv),
+  });
   env = {
     ...parsed,
     // Realtime services follow the active Torii endpoint unless explicitly overridden.

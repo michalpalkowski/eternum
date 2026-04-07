@@ -61,6 +61,19 @@ pub impl TileImpl of TileTrait {
     fn not_occupied(self: Tile) -> bool {
         !self.occupied()
     }
+
+    fn to_seed(self: Tile) -> felt252 {
+        // Pack [alt:1 bit | col:32 bits | row:32 bits] into a single felt.
+        // This is collision-free for Tile coordinates because col/row are u32.
+        let alt: felt252 = if self.alt {
+            1
+        } else {
+            0
+        };
+        let col: felt252 = self.col.into();
+        let row: felt252 = self.row.into();
+        return ((alt * 0x10000000000000000) + (col * 0x100000000) + row);
+    }
 }
 
 #[derive(Copy, Drop, Serde, PartialEq)]
@@ -108,6 +121,10 @@ pub enum TileOccupier {
     Quest,
     Chest,
     Spire,
+    //
+    HolySite,
+    Camp,
+    BitcoinMine,
 }
 
 pub impl TileOccupierIntoU8 of Into<TileOccupier, u8> {
@@ -156,6 +173,10 @@ pub impl TileOccupierIntoU8 of Into<TileOccupier, u8> {
             TileOccupier::Quest => 33,
             TileOccupier::Chest => 34,
             TileOccupier::Spire => 35,
+            //
+            TileOccupier::HolySite => 36,
+            TileOccupier::Camp => 37,
+            TileOccupier::BitcoinMine => 38,
         }
     }
 }

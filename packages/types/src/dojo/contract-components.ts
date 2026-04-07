@@ -712,6 +712,7 @@ export function defineContractComponents(world: World) {
           FISH_BALANCE: RecsType.BigInt,
           LORDS_BALANCE: RecsType.BigInt,
           ESSENCE_BALANCE: RecsType.BigInt,
+          RESEARCH_BALANCE: RecsType.BigInt,
           RELIC_E1_BALANCE: RecsType.BigInt,
           RELIC_E2_BALANCE: RecsType.BigInt,
           RELIC_E3_BALANCE: RecsType.BigInt,
@@ -962,6 +963,12 @@ export function defineContractComponents(world: World) {
             output_amount_left: RecsType.BigInt,
             last_updated_at: RecsType.Number,
           },
+          RESEARCH_PRODUCTION: {
+            building_count: RecsType.Number,
+            production_rate: RecsType.BigInt,
+            output_amount_left: RecsType.BigInt,
+            last_updated_at: RecsType.Number,
+          },
         },
         {
           metadata: {
@@ -969,10 +976,10 @@ export function defineContractComponents(world: World) {
             name: "Resource",
             types: [
               "u32", // entity_id
-              ...Array(56).fill("u128"), // balances
+              ...Array(57).fill("u128"), // balances
               "u128",
               "u128", // weight
-              ...Array(38).fill(["u32", "u128", "u128", "u32"]).flat(), // productions
+              ...Array(39).fill(["u32", "u128", "u128", "u32"]).flat(), // productions
             ],
             customTypes: ["Weight", "Production"],
           },
@@ -1529,6 +1536,7 @@ export function defineContractComponents(world: World) {
           },
           speed_config: {
             donkey_sec_per_km: RecsType.Number,
+            donkey_sec_per_km_troops: RecsType.Number,
           },
           map_config: {
             reward_resource_amount: RecsType.Number,
@@ -1549,7 +1557,13 @@ export function defineContractComponents(world: World) {
           settlement_config: {
             center: RecsType.Number,
             base_distance: RecsType.Number,
-            subsequent_distance: RecsType.Number,
+            layers_skipped: RecsType.Number,
+            layer_max: RecsType.Number,
+            layer_capacity_increment: RecsType.Number,
+            layer_capacity_bps: RecsType.Number,
+            spires_layer_distance: RecsType.Number,
+            spires_max_count: RecsType.Number,
+            spires_settled_count: RecsType.Number,
           },
           blitz_mode_on: RecsType.Boolean,
           blitz_settlement_config: {
@@ -1558,6 +1572,7 @@ export function defineContractComponents(world: World) {
             step: RecsType.Number,
             point: RecsType.Number,
             single_realm_mode: RecsType.Boolean,
+            two_player_mode: RecsType.Boolean,
           },
           blitz_hypers_settlement_config: {
             max_ring_count: RecsType.Number,
@@ -1579,6 +1594,9 @@ export function defineContractComponents(world: World) {
             registration_count_max: RecsType.Number,
             registration_start_at: RecsType.Number,
             assigned_positions_count: RecsType.Number,
+          },
+          blitz_exploration_config: {
+            reward_profile_id: RecsType.Number,
           },
           tick_config: {
             armies_tick_in_seconds: RecsType.Number,
@@ -1758,6 +1776,7 @@ export function defineContractComponents(world: World) {
               "u128", // HyperstructureConfig initialize_shards_amount
               "Span<u8>", // HyperstructureCostConfig construction_resources_ids
               "u16", // SpeedConfig donkey_sec_per_km
+              "u16", // SpeedConfig donkey_sec_per_km_troops
               "u16", // MapConfig reward_resource_amount
               "u16", // MapConfig shards_mines_win_probability
               "u16", // MapConfig shards_mines_fail_probability
@@ -1775,14 +1794,21 @@ export function defineContractComponents(world: World) {
               "u8", // MapConfig relic_hex_dist_from_center
               "u8", // MapConfig relic_chest_relics_per_chest
               "u32", // SettlementConfig center
-              "u32", // SettlementConfig base_distance
-              "u32", // SettlementConfig subsequent_distance
+              "u8", // SettlementConfig base_distance
+              "u8", // SettlementConfig layers_skipped
+              "u8", // SettlementConfig layer_max
+              "u8", // SettlementConfig layer_capacity_increment
+              "u16", // SettlementConfig layer_capacity_bps
+              "u8", // SettlementConfig spires_layer_distance
+              "u16", // SettlementConfig spires_max_count
+              "u16", // SettlementConfig spires_settled_count
               "bool", // blitz_mode_on
               "u32", // BlitzSettlementConfig base_distance
               "u32", // BlitzSettlementConfig side
               "u32", // BlitzSettlementConfig step
               "u32", // BlitzSettlementConfig point
               "bool", // BlitzSettlementConfig single_realm_mode
+              "bool", // BlitzSettlementConfig two_player_mode
               "u8", // BlitzHypersSettlementConfig max_ring_count
               "u8", // BlitzHypersSettlementConfig current_ring_count
               "u8", // BlitzHypersSettlementConfig point
@@ -1800,6 +1826,7 @@ export function defineContractComponents(world: World) {
               "u16", // BlitzRegistrationConfig registration_count_max
               "u32", // BlitzRegistrationConfig registration_start_at
               "u16", // BlitzRegistrationConfig assigned_positions_count
+              "u8", // BlitzExplorationConfig reward_profile_id
               "u64", // TickConfig armies_tick_in_seconds
               "u64", // TickConfig delivery_tick_in_seconds
               "u32", // BankConfig lp_fee_num

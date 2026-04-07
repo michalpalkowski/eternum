@@ -3,9 +3,10 @@ import { useUIStore } from "@/hooks/store/use-ui-store";
 import { sqlApi } from "@/services/api";
 
 import Button from "@/ui/design-system/atoms/button";
+import { resolveStructureUiCapabilities } from "@/ui/lib/structure-capabilities";
 import { useExplorersByStructure } from "@bibliothecadao/react";
 import { Guard } from "@bibliothecadao/torii";
-import { ClientComponents, StructureType, Troops } from "@bibliothecadao/types";
+import { ClientComponents, Troops } from "@bibliothecadao/types";
 import { ComponentValue } from "@dojoengine/recs";
 import { useQuery } from "@tanstack/react-query";
 import Shield from "lucide-react/dist/esm/icons/shield";
@@ -45,10 +46,10 @@ export const ArmyList = ({ structure }: { structure: ComponentValue<ClientCompon
   );
 
   const totalExplorersCount = explorers.length;
-
-  const isRealmOrVillage = structure.category === StructureType.Realm || structure.category === StructureType.Village;
-
-  const maxGuardSlots = structure.base.troop_max_guard_count;
+  const structureCapabilities = useMemo(() => resolveStructureUiCapabilities(structure), [structure]);
+  const maxFieldArmies = structureCapabilities.fieldArmySlots;
+  const maxGuardSlots = structureCapabilities.guardArmySlots;
+  const canOpenAttackModal = structureCapabilities.canCreateFieldArmy && totalExplorersCount < maxFieldArmies;
   const isDefenseFull = guards.length >= maxGuardSlots;
   const hasExistingGuards = guards.length > 0;
   const canOpenDefenseModal = !isDefenseFull || hasExistingGuards;
@@ -74,7 +75,7 @@ export const ArmyList = ({ structure }: { structure: ComponentValue<ClientCompon
     <div className="military-panel-selector p-3 space-y-3">
       <div className="grid grid-cols-2 gap-2 rounded-md border border-gold/15 bg-black/40 p-2 text-center">
         <div>
-          <div className="text-xxs uppercase tracking-[0.12em] text-gold/60">Attack Armies</div>
+          <div className="text-xxs uppercase tracking-[0.12em] text-gold/60">Field Armies</div>
           <div className="text-sm font-semibold text-gold">
             {totalExplorersCount} / {structure.base.troop_max_explorer_count}
           </div>
@@ -91,12 +92,12 @@ export const ArmyList = ({ structure }: { structure: ComponentValue<ClientCompon
         <div className="flex gap-2 justify-center">
           <div
             onMouseEnter={() => {
-              if (!isRealmOrVillage) {
+              if (!structureCapabilities.canCreateFieldArmy) {
                 setTooltip({
-                  content: "Can only create attacking armies on realms",
+                  content: "This structure cannot create field armies",
                   position: "top",
                 });
-              } else if (totalExplorersCount >= structure.base.troop_max_explorer_count) {
+              } else if (totalExplorersCount >= maxFieldArmies) {
                 setTooltip({
                   content: "Maximum number of armies reached",
                   position: "top",
@@ -107,11 +108,11 @@ export const ArmyList = ({ structure }: { structure: ComponentValue<ClientCompon
           >
             <Button
               variant="primary"
-              disabled={!isRealmOrVillage || totalExplorersCount >= structure.base.troop_max_explorer_count}
+              disabled={!canOpenAttackModal}
               className="px-3 py-2 flex items-center gap-2"
               onClick={handleCreateAttack}
-              aria-label="Create attack army"
-              title="Create attack army"
+              aria-label="Create field army"
+              title="Create field army"
             >
               <Sword className="h-4 w-4" />
             </Button>
@@ -169,7 +170,7 @@ export const ArmyList = ({ structure }: { structure: ComponentValue<ClientCompon
 
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xxs uppercase tracking-[0.12em] text-gold/60">
-            <span>Attack Armies</span>
+            <span>Field Armies</span>
             <span className="text-gold/70">
               {totalExplorersCount}/{structure.base.troop_max_explorer_count}
             </span>

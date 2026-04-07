@@ -14,6 +14,10 @@ export interface CreateVillageProps extends SystemSigner {
   village_pass_address: string;
 }
 
+export interface ReceiveArmyGrantProps extends SystemSigner {
+  village_id: BigNumberish;
+}
+
 export interface MintAndSettleTestRealmProps extends SystemSigner {
   token_id: BigNumberish;
   realms_address: string;
@@ -34,6 +38,11 @@ export interface BlitzRealmRegisterProps extends SystemSigner {
 
 export interface BlitzRealmMakeHyperstructuresProps extends SystemSigner {
   count: BigNumberish;
+}
+
+export interface SpireMakeSpiresProps extends SystemSigner {
+  count: number;
+  spiresSettledCount: number;
 }
 
 export interface BlitzRealmAssignRealmPositionsProps extends SystemSigner {}
@@ -143,6 +152,7 @@ export interface ExecuteRealmProductionPlanProps extends SystemSigner {
   realm_entity_id: BigNumberish;
   resource_to_resource?: ProductionPlanInstruction[];
   labor_to_resource?: ProductionPlanInstruction[];
+  skipQueue?: boolean;
 }
 
 export interface CreateMultipleRealmsProps extends SystemSigner {
@@ -359,6 +369,23 @@ export interface ClaimWonderProductionBonusProps extends SystemSigner {
   wonder_structure_id: BigNumberish;
 }
 
+export interface PledgeFaithProps extends SystemSigner {
+  structure_id: BigNumberish;
+  wonder_id: BigNumberish;
+}
+
+export interface RemoveFaithProps extends SystemSigner {
+  structure_id: BigNumberish;
+}
+
+export interface UpdateWonderOwnershipProps extends SystemSigner {
+  wonder_id: BigNumberish;
+}
+
+export interface UpdateStructureOwnershipProps extends SystemSigner {
+  structure_id: BigNumberish;
+}
+
 export interface MintStartingResources extends SystemSigner {
   config_ids: BigNumberish[];
   realm_entity_id: BigNumberish;
@@ -380,8 +407,12 @@ export interface SetMapConfigProps extends SystemSigner {
   shards_mines_fail_probability: BigNumberish;
   agent_find_probability: BigNumberish;
   agent_find_fail_probability: BigNumberish;
-  village_find_probability: BigNumberish;
-  village_find_fail_probability: BigNumberish;
+  camp_find_probability: BigNumberish;
+  camp_find_fail_probability: BigNumberish;
+  holysite_find_probability: BigNumberish;
+  holysite_find_fail_probability: BigNumberish;
+  bitcoin_mine_win_probability: BigNumberish;
+  bitcoin_mine_fail_probability: BigNumberish;
   hyps_win_prob: BigNumberish;
   hyps_fail_prob: BigNumberish;
   hyps_fail_prob_increase_p_hex: BigNumberish;
@@ -447,6 +478,9 @@ export interface SetCapacityConfigProps extends SystemSigner {
   hyperstructure_capacity: BigNumberish; // grams
   fragment_mine_capacity: BigNumberish; // grams
   bank_structure_capacity: BigNumberish; // grams
+  holysite_capacity: BigNumberish; // grams
+  camp_capacity: BigNumberish; // grams
+  bitcoin_mine_capacity: BigNumberish; // grams
 }
 
 export interface SetAgentConfigProps extends SystemSigner {
@@ -477,6 +511,7 @@ export interface SetWeightConfigProps extends SystemSigner {
 export interface SetTickConfigProps extends SystemSigner {
   tick_interval_in_seconds: BigNumberish;
   delivery_tick_interval_in_seconds: BigNumberish;
+  bitcoin_phase_in_seconds: BigNumberish;
 }
 
 export interface SetResourceFactoryConfigProps extends SystemSigner {
@@ -595,6 +630,7 @@ export interface SetMercenariesNameConfigProps extends SystemSigner {
 }
 export interface SetDonkeySpeedConfigProps extends SystemSigner {
   sec_per_km: BigNumberish;
+  sec_per_km_troops: BigNumberish;
 }
 
 export interface SetSeasonConfigProps extends SystemSigner {
@@ -647,6 +683,20 @@ export interface SetHyperstructureConfig extends SystemSigner {
 export interface SetQuestConfigProps extends SystemSigner {
   quest_find_probability: BigNumberish;
   quest_find_fail_probability: BigNumberish;
+}
+
+export interface SetFaithConfigProps extends SystemSigner {
+  enabled: boolean;
+  wonder_base_fp_per_sec: BigNumberish;
+  holy_site_fp_per_sec: BigNumberish;
+  realm_fp_per_sec: BigNumberish;
+  village_fp_per_sec: BigNumberish;
+  owner_share_percent: BigNumberish;
+  reward_token: BigNumberish;
+}
+
+export interface SetArtificerConfigProps extends SystemSigner {
+  research_cost_for_relic: BigNumberish;
 }
 
 export interface InitializeHyperstructureProps extends SystemSigner {
@@ -729,8 +779,15 @@ export interface SetStaminaRefillConfigProps extends SystemSigner {
 export interface SetSettlementConfigProps extends SystemSigner {
   center: BigNumberish;
   base_distance: BigNumberish;
-  subsequent_distance: BigNumberish;
+  layers_skipped: BigNumberish;
+  layer_max: BigNumberish;
+  layer_capacity_increment: BigNumberish;
+  layer_capacity_bps: BigNumberish;
+  spires_layer_distance: BigNumberish;
+  spires_max_count: BigNumberish;
+  spires_settled_count: BigNumberish;
   single_realm_mode: boolean;
+  two_player_mode: boolean;
 }
 export interface SetBlitzRegistrationConfigProps extends SystemSigner {
   fee_token: BigNumberish;
@@ -746,6 +803,10 @@ export interface SetBlitzRegistrationConfigProps extends SystemSigner {
   entry_token_class_hash: BigNumberish;
   entry_token_deploy_calldata: BigNumberish[];
   entry_token_ipfs_cid: ByteArray;
+}
+
+export interface SetBlitzExplorationConfigProps extends SystemSigner {
+  reward_profile_id: BigNumberish;
 }
 export interface MintTestRealmProps extends SystemSigner {
   token_id: BigNumberish;
@@ -826,6 +887,8 @@ export interface ExplorerMoveProps extends SystemSigner {
   directions: number[];
   /** Whether to explore new tiles along the way */
   explore: boolean;
+  /** Optional VRF source salt (packed tile seed) required when explore=true and VRF is enabled */
+  vrf_source_salt?: BigNumberish;
 }
 
 /**
@@ -839,6 +902,16 @@ export interface ExplorerTravelProps extends SystemSigner {
 }
 
 /**
+ * Properties for toggling explorer layer through a spire
+ */
+export interface ToggleAlternateProps extends SystemSigner {
+  /** ID of the explorer to move */
+  explorer_id: number;
+  /** Direction from explorer to adjacent spire */
+  spire_direction: number;
+}
+
+/**
  * Properties for exploring with an explorer (includes VRF and reward extraction)
  */
 export interface ExplorerExploreProps extends SystemSigner {
@@ -846,6 +919,8 @@ export interface ExplorerExploreProps extends SystemSigner {
   explorer_id: number;
   /** Array of directions to move in */
   directions: number[];
+  /** VRF source salt (packed tile seed for the destination tile) */
+  vrf_source_salt?: BigNumberish;
 }
 
 /**
@@ -1141,6 +1216,10 @@ export interface OpenChestProps extends SystemSigner {
     x: BigNumberish;
     y: BigNumberish;
   };
+}
+
+export interface BurnResearchForRelicProps extends SystemSigner {
+  structure_id: BigNumberish;
 }
 
 export interface ApplyRelicProps extends SystemSigner {

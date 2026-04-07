@@ -4,8 +4,7 @@ use dojo::model::ModelStorage;
 use dojo::world::{IWorldDispatcherTrait, WorldStorage};
 use crate::alias::ID;
 use crate::constants::{
-    DAYDREAMS_AGENT_ID, RESOURCE_PRECISION, ResourceTypes, WORLD_CONFIG_ID, split_blitz_exploration_reward_and_probs,
-    split_resources_and_probs,
+    DAYDREAMS_AGENT_ID, RESOURCE_PRECISION, ResourceTypes, WORLD_CONFIG_ID, split_resources_and_probs,
 };
 use crate::models::agent::{AgentConfig, AgentCountImpl, AgentLordsMintedImpl, AgentOwner};
 use crate::models::config::{
@@ -33,6 +32,7 @@ use crate::models::troop::{
 use crate::models::weight::{Weight, WeightImpl};
 use crate::system_libraries::biome_library::{IBiomeLibraryDispatcherTrait, biome_library};
 use crate::system_libraries::rng_library::{IRNGlibraryDispatcherTrait, rng_library};
+use crate::systems::utils::blitz_exploration::iBlitzExplorationRewardsImpl;
 use crate::systems::utils::map::IMapImpl;
 use crate::utils::map::biomes::Biome;
 use crate::utils::math::PercentageValueImpl;
@@ -55,6 +55,7 @@ pub impl iGuardImpl of iGuardTrait {
         troop_limit_config: TroopLimitConfig,
         troop_stamina_config: TroopStaminaConfig,
         stamina_revert_initial_amount: bool,
+        max_army_size_check: bool,
     ) {
         let current_tick: u64 = tick.current();
         if troops.count.is_zero() {
@@ -98,12 +99,14 @@ pub impl iGuardImpl of iGuardTrait {
         troops.count += amount;
 
         // ensure structure troop count does not exceed max army size
-        let max_army_size: u128 = troop_limit_config.max_army_size(structure_base.level, troops.tier).into();
-        assert!(
-            troops.count <= max_army_size * RESOURCE_PRECISION,
-            "reached limit of structure guard troop count. max: {}",
-            max_army_size,
-        );
+        if max_army_size_check {
+            let max_army_size: u128 = troop_limit_config.max_army_size(structure_base.level, troops.tier).into();
+            assert!(
+                troops.count <= max_army_size * RESOURCE_PRECISION,
+                "reached limit of structure guard troop count. max: {}",
+                max_army_size,
+            );
+        }
 
         // update guard slot and structure
         guards.to_slot(slot, troops, troops_destroyed_tick.try_into().unwrap());
@@ -406,8 +409,11 @@ pub impl iExplorerImpl of iExplorerTrait {
     }
 
     fn exploration_reward_receiver(
-        ref world: WorldStorage, explorer: ExplorerTroops, explorer_reward_resource: u8,
+        ref world: WorldStorage, blitz_mode: bool, explorer: ExplorerTroops, explorer_reward_resource: u8,
     ) -> ID {
+        if !blitz_mode {
+            return explorer.explorer_id;
+        }
         if RelicResourceImpl::is_relic(explorer_reward_resource) {
             return explorer.explorer_id;
         }
@@ -426,12 +432,16 @@ pub impl iExplorerImpl of iExplorerTrait {
         config: MapConfig,
         vrf_seed: u256,
         blitz_mode_on: bool,
+        blitz_exploration_reward_profile_id: u8,
     ) -> (u8, u128) {
         let mut reward_resource_id: u8 = 0;
         let mut reward_resource_amount: u128 = 0;
         let rng_library = rng_library::get_dispatcher(@world);
         if blitz_mode_on {
-            let (resources, resources_probs) = split_blitz_exploration_reward_and_probs();
+            let (resources, resources_probs) =
+                iBlitzExplorationRewardsImpl::split_blitz_exploration_rewards_and_probabilities(
+                blitz_exploration_reward_profile_id,
+            );
             let (resource_id, resource_amount): (u8, u128) = *rng_library
                 .get_weighted_choice_u8_u128_pair(resources, resources_probs, 1, true, vrf_seed)
                 .at(0);
@@ -600,6 +610,7 @@ pub impl iMercenariesImpl of iMercenariesTrait {
                         tick,
                         troop_limit_config,
                         troop_stamina_config,
+                        false,
                         false,
                     );
                 },
