@@ -49,7 +49,13 @@ pub mod dev_config_systems {
 
             // Tick config
             WorldConfigUtilImpl::set_member(
-                ref world, selector!("tick_config"), TickConfig { armies_tick_in_seconds: 1, delivery_tick_in_seconds: 1 },
+                ref world,
+                selector!("tick_config"),
+                TickConfig {
+                    armies_tick_in_seconds: 1,
+                    delivery_tick_in_seconds: 1,
+                    bitcoin_phase_in_seconds: 600,
+                },
             );
 
             // Capacity: large values so we never hit limits
@@ -72,6 +78,9 @@ pub mod dev_config_systems {
                     hyperstructure_capacity: 1_000_000_000_000_000,
                     fragment_mine_capacity: 1_000_000_000_000_000,
                     bank_structure_capacity: 1_000_000_000_000_000,
+                    holysite_capacity: 1_000_000_000_000_000,
+                    camp_capacity: 1_000_000_000_000_000,
+                    bitcoin_mine_capacity: 1_000_000_000_000_000,
                 },
             );
 
