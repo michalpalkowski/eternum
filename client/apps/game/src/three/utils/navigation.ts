@@ -1,5 +1,6 @@
 import { Position } from "@bibliothecadao/eternum";
 import { getGameModeId } from "@/config/game-modes";
+import { buildPlaySceneUrl } from "@/sharding/location-url";
 
 import { Structure } from "@bibliothecadao/types";
 import { resolveNavigationSceneTarget } from "../scene-navigation-boundary";
@@ -14,17 +15,20 @@ import { SceneName } from "../types";
 const isFastTravelEnabled = (): boolean => getGameModeId() !== "blitz";
 
 function buildSceneLocationUrl(col: number, row: number, targetScene: SceneName): string {
-  const url = new Position({ x: col, y: row });
+  const normalized = new Position({ x: col, y: row }).getNormalized();
 
   if (targetScene === SceneName.Hexception) {
-    return url.toHexLocationUrl();
+    return buildPlaySceneUrl("hex", normalized.x, normalized.y);
   }
 
   if (targetScene === SceneName.FastTravel) {
-    return `/${SceneName.FastTravel}?col=${col}&row=${row}`;
+    const params = new URLSearchParams(window.location.search);
+    params.set("col", String(normalized.x));
+    params.set("row", String(normalized.y));
+    return `/${SceneName.FastTravel}?${params.toString()}`;
   }
 
-  return url.toMapLocationUrl();
+  return buildPlaySceneUrl("map", normalized.x, normalized.y);
 }
 
 function dispatchSceneNavigation(navigationUrl: string): void {
@@ -158,25 +162,25 @@ export function toggleMapHexView() {
     return;
   }
 
-  // Determine new path based on current path
-  let newPath: string;
+  // Determine next scene based on current path
+  let nextScene: "hex" | "map";
   if (currentPath.includes("/hex")) {
-    newPath = "/map";
+    nextScene = "map";
   } else if (currentPath.includes("/map")) {
-    newPath = "/hex";
+    nextScene = "hex";
   } else {
     console.warn("Current path is neither /hex nor /map, cannot toggle");
     return;
   }
 
-  // Construct new URL with same coordinates
-  const newUrl = `${newPath}?col=${col}&row=${row}`;
+  const parsedCol = Number(col);
+  const parsedRow = Number(row);
+  if (!Number.isFinite(parsedCol) || !Number.isFinite(parsedRow)) {
+    console.warn("Invalid coordinates in URL, cannot toggle");
+    return;
+  }
 
-  // Update browser URL
-  window.history.pushState({}, "", newUrl);
+  dispatchSceneNavigation(buildPlaySceneUrl(nextScene, parsedCol, parsedRow));
 
-  // Dispatch URL changed event to trigger scene updates
-  window.dispatchEvent(new Event("urlChanged"));
-
-  console.log(`Toggled view from ${currentPath} to ${newPath}`);
+  console.log(`Toggled view from ${currentPath} to ${nextScene}`);
 }
