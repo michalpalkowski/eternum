@@ -21,7 +21,10 @@ pub trait IShardingSystems<T> {
 pub mod sharding_systems {
     use dojo::model::Model;
     use dojo::sharding::request::{CRDVariant, ShardField};
-    use dojo::world::{IWorldDispatcherTrait, WorldStorage};
+    use dojo::world::WorldStorage;
+    use dojo::world::world_sharding::{
+        IShardingSettlementDispatcher, IShardingSettlementDispatcherTrait,
+    };
     use dojo::utils::entity_id_from_serialized_keys;
     use crate::constants::DEFAULT_NS;
     use crate::systems::config::contracts::config_systems::assert_caller_is_admin;
@@ -46,6 +49,10 @@ pub mod sharding_systems {
     };
     use crate::models::season::SeasonPrize;
 
+    fn sharding_disp(world: @WorldStorage) -> IShardingSettlementDispatcher {
+        IShardingSettlementDispatcher { contract_address: *world.dispatcher.contract_address }
+    }
+
     fn register_policy(
         ref world: WorldStorage,
         ns_hash: felt252,
@@ -53,7 +60,7 @@ pub mod sharding_systems {
         default_crdt: CRDVariant,
         field_overrides: Span<ShardField>,
     ) {
-        world.dispatcher.register_shard_policy(model_selector, default_crdt, field_overrides);
+        sharding_disp(@world).register_shard_policy(model_selector, default_crdt, field_overrides);
     }
 
     #[abi(embed_v0)]
@@ -201,8 +208,7 @@ pub mod sharding_systems {
                 entity_keys_flat.append(1);
                 entity_keys_flat.append(*id);
             };
-            world
-                .dispatcher
+            sharding_disp(@world)
                 .request_sharding(
                     dojo_entities.span(), dojo_shared_entities.span(), entity_keys_flat.span(),
                 );
@@ -268,17 +274,16 @@ pub mod sharding_systems {
                 entity_keys_flat.append(*id);
             };
 
-            world
-                .dispatcher
+            sharding_disp(@world)
                 .request_sharding(
                     dojo_entities.span(), dojo_shared_entities.span(), entity_keys_flat.span(),
                 );
         }
 
         fn finish_shard(ref self: ContractState, shard_id: felt252) {
-            let world = self.world(DEFAULT_NS());
+            let mut world = self.world(DEFAULT_NS());
             assert_caller_is_admin(world);
-            world.dispatcher.end_shard(shard_id);
+            sharding_disp(@world).end_shard(shard_id);
         }
     }
 }

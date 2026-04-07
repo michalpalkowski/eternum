@@ -171,14 +171,14 @@ fn test_register_policies() {
     // Verify a known policy: Market should be Add (encoded=2).
     let ns_hash = dojo::utils::bytearray_hash(DEFAULT_NS());
     let market_selector = Model::<crate::models::bank::market::Market>::selector(ns_hash);
-    let world_disp = dojo::world::IWorldDispatcher { contract_address: world.dispatcher.contract_address };
-    let (default_encoded, overrides) = world_disp.get_shard_policy(market_selector);
+    let sharding_disp = dojo::world::world_sharding::IShardingSettlementDispatcher { contract_address: world.dispatcher.contract_address };
+    let (default_encoded, overrides) = sharding_disp.get_shard_policy(market_selector);
     assert!(default_encoded == 2, "Market default should be Add(2), got {}", default_encoded);
     assert!(overrides.len() == 0, "Market should have no field overrides");
 
     // Verify Structure has Set default (1) with Lock override on owner.
     let structure_selector = Model::<Structure>::selector(ns_hash);
-    let (struct_default, struct_overrides) = world_disp.get_shard_policy(structure_selector);
+    let (struct_default, struct_overrides) = sharding_disp.get_shard_policy(structure_selector);
     assert!(struct_default == 1, "Structure default should be Set(1), got {}", struct_default);
     assert!(struct_overrides.len() == 1, "Structure should have 1 field override");
 }
