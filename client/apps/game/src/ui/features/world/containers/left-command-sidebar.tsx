@@ -2,7 +2,6 @@ import type { VillageIconKey } from "@/config/game-modes";
 import { useGameModeConfig } from "@/config/game-modes/use-game-mode-config";
 import { useBlockTimestamp } from "@/hooks/helpers/use-block-timestamp";
 import { useGoToStructure } from "@/hooks/helpers/use-navigate";
-import { useResolvedStructureEntityKey } from "@/hooks/helpers/use-resolved-structure-entity-key";
 import { useAccountStore } from "@/hooks/store/use-account-store";
 import { useUIStore } from "@/hooks/store/use-ui-store";
 import { LeftView } from "@/types";
@@ -11,8 +10,8 @@ import { Tabs } from "@/ui/design-system/atoms";
 import CircleButton from "@/ui/design-system/molecules/circle-button";
 import { ResourceIcon } from "@/ui/design-system/molecules/resource-icon";
 import { ResourceArrivals as AllResourceArrivals, MarketModal } from "@/ui/features/economy/trading";
-import { ShardRequestButton } from "@/ui/features/sharding/shard-request-button";
 import { TRANSFER_POPUP_NAME } from "@/ui/features/economy/transfers/transfer-automation-popup";
+import { resolveStructureUiCapabilities } from "@/ui/lib/structure-capabilities";
 import {
   RealtimeChatShell,
   useRealtimeChatActions,
@@ -109,7 +108,7 @@ type RealmNavigationContext = {
   view: LeftView;
   setView: (view: LeftView) => void;
   disableButtons: boolean;
-  isRealmOrVillage: boolean;
+  canOpenConstruction: boolean;
   arrivedArrivalsNumber: number;
   pendingArrivalsNumber: number;
   toggleModal: (content: ReactNode | null) => void;
@@ -246,7 +245,7 @@ const LeftPanelHeader = memo(
         {
           key: "villages",
           label: mode.labels.villages,
-          categories: [StructureType.Village],
+          categories: [StructureType.Village, StructureType.Camp],
           icon: VILLAGE_ICON_BY_KEY[mode.ui.villageIconKey],
         },
         {
@@ -272,23 +271,19 @@ const LeftPanelHeader = memo(
       const maxRealmLevel = configManager.getMaxLevel(StructureType.Realm);
       return structures.map((structure) => {
         const { name, originalName } = mode.structure.getName(structure.structure);
+        const structureCapabilities = resolveStructureUiCapabilities(structure.structure);
         const baseLevel = structure.structure.base?.level;
         const normalizedLevel =
           typeof baseLevel === "number" ? baseLevel : typeof baseLevel === "bigint" ? Number(baseLevel) : 0;
-        const realmLevelLabel =
-          structure.category === StructureType.Realm || structure.category === StructureType.Village
-            ? getLevelName(
-                Math.min(Math.max(normalizedLevel, RealmLevels.Settlement), RealmLevels.Empire) as RealmLevels,
-              )
-            : null;
+        const realmLevelLabel = structureCapabilities.hasPopulationDetails
+          ? getLevelName(Math.min(Math.max(normalizedLevel, RealmLevels.Settlement), RealmLevels.Empire) as RealmLevels)
+          : null;
         const structureEntity = getEntityIdFromKeys([BigInt(structure.entityId)]);
         const structureBuildings = components.StructureBuildings
           ? getComponentValue(components.StructureBuildings, structureEntity)
           : null;
         const population = Number(structureBuildings?.population.current ?? 0);
-        const hasBasePopulation =
-          structure.category === StructureType.Realm || structure.category === StructureType.Village;
-        const normalizedBasePopulationCapacity = hasBasePopulation
+        const normalizedBasePopulationCapacity = structureCapabilities.hasPopulationDetails
           ? Math.max(Number(basePopulationCapacityValue ?? 0), 6)
           : 0;
         const populationCapacity = Number(structureBuildings?.population.max ?? 0) + normalizedBasePopulationCapacity;
@@ -349,18 +344,18 @@ const LeftPanelHeader = memo(
       0;
     const normalizedLevel =
       typeof normalizedLevelRaw === "bigint" ? Number(normalizedLevelRaw) : Number(normalizedLevelRaw ?? 0);
-    const levelLabel =
-      selectedStructureMetadata?.category === StructureType.Realm ||
-      selectedStructureMetadata?.category === StructureType.Village
-        ? getLevelName(Math.min(Math.max(normalizedLevel, RealmLevels.Settlement), RealmLevels.Empire) as RealmLevels)
-        : selectedStructureMetadata
-          ? `Level ${normalizedLevel}`
-          : "Level —";
-    const hasBasePopulation =
-      selectedStructureMetadata?.category === StructureType.Realm ||
-      selectedStructureMetadata?.category === StructureType.Village;
-    const basePopulationCapacity = hasBasePopulation ? configManager.getBasePopulationCapacity() : 0;
-    const normalizedBasePopulationCapacity = hasBasePopulation ? Math.max(Number(basePopulationCapacity ?? 0), 6) : 0;
+    const selectedStructureCapabilities = resolveStructureUiCapabilities(selectedStructureMetadata?.structure);
+    const levelLabel = selectedStructureCapabilities.hasPopulationDetails
+      ? getLevelName(Math.min(Math.max(normalizedLevel, RealmLevels.Settlement), RealmLevels.Empire) as RealmLevels)
+      : selectedStructureMetadata
+        ? `Level ${normalizedLevel}`
+        : "Level —";
+    const basePopulationCapacity = selectedStructureCapabilities.hasPopulationDetails
+      ? configManager.getBasePopulationCapacity()
+      : 0;
+    const normalizedBasePopulationCapacity = selectedStructureCapabilities.hasPopulationDetails
+      ? Math.max(Number(basePopulationCapacity ?? 0), 6)
+      : 0;
     const livePopulation = Number(
       liveStructureBuildings?.population.current ?? selectedStructureMetadata?.population ?? 0,
     );
@@ -368,11 +363,7 @@ const LeftPanelHeader = memo(
       Number(liveStructureBuildings?.population.max ?? selectedStructureMetadata?.populationCapacity ?? 0) +
       normalizedBasePopulationCapacity;
     const populationCapacityLabel = selectedStructureMetadata ? `${livePopulation}/${livePopulationCapacity}` : null;
-    const showDetailedStats = Boolean(
-      selectedStructureMetadata &&
-      (selectedStructureMetadata.category === StructureType.Realm ||
-        selectedStructureMetadata.category === StructureType.Village),
-    );
+    const showDetailedStats = Boolean(selectedStructureMetadata && selectedStructureCapabilities.hasPopulationDetails);
     const headerTitle =
       selectedStructureMetadata?.displayName ??
       structureInfo?.name?.name ??
@@ -540,24 +531,26 @@ const StructureListItem = memo(
       return [...structureRelics, ...armyRelics];
     }, [productionBoostBonus, liveStructure, currentArmiesTick]);
 
+    const structureCapabilities = resolveStructureUiCapabilities(structure.structure);
     const rawLevel = liveStructure?.base?.level ?? structure.structure.base?.level ?? 0;
     const normalizedLevel = typeof rawLevel === "bigint" ? Number(rawLevel) : Number(rawLevel ?? 0);
-    const levelLabel =
-      structure.category === StructureType.Realm || structure.category === StructureType.Village
-        ? getLevelName(Math.min(Math.max(normalizedLevel, RealmLevels.Settlement), RealmLevels.Empire) as RealmLevels)
-        : null;
+    const levelLabel = structureCapabilities.hasPopulationDetails
+      ? getLevelName(Math.min(Math.max(normalizedLevel, RealmLevels.Settlement), RealmLevels.Empire) as RealmLevels)
+      : null;
 
-    const hasBasePopulation =
-      structure.category === StructureType.Realm || structure.category === StructureType.Village;
-    const basePopulationCapacity = hasBasePopulation ? configManager.getBasePopulationCapacity() : 0;
-    const normalizedBasePopulationCapacity = hasBasePopulation ? Math.max(Number(basePopulationCapacity ?? 0), 6) : 0;
+    const basePopulationCapacity = structureCapabilities.hasPopulationDetails
+      ? configManager.getBasePopulationCapacity()
+      : 0;
+    const normalizedBasePopulationCapacity = structureCapabilities.hasPopulationDetails
+      ? Math.max(Number(basePopulationCapacity ?? 0), 6)
+      : 0;
 
     const population = Number(liveStructureBuildings?.population.current ?? structure.population ?? 0);
     const populationCapacity =
       Number(liveStructureBuildings?.population.max ?? structure.populationCapacity ?? 0) +
       normalizedBasePopulationCapacity;
 
-    const showInfoLine = hasBasePopulation;
+    const showInfoLine = structureCapabilities.hasPopulationDetails;
     const capacityDisplay = `${population}/${populationCapacity}`;
     const infoLineLabel = levelLabel ?? `Level ${normalizedLevel}`;
 
@@ -635,11 +628,6 @@ const StructureListItem = memo(
             <StructureLevelUpButton structureEntityId={structure.entityId} className="ml-auto shrink-0" />
           )}
         </div>
-        {isSelected && structure.category === StructureType.Realm && (
-          <div className="mt-2 border-t border-gold/10 pt-2">
-            <ShardRequestButton entityId={structure.entityId} />
-          </div>
-        )}
       </div>
     );
   },
@@ -652,6 +640,7 @@ const ORDERED_MENU_IDS: MenuEnum[] = [
   MenuEnum.construction, // Buildings
   MenuEnum.military, // Army
   MenuEnum.resourceArrivals, // Donkey arrivals
+  MenuEnum.trade, // Trade
   MenuEnum.transfer, // Transfers
   MenuEnum.bridge, // Bridge
   MenuEnum.chat, // Chat
@@ -665,7 +654,6 @@ type StructureLevelUpButtonProps = {
 };
 
 const StructureLevelUpButton = ({ structureEntityId, className }: StructureLevelUpButtonProps) => {
-  const [isUpgrading, setIsUpgrading] = useState(false);
   const upgradeInfo = useStructureUpgrade(typeof structureEntityId === "number" ? structureEntityId : null);
   const setTooltip = useUIStore((state) => state.setTooltip);
 
@@ -678,7 +666,7 @@ const StructureLevelUpButton = ({ structureEntityId, className }: StructureLevel
   const isAtMaxLevel = upgradeInfo.isMaxLevel || currentLevel >= maxLevel;
   const meetsRequirements = (upgradeInfo.missingRequirements?.length ?? 0) === 0;
   const canUpgrade = upgradeInfo.isOwner && !isAtMaxLevel && meetsRequirements;
-  const isDisabled = !canUpgrade || isUpgrading || isAtMaxLevel || upgradeInfo.isWriteBlocked;
+  const isDisabled = !canUpgrade || upgradeInfo.isUpgradeLocked || isAtMaxLevel;
   const shouldGlow = canUpgrade && !isDisabled;
   const nextLevel = upgradeInfo.nextLevel ?? 0;
 
@@ -751,18 +739,13 @@ const StructureLevelUpButton = ({ structureEntityId, className }: StructureLevel
     return <ChevronUp className="h-3.5 w-3.5" />;
   };
 
-  const handleUpgrade = async (event: MouseEvent<HTMLButtonElement>) => {
+  const handleUpgrade = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     if (isDisabled) return;
 
-    setIsUpgrading(true);
-    try {
-      await upgradeInfo.handleUpgrade();
-    } catch (error) {
+    void upgradeInfo.handleUpgrade().catch((error) => {
       console.error("Failed to upgrade structure", error);
-    } finally {
-      setIsUpgrading(false);
-    }
+    });
   };
 
   return (
@@ -778,9 +761,8 @@ const StructureLevelUpButton = ({ structureEntityId, className }: StructureLevel
             : "border-gold/20 bg-black/30 text-gold/50 cursor-not-allowed",
         )}
         aria-label="Level up realm"
-        title={upgradeInfo.writeBlockReason ?? "Level up realm"}
       >
-        {isUpgrading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : renderIcon()}
+        {upgradeInfo.isUpgradeLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : renderIcon()}
       </button>
       <button
         type="button"
@@ -802,7 +784,7 @@ const buildRealmNavigationItems = ({
   view,
   setView,
   disableButtons,
-  isRealmOrVillage,
+  canOpenConstruction,
   arrivedArrivalsNumber,
   pendingArrivalsNumber,
   toggleModal,
@@ -832,7 +814,7 @@ const buildRealmNavigationItems = ({
       tooltipLocation: "top",
       label: construction,
       size: DEFAULT_BUTTON_SIZE,
-      disabled: disableButtons || !isRealmOrVillage,
+      disabled: disableButtons || !canOpenConstruction,
       active: view === LeftView.ConstructionView,
       onClick: toggleView(LeftView.ConstructionView),
     },
@@ -1054,7 +1036,7 @@ const InGameMarket = lazy(() =>
 );
 const HYPERSTRUCTURES_MENU_BY_VARIANT = {
   blitz: BlitzHyperstructuresMenu,
-  standard: EternumHyperstructuresMenu,
+  eternum: EternumHyperstructuresMenu,
 } as const;
 // const RelicsModule = lazy(() =>
 //   import("@/ui/features/relics").then((module) => ({
@@ -1083,7 +1065,6 @@ export const LeftCommandSidebar = memo(() => {
   const setStructureEntityId = useUIStore((state) => state.setStructureEntityId);
   const setSelectedHex = useUIStore((state) => state.setSelectedHex);
   const structures = useUIStore((state) => state.playerStructures);
-  const structuresWithKeys = structures as Array<{ entityId: number | string; recsEntityKey?: string }>;
   const toggleModal = useUIStore((state) => state.toggleModal);
   const { structureGroups, updateStructureGroup } = useStructureGroups();
   const { favorites, toggleFavorite } = useFavoriteStructures();
@@ -1147,10 +1128,8 @@ export const LeftCommandSidebar = memo(() => {
     prevChatOpen.current = isChatOpen;
   }, [isChatOpen, setView, view]);
 
-  const selectedStructureEntityKey = useResolvedStructureEntityKey(structureEntityId, structuresWithKeys);
-
   // listen to structure updates
-  const structure = useComponentValue(components.Structure, selectedStructureEntityKey);
+  const structure = useComponentValue(components.Structure, getEntityIdFromKeys([BigInt(structureEntityId)]));
 
   const structureInfo = useMemo(() => {
     // Include structureNameVersion to refresh cached info when renames happen locally.
@@ -1158,18 +1137,10 @@ export const LeftCommandSidebar = memo(() => {
     return mode.structure.getEntityInfo(structureEntityId, ContractAddress(account.address), components);
   }, [structureEntityId, structure, account.address, components, structureNameVersion, mode]);
 
-  const isRealmOrVillage = useMemo(() => {
-    const liveCategory = Number((structure as { base?: { category?: unknown } } | undefined)?.base?.category);
-    if (Number.isFinite(liveCategory)) {
-      return liveCategory === StructureType.Realm || liveCategory === StructureType.Village;
-    }
-
-    return (
-      Boolean(structureInfo) &&
-      (structureInfo?.structureCategory === StructureType.Realm ||
-        structureInfo?.structureCategory === StructureType.Village)
-    );
-  }, [structure, structureInfo]);
+  const canOpenConstruction = useMemo(
+    () => resolveStructureUiCapabilities({ category: structureInfo?.structureCategory }).canOpenConstruction,
+    [structureInfo],
+  );
 
   const realmNavigationItems = useMemo(
     () =>
@@ -1177,7 +1148,7 @@ export const LeftCommandSidebar = memo(() => {
         view,
         setView,
         disableButtons,
-        isRealmOrVillage,
+        canOpenConstruction,
         arrivedArrivalsNumber,
         pendingArrivalsNumber,
         toggleModal,
@@ -1188,7 +1159,7 @@ export const LeftCommandSidebar = memo(() => {
       view,
       setView,
       disableButtons,
-      isRealmOrVillage,
+      canOpenConstruction,
       arrivedArrivalsNumber,
       pendingArrivalsNumber,
       toggleModal,

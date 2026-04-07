@@ -1,49 +1,48 @@
-import { useAccountStore } from "@/hooks/store/use-account-store";
+import clsx from "clsx";
 import { useUIStore } from "@/hooks/store/use-ui-store";
 import { LoadingStateKey } from "@/hooks/store/use-world-loading";
+import { markGameEntryMilestone } from "@/ui/layouts/game-entry-timeline";
+import { BootLoaderShell, useBootDocumentState } from "@/ui/modules/boot-loader";
 import { Position } from "@bibliothecadao/eternum";
 import { usePlayerStructures } from "@bibliothecadao/react";
-import { ContractAddress } from "@bibliothecadao/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BootstrapTask } from "@/hooks/context/use-eager-bootstrap";
-import { BootstrapLoadingPanel } from "@/ui/layouts/bootstrap-loading/bootstrap-loading-panel";
-import { buildPlaySceneUrl } from "@/sharding/location-url";
 import {
   getSceneWarmupProgress,
   resolveEntryOverlayPhase,
-  waitForHexceptionGridReady,
+  waitForWorldmapSceneReady,
 } from "./game-loading-overlay.utils";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 const SAFETY_TIMEOUT_MS = 15_000;
 const SLOW_THRESHOLD_MS = 8_000;
 const TICK_INTERVAL_MS = 250;
 const HANDOFF_PROGRESS = 76;
-const POST_HEX_READY_DELAY_MS = 250;
-const HEXCEPTION_READY_TIMEOUT_MS = 6_000;
-// Time to wait after tile data loads before dismissing (spectator path).
-// Longer because the bounds subscription still needs to stream Structure
-// entities and the WorldUpdateListener needs to process them into visuals.
-const POST_MAP_LOAD_DELAY_MS = 3_000;
+const WORLDMAP_READY_TIMEOUT_MS = 1_200;
 
-const overlayDiag = (event: string, details?: Record<string, unknown>) => {
-  if (!import.meta.env.DEV) {
-    return;
-  }
+type WorldMapPosition = {
+  col: number;
+  row: number;
+};
 
-  if (details) {
-    console.log("[GameLoadingOverlay]", event, details);
-    return;
-  }
-
-  console.log("[GameLoadingOverlay]", event);
+const isFiniteWorldMapPosition = (
+  position: { col?: number | null; row?: number | null } | null | undefined,
+): position is WorldMapPosition => {
+  return (
+    position != null &&
+    typeof position.col === "number" &&
+    Number.isFinite(position.col) &&
+    typeof position.row === "number" &&
+    Number.isFinite(position.row)
+  );
 };
 
 /**
  * Loading overlay shown while game data syncs after <World> mounts.
  *
  * For players:
- *   Waits for structures in RECS, navigates to the player's realm, then dismisses.
+ *   Waits for structures in RECS, navigates to the player's realm on the world map,
+ *   then dismisses once the map finishes its initial fetch.
  *
  * For spectators:
  *   Waits for the world map's initial Torii fetch to complete, then dismisses.
@@ -51,43 +50,70 @@ const overlayDiag = (event: string, details?: Record<string, unknown>) => {
  * Falls back to a safety timeout if neither signal fires.
  */
 export const GameLoadingOverlay = () => {
+  useBootDocumentState("app-loading");
+
+  useEffect(() => {
+    markGameEntryMilestone("overlay-mounted");
+  }, []);
+
   const setShowBlankOverlay = useUIStore((state) => state.setShowBlankOverlay);
-  const setIsLoadingScreenEnabled = useUIStore((state) => state.setIsLoadingScreenEnabled);
   const isSpectating = useUIStore((state) => state.isSpectating);
+  const worldMapReturnPosition = useUIStore((state) => state.worldMapReturnPosition);
   const mapLoading = useUIStore((state) => state.loadingStates[LoadingStateKey.Map]);
-  const playerAddress = useAccountStore((state) => state.playerAddress);
-  const playerStructures = usePlayerStructures(
-    playerAddress ? ContractAddress(playerAddress) : undefined,
-  );
+  const playerStructures = usePlayerStructures();
   const hasDismissed = useRef(false);
   const hasSeenMapLoading = useRef(false);
+  const hasSeenWorldmapReady = useRef(false);
+  const isWaitingForWorldmapReady = useRef(false);
   const startedAt = useRef(0);
   const hasStartedPlayerFlow = useRef(false);
   const hasStartedSpectatorFlow = useRef(false);
-  const hasQueuedSpectatorReady = useRef(false);
-  const spectatorReadyTimeoutId = useRef<number | null>(null);
+  const hasQueuedWorldMapReady = useRef(false);
+  const worldMapReadyTimeoutId = useRef<number | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [isReady, setIsReady] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const isOnWorldMapRoute = location.pathname.startsWith("/play/map");
+  const targetWorldMapPosition = useMemo<WorldMapPosition | null>(() => {
+    if (isSpectating && isFiniteWorldMapPosition(worldMapReturnPosition)) {
+      return worldMapReturnPosition;
+    }
+
+    if (playerStructures.length === 0) {
+      return null;
+    }
+
+    const first = playerStructures[0];
+    const normalized = new Position({ x: first.position.x, y: first.position.y }).getNormalized();
+    return { col: normalized.x, row: normalized.y };
+  }, [isSpectating, playerStructures, worldMapReturnPosition]);
 
   const dismiss = useCallback(
-    (delayMs: number, reason: string) => {
+    (delayMs: number) => {
       if (hasDismissed.current) return;
       hasDismissed.current = true;
-      overlayDiag("dismiss:scheduled", {
-        reason,
-        delayMs,
-        isSpectating,
-        mapLoading,
-        playerStructuresCount: playerStructures.length,
-      });
-      setTimeout(() => {
-        overlayDiag("dismiss:executed", { reason });
-        setShowBlankOverlay(false);
-        setIsLoadingScreenEnabled(false);
-      }, delayMs);
+      setTimeout(() => setShowBlankOverlay(false), delayMs);
     },
-    [setShowBlankOverlay, setIsLoadingScreenEnabled, isSpectating, mapLoading, playerStructures.length],
+    [setShowBlankOverlay],
+  );
+
+  const markWorldMapReady = useCallback(
+    (delayMs: number) => {
+      if (hasQueuedWorldMapReady.current) {
+        return;
+      }
+
+      hasQueuedWorldMapReady.current = true;
+      markGameEntryMilestone("overlay-ready");
+      worldMapReadyTimeoutId.current = window.setTimeout(() => {
+        worldMapReadyTimeoutId.current = null;
+        setIsReady(true);
+      }, 0);
+      dismiss(delayMs);
+    },
+    [dismiss],
   );
 
   useEffect(() => {
@@ -100,72 +126,96 @@ export const GameLoadingOverlay = () => {
     return () => window.clearInterval(interval);
   }, []);
 
-  // --- Player path: navigate to first structure once it appears in RECS ---
+  // --- Player path: navigate to the world map centered on the first synced structure ---
   useEffect(() => {
     if (hasDismissed.current || isSpectating || hasStartedPlayerFlow.current) return;
+    if (targetWorldMapPosition == null) return;
+
+    if (isOnWorldMapRoute) {
+      hasStartedPlayerFlow.current = true;
+      return;
+    }
+
     if (playerStructures.length === 0) return;
 
     hasStartedPlayerFlow.current = true;
+    markGameEntryMilestone("player-structures-synced");
 
     const first = playerStructures[0];
-    const normalized = new Position({ x: first.position.x, y: first.position.y }).getNormalized();
-    overlayDiag("player-flow:start", {
-      firstStructureId: first.entityId,
-      firstStructurePosition: first.position,
-      normalizedPosition: normalized,
-    });
-
     const setStructureEntityId = useUIStore.getState().setStructureEntityId;
     setStructureEntityId(first.entityId, {
       spectator: false,
-      worldMapPosition: { col: normalized.x, row: normalized.y },
+      worldMapPosition: targetWorldMapPosition,
     });
 
-    const targetCoords = { col: normalized.x, row: normalized.y };
-    const ready = waitForHexceptionGridReady(targetCoords, HEXCEPTION_READY_TIMEOUT_MS);
-
-    const url = buildPlaySceneUrl("hex", normalized.x, normalized.y, { spectate: false });
+    const url = `/play/map?col=${targetWorldMapPosition.col}&row=${targetWorldMapPosition.row}`;
+    markGameEntryMilestone("worldmap-navigation-started");
     navigate(url);
     window.dispatchEvent(new Event("urlChanged"));
+  }, [playerStructures, isOnWorldMapRoute, isSpectating, navigate, targetWorldMapPosition]);
 
-    void ready.then(() => {
-      setIsReady(true);
-      dismiss(POST_HEX_READY_DELAY_MS, "player-hex-ready");
-    });
-  }, [playerStructures, isSpectating, navigate, dismiss]);
-
-  // --- Spectator path: dismiss once the world map finishes its initial fetch ---
   useEffect(() => {
-    if (hasDismissed.current || !isSpectating) return;
-    if (!hasStartedSpectatorFlow.current) {
+    if (hasDismissed.current) return;
+
+    const hasStartedWorldMapFlow = isSpectating ? hasStartedSpectatorFlow.current : hasStartedPlayerFlow.current;
+    if (!hasStartedWorldMapFlow) {
+      return;
+    }
+
+    if (hasSeenWorldmapReady.current || isWaitingForWorldmapReady.current) {
+      return;
+    }
+
+    isWaitingForWorldmapReady.current = true;
+    let cancelled = false;
+
+    void waitForWorldmapSceneReady(WORLDMAP_READY_TIMEOUT_MS).then(() => {
+      isWaitingForWorldmapReady.current = false;
+      if (cancelled) {
+        return;
+      }
+
+      hasSeenWorldmapReady.current = true;
+      markGameEntryMilestone("worldmap-scene-ready");
+
+      if (hasSeenMapLoading.current && !mapLoading) {
+        markWorldMapReady(0);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      isWaitingForWorldmapReady.current = false;
+    };
+  }, [isSpectating, mapLoading, markWorldMapReady]);
+
+  // --- World-map path: dismiss once the initial map fetch completes ---
+  useEffect(() => {
+    if (hasDismissed.current) return;
+
+    if (isSpectating && !hasStartedSpectatorFlow.current) {
       hasStartedSpectatorFlow.current = true;
     }
 
-    if (mapLoading && !hasSeenMapLoading.current) {
-      overlayDiag("spectator-flow:map-loading-seen");
+    const hasStartedWorldMapFlow = isSpectating ? hasStartedSpectatorFlow.current : hasStartedPlayerFlow.current;
+    if (!hasStartedWorldMapFlow) {
+      return;
+    }
+
+    if (mapLoading) {
       hasSeenMapLoading.current = true;
     }
 
-    // Map loading went true → false: initial tile fetch complete.
-    // Wait additional time for the bounds subscription to stream
-    // Structure entities and for the map to render them.
-    if (hasSeenMapLoading.current && !mapLoading && !hasQueuedSpectatorReady.current) {
-      hasQueuedSpectatorReady.current = true;
-      overlayDiag("spectator-flow:map-loading-finished", {
-        playerStructuresCount: playerStructures.length,
-      });
-      spectatorReadyTimeoutId.current = window.setTimeout(() => {
-        spectatorReadyTimeoutId.current = null;
-        setIsReady(true);
-      }, 0);
-      dismiss(POST_MAP_LOAD_DELAY_MS, "spectator-map-load-complete");
+    if (hasSeenMapLoading.current && !mapLoading && hasSeenWorldmapReady.current) {
+      markGameEntryMilestone("worldmap-fetch-completed");
+      markWorldMapReady(0);
     }
-  }, [mapLoading, isSpectating, dismiss, playerStructures.length]);
+  }, [isSpectating, mapLoading, markWorldMapReady]);
 
   useEffect(() => {
     return () => {
-      if (spectatorReadyTimeoutId.current !== null) {
-        window.clearTimeout(spectatorReadyTimeoutId.current);
+      if (worldMapReadyTimeoutId.current !== null) {
+        window.clearTimeout(worldMapReadyTimeoutId.current);
       }
     };
   }, []);
@@ -174,21 +224,17 @@ export const GameLoadingOverlay = () => {
   useEffect(() => {
     const timeout = setTimeout(() => {
       if (!hasDismissed.current) {
-        console.warn("[GameLoadingOverlay] safety timeout reached", {
-          isSpectating,
-          mapLoading,
-          playerStructuresCount: playerStructures.length,
-        });
         hasDismissed.current = true;
         setShowBlankOverlay(false);
-        setIsLoadingScreenEnabled(false);
       }
     }, SAFETY_TIMEOUT_MS);
     return () => clearTimeout(timeout);
-  }, [setShowBlankOverlay, setIsLoadingScreenEnabled, isSpectating, mapLoading, playerStructures.length]);
+  }, [setShowBlankOverlay]);
 
   const isSlow = !isReady && elapsedMs >= SLOW_THRESHOLD_MS;
-  const hasNavigatedToTarget = isSpectating ? elapsedMs >= TICK_INTERVAL_MS : playerStructures.length > 0;
+  const hasNavigatedToTarget = isSpectating
+    ? elapsedMs >= TICK_INTERVAL_MS
+    : isOnWorldMapRoute || playerStructures.length > 0;
   const phase = resolveEntryOverlayPhase({
     isReady,
     hasNavigated: hasNavigatedToTarget,
@@ -202,61 +248,103 @@ export const GameLoadingOverlay = () => {
   }, [phase, elapsedMs]);
 
   const statements = useMemo(() => {
-    if (phase === "ready") return ["Realm ready!"];
-    if (phase === "slow") return ["Taking longer than usual, still syncing...", "Still assembling your realm..."];
-    if (phase === "handoff") return ["Opening your realm portal..."];
-    return ["Rendering your realm...", "Placing structures...", "Waking your armies..."];
+    if (phase === "ready") return ["Your realm awaits."];
+    if (phase === "slow") return ["The realm is vast — still gathering intel..."];
+    if (phase === "handoff") return ["Crossing into the world map..."];
+    return ["Assembling the known world..."];
   }, [phase]);
 
   const tasks = useMemo<BootstrapTask[]>(() => {
     if (phase === "ready") {
       return [
-        { id: "handoff", label: "Transitioning to the realm", status: "complete" },
-        { id: "render", label: "Rendering terrain and structures", status: "complete" },
-        { id: "final", label: "Final checks", status: "complete" },
+        { id: "handoff", label: "World map located", status: "complete" },
+        { id: "render", label: "Terrain & structures rendered", status: "complete" },
+        { id: "final", label: "Realm synchronized", status: "complete" },
       ];
     }
 
     if (phase === "handoff") {
       return [
-        { id: "handoff", label: "Transitioning to the realm", status: "running" },
-        { id: "render", label: "Rendering terrain and structures", status: "pending" },
-        { id: "final", label: "Final checks", status: "pending" },
+        { id: "handoff", label: "Locating world map", status: "running" },
+        { id: "render", label: "Terrain & structures", status: "pending" },
+        { id: "final", label: "Realm synchronization", status: "pending" },
       ];
     }
 
     if (phase === "slow") {
       return [
-        { id: "handoff", label: "Transitioning to the realm", status: "complete" },
-        { id: "render", label: "Rendering terrain and structures", status: "running" },
-        { id: "final", label: "Final checks", status: "running" },
+        { id: "handoff", label: "World map located", status: "complete" },
+        { id: "render", label: "Rendering terrain & structures", status: "running" },
+        { id: "final", label: "Synchronizing realm", status: "running" },
       ];
     }
 
     return [
-      { id: "handoff", label: "Transitioning to the realm", status: "complete" },
-      { id: "render", label: "Rendering terrain and structures", status: "running" },
-      { id: "final", label: "Final checks", status: "pending" },
+      { id: "handoff", label: "World map located", status: "complete" },
+      { id: "render", label: "Rendering terrain & structures", status: "running" },
+      { id: "final", label: "Realm synchronization", status: "pending" },
     ];
   }, [phase]);
 
-  const overlayTitle = isSpectating ? "Entering World View" : "Entering Realm";
+  const overlayTitle = "Entering the Realm";
+  const activeStatement = statements[0] ?? "Rendering the world map...";
 
   return (
-    <div className="absolute inset-0 z-[110] flex items-center justify-center bg-black/95 backdrop-blur-sm">
-      <div className="bg-black/20 border-r border-[0.5px] border-gradient text-gold relative backdrop-filter backdrop-blur-[32px] panel-wood panel-wood-corners w-full max-w-[456px] p-4 sm:p-5">
-        <div className="text-center mb-3">
-          <div className="text-[10px] sm:text-xs uppercase tracking-widest text-gold/60">Step 2 of 2</div>
-          <h3 className="text-base sm:text-lg font-semibold text-gold mt-1">{overlayTitle}</h3>
+    <BootLoaderShell
+      className="absolute inset-0 z-[110]"
+      panelClassName="max-w-[30rem] px-6 py-7 sm:px-8 sm:py-8"
+      mode="determinate"
+      progress={progress}
+      title={overlayTitle}
+      subtitle={activeStatement}
+      caption="World Sync"
+      detail={
+        <div className="space-y-4">
+          <div className="flex items-center justify-between border-b border-gold/10 pb-3 font-['Space_Grotesk',ui-sans-serif,system-ui,sans-serif] text-xs uppercase tracking-[0.28em] text-gold/45">
+            <span>World handoff</span>
+            <span className="tabular-nums">{Math.max(0, Math.min(100, Math.round(progress)))}%</span>
+          </div>
+          <div className="space-y-2.5">
+            {tasks.map((task) => {
+              const isRunning = task.status === "running";
+              const isComplete = task.status === "complete";
+              const statusTone = isComplete
+                ? "border-gold/30 bg-gold/12 text-gold"
+                : isRunning
+                  ? "border-gold/20 bg-gold/6 text-gold/80"
+                  : "border-gold/8 bg-gold/3 text-gold/30";
+
+              return (
+                <div
+                  key={task.id}
+                  className={clsx(
+                    "flex items-center justify-between gap-4 rounded-lg border border-gold/15 bg-black/20 px-4 py-2.5 transition-all duration-300",
+                    isRunning && "border-l-2 border-l-gold/50",
+                  )}
+                >
+                  <span
+                    className={clsx(
+                      "font-['Space_Grotesk',ui-sans-serif,system-ui,sans-serif] text-sm transition-colors duration-300",
+                      isComplete
+                        ? "text-[rgba(236,224,194,0.9)]"
+                        : isRunning
+                          ? "text-[rgba(236,224,194,0.84)]"
+                          : "text-[rgba(236,224,194,0.45)]",
+                    )}
+                  >
+                    {task.label}
+                  </span>
+                  <span
+                    className={`shrink-0 rounded-full border px-2.5 py-0.5 font-['Space_Grotesk',ui-sans-serif,system-ui,sans-serif] text-[0.6rem] uppercase tracking-[0.22em] transition-all duration-300 ${statusTone}`}
+                  >
+                    {task.status === "complete" ? "done" : task.status === "running" ? "syncing" : "waiting"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
         </div>
-        <BootstrapLoadingPanel
-          tasks={tasks}
-          progress={progress}
-          error={null}
-          onRetry={() => {}}
-          statements={statements}
-        />
-      </div>
-    </div>
+      }
+    />
   );
 };

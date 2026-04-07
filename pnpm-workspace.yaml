@@ -9,6 +9,8 @@ packages:
   - client/apps/heavy-load
   - client/apps/eternum-mobile
   - client/apps/onchain-agent
+  - client/apps/amm-indexer
+  - client/apps/amm-indexerv2
   - config
   - packages/*
   - contracts/season_pass/scripts/deployment
@@ -18,17 +20,17 @@ packages:
 autoInstallPeers: true
 
 catalog:
-  "@cartridge/connector": ^0.12.1
-  "@cartridge/controller": ^0.12.1
-  "@dojoengine/core": 1.7.0
-  "@dojoengine/predeployed-connector": 1.7.0
-  "@dojoengine/react": 1.7.0
+  "@cartridge/connector": ^0.13.9
+  "@cartridge/controller": ^0.13.9
+  "@dojoengine/core": 1.7.0-preview.3
+  "@dojoengine/predeployed-connector": 1.7.0-preview.3
+  "@dojoengine/react": 1.7.0-preview.3
   "@dojoengine/recs": ^2.0.13
-  "@dojoengine/sdk": 1.7.0
-  "@dojoengine/state": 1.7.0
-  "@dojoengine/torii-client": 1.7.0
-  "@dojoengine/torii-wasm": 1.7.0
-  "@dojoengine/utils": 1.7.0
+  "@dojoengine/sdk": 1.7.0-preview.3
+  "@dojoengine/state": 1.7.0-preview.3
+  "@dojoengine/torii-client": 1.7.0-preview.3
+  "@dojoengine/torii-wasm": 1.7.0-preview.3
+  "@dojoengine/utils": 1.7.0-preview.3
   "@metamask/sdk": ^0.32.1
   "@solana/web3.js": ^1.98.0
   "@starknet-react/chains": 5.0.3

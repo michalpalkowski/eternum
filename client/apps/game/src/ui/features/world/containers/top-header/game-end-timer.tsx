@@ -1,4 +1,5 @@
 import { useUIStore } from "@/hooks/store/use-ui-store";
+import { hasFiniteSeasonEnd } from "@/ui/features/world/utils/season-timing";
 import { getBlockTimestamp } from "@bibliothecadao/eternum";
 import Clock from "lucide-react/dist/esm/icons/clock";
 import { memo, useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
@@ -14,38 +15,25 @@ const FINAL_THRESHOLD_SECONDS = 30;
 
 type UrgencyState = "default" | "warning" | "critical" | "final";
 
-const formatCompactTimeRemaining = (secondsRemaining: number): string => {
-  const displaySeconds = Math.max(0, Math.floor(secondsRemaining));
-  const hours = Math.floor(displaySeconds / 3600);
-  const minutes = Math.floor((displaySeconds % 3600) / 60);
-  const seconds = displaySeconds % 60;
+const getSecondsRemaining = (gameEndAt: number | null, currentBlockTimestamp: number) => {
+  if (!hasFiniteSeasonEnd(gameEndAt)) {
+    return 0;
+  }
 
-  if (hours > 0) {
-    return `${hours}h ${minutes.toString().padStart(2, "0")}m`;
-  }
-  if (minutes > 0) {
-    return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
-  }
-  return `${seconds}s`;
+  return Math.max(0, gameEndAt - currentBlockTimestamp);
 };
 
 export const GameEndTimer = memo(() => {
   const gameEndAt = useUIStore((state) => state.gameEndAt);
   const setTooltip = useUIStore((state) => state.setTooltip);
   const { currentBlockTimestamp } = getBlockTimestamp();
+  const hasFiniteGameEnd = useMemo(() => hasFiniteSeasonEnd(gameEndAt), [gameEndAt]);
 
-  const [secondsRemaining, setSecondsRemaining] = useState(
-    Math.max(0, gameEndAt ? gameEndAt - currentBlockTimestamp : 0),
-  );
+  const [secondsRemaining, setSecondsRemaining] = useState(() => getSecondsRemaining(gameEndAt, currentBlockTimestamp));
   const [isTooltipVisible, setIsTooltipVisible] = useState(false);
 
   useEffect(() => {
-    if (!gameEndAt) {
-      setSecondsRemaining(0);
-      return;
-    }
-
-    const nextRemaining = Math.max(gameEndAt - currentBlockTimestamp, 0);
+    const nextRemaining = getSecondsRemaining(gameEndAt, currentBlockTimestamp);
     setSecondsRemaining((previous) => (previous === nextRemaining ? previous : nextRemaining));
   }, [currentBlockTimestamp, gameEndAt]);
 
@@ -59,6 +47,19 @@ export const GameEndTimer = memo(() => {
 
   useEffect(() => {
     if (!isTooltipVisible) return;
+
+    if (!hasFiniteGameEnd) {
+      setTooltip({
+        position: "bottom",
+        content: (
+          <div className="whitespace-nowrap pointer-events-none flex flex-col mt-3 mb-3 text-sm capitalize">
+            <div className="font-bold">Game Duration:</div>
+            <div>Infinite</div>
+          </div>
+        ),
+      });
+      return;
+    }
 
     const calculateDisplaySeconds = () => Math.max(0, DEBUG_URGENCY_MODE ? DEBUG_SECONDS_REMAINING : secondsRemaining);
 
@@ -85,29 +86,42 @@ export const GameEndTimer = memo(() => {
     const tooltipTimer = setInterval(updateTooltip, 1000);
 
     return () => clearInterval(tooltipTimer);
-  }, [isTooltipVisible, secondsRemaining, setTooltip]);
+  }, [hasFiniteGameEnd, isTooltipVisible, secondsRemaining, setTooltip]);
 
-  const secondsForDisplay = useMemo(
-    () => Math.max(0, DEBUG_URGENCY_MODE ? DEBUG_SECONDS_REMAINING : secondsRemaining),
-    [secondsRemaining],
-  );
+  const secondsForDisplay = useMemo(() => {
+    if (!hasFiniteGameEnd) {
+      return 0;
+    }
+
+    return Math.max(0, DEBUG_URGENCY_MODE ? DEBUG_SECONDS_REMAINING : secondsRemaining);
+  }, [hasFiniteGameEnd, secondsRemaining]);
 
   const hasGameEnded = useMemo(() => {
+    if (!hasFiniteGameEnd || gameEndAt == null) return false;
     if (DEBUG_URGENCY_MODE) return false;
-    if (!gameEndAt) return false;
 
     return currentBlockTimestamp >= gameEndAt || secondsForDisplay <= 0;
-  }, [currentBlockTimestamp, gameEndAt, secondsForDisplay]);
+  }, [currentBlockTimestamp, gameEndAt, hasFiniteGameEnd, secondsForDisplay]);
 
-  const timeDisplay = useMemo(() => formatCompactTimeRemaining(secondsForDisplay), [secondsForDisplay]);
+  const { hours, minutes } = useMemo(() => {
+    const hrs = Math.floor(secondsForDisplay / 3600);
+    const mins = Math.floor((secondsForDisplay % 3600) / 60);
+    return { hours: hrs, minutes: mins };
+  }, [secondsForDisplay]);
+
+  const timeDisplay = useMemo(
+    () => (hasFiniteGameEnd ? `${hours}h ${minutes.toString().padStart(2, "0")}m` : "Infinite"),
+    [hasFiniteGameEnd, hours, minutes],
+  );
 
   const urgencyState = useMemo<UrgencyState>(() => {
+    if (!hasFiniteGameEnd) return "default";
     if (hasGameEnded) return "default";
     if (secondsForDisplay <= FINAL_THRESHOLD_SECONDS) return "final";
     if (secondsForDisplay <= CRITICAL_THRESHOLD_SECONDS) return "critical";
     if (secondsForDisplay <= URGENCY_THRESHOLD_SECONDS) return "warning";
     return "default";
-  }, [hasGameEnded, secondsForDisplay]);
+  }, [hasFiniteGameEnd, hasGameEnded, secondsForDisplay]);
 
   const containerToneClass = useMemo(() => {
     switch (urgencyState) {
