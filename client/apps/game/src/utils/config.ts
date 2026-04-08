@@ -4,6 +4,7 @@ import { env } from "./../../env";
 type ConfigResolutionOptions = {
   chain?: Chain;
   gameType?: GameType;
+  components?: unknown;
 };
 
 export const ETERNUM_CONFIG = (options: ConfigResolutionOptions = {}) => {

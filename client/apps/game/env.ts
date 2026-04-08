@@ -7,10 +7,6 @@ import {
 import { getSelectedChain } from "./src/runtime/world/store";
 
 const _rawEnv = import.meta.env as Record<string, string | undefined>;
-type ParsedEnv = z.infer<typeof envSchema>;
-type RuntimeEnv = ParsedEnv & {
-  VITE_PUBLIC_REALTIME_URL: string;
-};
 
 function resolveLegacyAmmRouterAddress(rawEnv: Record<string, string | undefined>) {
   return rawEnv.VITE_PUBLIC_AMM_ROUTER_ADDRESS ?? rawEnv.VITE_PUBLIC_AMM_ADDRESS;
@@ -33,10 +29,6 @@ const envSchema = z.object({
 
   // API endpoints
   VITE_PUBLIC_TORII: z.string().url().optional().default("https://api.cartridge.gg/x/eternum-blitz-slot-4/torii"),
-  // gRPC-web endpoint for Torii subscriptions (SubscribeEntities, SubscribeEventMessages).
-  // Falls back to VITE_PUBLIC_TORII when unset — works for Slot/local where HTTP and gRPC
-  // share the same port. Set separately for nginx deployments with split ports (8080/8090).
-  VITE_PUBLIC_TORII_GRPC: z.string().url().optional(),
   VITE_PUBLIC_GLOBAL_TORII: z.string().url().optional().default("https://api.cartridge.gg/x/blitz-slot-global-1/torii"),
   VITE_PUBLIC_NODE_URL: z
     .string()
@@ -55,9 +47,14 @@ const envSchema = z.object({
     .url()
     .optional()
     .default("https://torii-creator.zerocredence.workers.dev/dispatch/torii"),
+  VITE_PUBLIC_FACTORY_WORKER_URL: z
+    .string()
+    .url()
+    .optional()
+    .default("https://realms-game-launch.zerocredence.workers.dev"),
   VITE_PUBLIC_EXPLORER_MAINNET: z.string().url().optional().default("https://voyager.online"),
   VITE_PUBLIC_EXPLORER_SEPOLIA: z.string().url().optional().default("https://sepolia.voyager.online"),
-  VITE_PUBLIC_REALTIME_URL: z.string().url().optional(),
+  VITE_PUBLIC_REALTIME_URL: z.string().url().optional().default("http://localhost:8080"),
   VITE_PUBLIC_ENABLE_SQL_CACHE: z
     .string()
     .transform((v) => v === "true")
@@ -95,9 +92,16 @@ const envSchema = z.object({
     .transform((v) => v === "true")
     .optional()
     .default("false"),
+  VITE_PUBLIC_RENDERER_BUILD_MODE: z
+    .enum(["legacy-webgl", "experimental-webgpu-auto", "experimental-webgpu-force-webgl"])
+    .optional()
+    .default("experimental-webgpu-auto"),
   // Version and chain info
   VITE_PUBLIC_GAME_VERSION: z.string().optional().default(""),
-  VITE_PUBLIC_CHAIN: z.enum(["sepolia", "mainnet", "slot", "slottest", "local"]).optional().default("local"), // Add other chains as needed
+  VITE_PUBLIC_CHAIN: z.enum(["sepolia", "mainnet", "slot", "slottest", "local"]).optional().default("local"),
+  VITE_PUBLIC_GAME_TYPE: z.enum(["blitz", "eternum"]).optional().default("blitz"),
+  // Deprecated for runtime mode selection. Kept for deploy tooling defaults.
+  VITE_PUBLIC_FORCE_GAME_MODE_ID: z.enum(["eternum", "blitz"]).optional(),
   VITE_PUBLIC_FACTORY_DEPLOY_REPEATS: z.string().optional(),
 
   VITE_PUBLIC_CONSTRUCTION_FLAG: z
@@ -208,12 +212,34 @@ const envSchema = z.object({
     .transform((v) => v === "true")
     .optional()
     .default("true"),
+  VITE_PUBLIC_TORII_SUBSCRIPTION_SETUP_TIMEOUT_MS: z
+    .string()
+    .optional()
+    .default("8000")
+    .transform((v) => Number(v))
+    .refine((value) => Number.isFinite(value) && value >= 0, "VITE_PUBLIC_TORII_SUBSCRIPTION_SETUP_TIMEOUT_MS"),
+  VITE_PUBLIC_WORLDMAP_CHUNK_PHASE_TIMEOUT_MS: z
+    .string()
+    .optional()
+    .default("12000")
+    .transform((v) => Number(v))
+    .refine((value) => Number.isFinite(value) && value >= 0, "VITE_PUBLIC_WORLDMAP_CHUNK_PHASE_TIMEOUT_MS"),
+  VITE_PUBLIC_WORLDMAP_STREAMING_STAGED: z
+    .string()
+    .transform((v) => v === "true")
+    .optional()
+    .default("true"),
   VITE_PUBLIC_WORLDMAP_ZOOM_HARDENING: z
     .string()
     .transform((v) => v === "true")
     .optional()
     .default("true"),
   VITE_PUBLIC_WORLDMAP_ZOOM_HARDENING_TELEMETRY: z
+    .string()
+    .transform((v) => v === "true")
+    .optional()
+    .default("true"),
+  VITE_PUBLIC_ETERNUM_UNIFIED_SETTLEMENT_PLANNER: z
     .string()
     .transform((v) => v === "true")
     .optional()
@@ -227,17 +253,12 @@ const envSchema = z.object({
   VITE_NEW_RELIC_LICENSE_KEY: z.string().optional(),
 });
 
-let env: RuntimeEnv;
+let env: z.infer<typeof envSchema>;
 try {
-  const parsed = envSchema.parse({
+  env = envSchema.parse({
     ...import.meta.env,
     VITE_PUBLIC_AMM_ROUTER_ADDRESS: resolveLegacyAmmRouterAddress(_rawEnv),
   });
-  env = {
-    ...parsed,
-    // Realtime services follow the active Torii endpoint unless explicitly overridden.
-    VITE_PUBLIC_REALTIME_URL: parsed.VITE_PUBLIC_REALTIME_URL ?? parsed.VITE_PUBLIC_TORII,
-  };
 } catch (error) {
   if (error instanceof z.ZodError) {
     console.error("❌ Invalid environment variables:", JSON.stringify(error.errors, null, 2));
@@ -246,11 +267,15 @@ try {
 }
 
 const storedChain = getSelectedChain();
+if (storedChain) {
+  env = { ...env, VITE_PUBLIC_CHAIN: storedChain };
+}
+
+export { env };
+export const hasPublicNodeUrl = Boolean(env.VITE_PUBLIC_NODE_URL);
+
 // "hasExplicit*" — the env var was physically set by the launcher/CI (not just filled by zod defaults).
 // Used to decide whether the launcher's value should take precedence over world-profile discovery.
-export const hasExplicitChain = _rawEnv.VITE_PUBLIC_CHAIN !== undefined;
-export const hasExplicitNodeUrl = _rawEnv.VITE_PUBLIC_NODE_URL !== undefined;
-export const hasExplicitToriiUrl = _rawEnv.VITE_PUBLIC_TORII !== undefined;
 export const hasExplicitGlobalToriiUrl = _rawEnv.VITE_PUBLIC_GLOBAL_TORII !== undefined;
 
 const LOCAL_ENDPOINT_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
@@ -275,13 +300,3 @@ export const resolveGlobalToriiUrl = (): string => {
   }
   return env.VITE_PUBLIC_GLOBAL_TORII;
 };
-
-// Respect persisted chain selection only when the launcher did not explicitly pin one.
-if (storedChain && env.VITE_PUBLIC_CHAIN !== "local" && !hasExplicitChain) {
-  env = { ...env, VITE_PUBLIC_CHAIN: storedChain };
-}
-
-export { env };
-// "hasPublicNodeUrl" — the resolved env has a truthy NODE_URL (always true when zod provides a default).
-// Used for RPC-compatibility checks at bootstrap, not for precedence decisions.
-export const hasPublicNodeUrl = Boolean(env.VITE_PUBLIC_NODE_URL);

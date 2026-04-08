@@ -1,5 +1,6 @@
 import type { AppStore } from "@/hooks/store/use-ui-store";
 import { useAccountStore } from "@/hooks/store/use-account-store";
+import { useConnectionStore } from "@/hooks/store/use-connection-store";
 import { type SetupResult } from "@bibliothecadao/dojo";
 
 import { fetchWorldConfigMapCenterOffset, sqlApi } from "@/services/api";
@@ -18,12 +19,15 @@ import { resolveInitialStructureSelection } from "./sync-initial-selection";
 import { isDeletionPayload, isDeletablePayloadForOrigin, type SyncUpdateOrigin } from "./sync-utils";
 import { ToriiSyncWorkerManager } from "./sync-worker-manager";
 import { buildModelKeysClause, type GlobalModelStreamConfig } from "./torii-stream-manager";
+import { setupToriiSubscriptions, type ToriiSubscriptionSetupTimeoutInfo } from "./torii-subscription-setup";
 import { timedAsync, timedSync, perfEvent } from "./perf-diagnostics";
 
 export const EVENT_QUERY_LIMIT = 40_000;
-// 8s was too aggressive for remote deployments (TEE/testnet) where Torii latency
-// is 100-500ms and initial subscription setup competes with query traffic.
-const TORII_STREAM_SUBSCRIPTION_SETUP_TIMEOUT_MS = 30_000;
+
+interface SyncEntitiesSubscriptionOptions {
+  subscriptionSetupTimeoutMs?: number;
+  onSubscriptionSetupTimeout?: (info: ToriiSubscriptionSetupTimeoutInfo) => void;
+}
 
 let entityStreamSubscription: { cancel: () => void } | null = null;
 let entityStreamSubscriptionAttempt = 0;
@@ -281,34 +285,14 @@ const createWorkerQueueProcessor = (
   }
 };
 
-const withSetupTimeout = async <T>(promise: Promise<T>, label: string): Promise<T> => {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
-  try {
-    return await Promise.race([
-      promise.finally(() => {
-        if (timeoutId !== null) {
-          clearTimeout(timeoutId);
-          timeoutId = null;
-        }
-      }),
-      new Promise<T>((_, reject) => {
-        timeoutId = setTimeout(() => {
-          reject(new Error(`[sync] ${label} setup timed out after ${TORII_STREAM_SUBSCRIPTION_SETUP_TIMEOUT_MS}ms`));
-        }, TORII_STREAM_SUBSCRIPTION_SETUP_TIMEOUT_MS);
-      }),
-    ]);
-  } finally {
-    if (timeoutId !== null) {
-      clearTimeout(timeoutId);
-    }
-  }
-};
 
 export const syncEntitiesDebounced = async (
   client: ToriiClient,
   setupResult: SetupResult,
   entityKeyClause: Clause | undefined | null,
   logging = true,
+  onUpdate?: () => void,
+  options?: SyncEntitiesSubscriptionOptions,
 ) => {
   if (logging) console.log("Starting syncEntities");
 
@@ -317,20 +301,26 @@ export const syncEntitiesDebounced = async (
   } = setupResult;
 
   const applyBatch = ({ upserts, deletions }: BatchPayload) => {
-    timedSync(`applyBatch(del=${deletions.length},ups=${upserts.length})`, () => {
-      if (deletions.length > 0) {
-        deletions.forEach((entityId) => {
+    if (deletions.length > 0) {
+      deletions.forEach((entityId) => {
+        try {
           world.deleteEntity(entityId as Entity);
-        });
-      }
+        } catch (error) {
+          console.error("[sync] failed to delete entity", entityId, error);
+        }
+      });
+    }
 
-      if (upserts.length > 0) {
-        const modelsArray = upserts.map((value) => {
-          return { hashed_keys: value.hashed_keys, models: value.models };
-        });
+    if (upserts.length > 0) {
+      const modelsArray = upserts.map((value) => {
+        return { hashed_keys: value.hashed_keys, models: value.models };
+      });
+      try {
         setEntities(modelsArray, world.components, logging);
+      } catch (error) {
+        console.error("[sync] failed to apply entity upserts", error);
       }
-    });
+    }
   };
 
   const queueProcessor =
@@ -339,58 +329,49 @@ export const syncEntitiesDebounced = async (
   const queueUpdate = (data: ToriiEntity, origin: "entity" | "event") => {
     try {
       queueProcessor.queueUpdate(data.hashed_keys, data, origin);
+      onUpdate?.();
     } catch (error) {
       console.error("Error queuing entity update:", error);
     }
   };
 
-  const entitySubPromise = timedAsync("subscription:onEntityUpdated", () =>
-    client.onEntityUpdated(entityKeyClause, (data: ToriiEntity) => {
-      perfEvent("callback:entityUpdated", { keys: data.hashed_keys });
-      if (logging) console.log("Entity updated", data);
-      queueUpdate(data, "entity");
-    }),
-  );
-
-  const eventSubPromise = timedAsync("subscription:onEventMessageUpdated", () =>
-    client.onEventMessageUpdated(entityKeyClause, (data: ToriiEntity) => {
-      perfEvent("callback:eventMessageUpdated", { keys: data.hashed_keys });
-      if (logging) console.log("Event message updated", data.hashed_keys);
-      queueUpdate(data, "event");
-    }),
-  );
-
-  // Main entity stream is critical for correctness; do not fail-fast here.
-  // It can legitimately take longer on local shards under load.
-  const entitySub = await entitySubPromise;
-
-  let eventSub: { cancel: () => void } | null = null;
-  let canceled = false;
-  void withSetupTimeout(eventSubPromise, "onEventMessageUpdated")
-    .then((subscription) => {
-      if (canceled) {
-        subscription.cancel();
-        return;
-      }
-      eventSub = subscription;
-    })
-    .catch((error) => {
-      console.warn("[sync] Event message stream unavailable, continuing with entity stream only", error);
+  try {
+    const subscriptions = await setupToriiSubscriptions({
+      createEntitySubscription: () =>
+        client.onEntityUpdated(entityKeyClause, (data: ToriiEntity) => {
+          if (logging) console.log("Entity updated", data);
+          queueUpdate(data, "entity");
+        }),
+      createEventSubscription: () =>
+        client.onEventMessageUpdated(entityKeyClause, (data: ToriiEntity) => {
+          if (logging) console.log("Event message updated", data.hashed_keys);
+          queueUpdate(data, "event");
+        }),
+      subscriptionSetupTimeoutMs: options?.subscriptionSetupTimeoutMs,
+      onSubscriptionSetupTimeout: options?.onSubscriptionSetupTimeout,
     });
 
-  return {
-    cancel: () => {
-      canceled = true;
-      entitySub.cancel();
-      eventSub?.cancel();
-      queueProcessor.dispose();
-    },
-  };
+    return {
+      cancel: () => {
+        subscriptions.cancel();
+        queueProcessor.dispose();
+      },
+    };
+  } catch (error) {
+    queueProcessor.dispose();
+    throw error;
+  }
 };
 
 const startGlobalEntityStreamSubscription = (setup: SetupResult, logging: boolean): void => {
   const attempt = entityStreamSubscriptionAttempt;
-  void syncEntitiesDebounced(setup.network.toriiClient, setup, GLOBAL_STREAM_CLAUSE, logging)
+  void syncEntitiesDebounced(
+    setup.network.toriiClient,
+    setup,
+    GLOBAL_STREAM_CLAUSE,
+    logging,
+    () => useConnectionStore.getState().recordGlobalUpdate(),
+  )
     .then((subscription) => {
       if (attempt !== entityStreamSubscriptionAttempt) {
         subscription.cancel();
