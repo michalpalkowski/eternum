@@ -949,7 +949,7 @@
       "amount": 500
     }
   ],
-  "discoverableVillageStartingResources": [
+  "campStartingResources": [
     {
       "resource": 35,
       "min_amount": 500,

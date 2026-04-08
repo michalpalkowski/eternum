@@ -23,6 +23,13 @@ const buildLatestFeaturesFeed = (features: LatestFeature[]) =>
 const allLatestFeatures: LatestFeature[] = [
   {
     date: "2026-04-08",
+    title: "Chunk Structure Sync Fix",
+    description:
+      "Realm buildings, essence mines, and other structures now stay aligned with chunk streaming more reliably, so landmarks stop disappearing while nearby terrain is still visible during chunk crossings.",
+    type: "fix",
+  },
+  {
+    date: "2026-04-08",
     title: "Transition Release Fail-Safe",
     description:
       "Scene handoff now guarantees the transition loader is released even if camera post-setup hooks fail, preventing sessions from getting stuck on the Charting the World overlay after world-route updates.",

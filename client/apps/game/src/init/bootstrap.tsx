@@ -13,14 +13,15 @@ import {
   normalizeRpcUrl,
   patchManifestWithFactory,
   resolveChain,
+  type WorldProfile,
 } from "@/runtime/world";
 import { buildWorldProfile } from "@/runtime/world/profile-builder";
-import { fetchWorldConfigMapCenterOffset, setSqlApiBaseUrl } from "@/services/api";
+import { setSqlApiBaseUrl } from "@/services/api";
 import { parseShardUrlParams } from "@/sharding/protocol";
 import { resolveMainGameReturnUrl, resolveRuntimeContext } from "@/sharding/runtime-context";
 import { Chain, getGameManifest } from "@contracts";
 import { dojoConfig } from "../../dojo-config";
-import { env, hasExplicitNodeUrl, hasExplicitToriiUrl, hasPublicNodeUrl } from "../../env";
+import { env, hasPublicNodeUrl } from "../../env";
 import { clearSubscriptionQueue } from "../dojo/debounced-queries";
 import { cancelEntityStreamSubscription, initialSync } from "../dojo/sync";
 import { usePlayerStore } from "../hooks/store/use-player-store";
@@ -28,27 +29,30 @@ import useSettlementStore from "../hooks/store/use-settlement-store";
 import { useSyncStore } from "../hooks/store/use-sync-store";
 import { useTransactionStore } from "../hooks/store/use-transaction-store";
 import { useUIStore } from "../hooks/store/use-ui-store";
+import { markGameEntryMilestone, recordGameEntryDuration } from "../ui/layouts/game-entry-timeline";
 import { NoAccountModal } from "../ui/layouts/no-account-modal";
 import { ETERNUM_CONFIG } from "../utils/config";
+import { createBootstrapSession, type BootstrapSelection } from "./bootstrap-session";
 import { initializeGameRenderer } from "./game-renderer";
 import { resolveProfileForShardSession } from "./shard-world-profile";
 
 export type SetupResult = Awaited<ReturnType<typeof setup>>;
 
 type BootstrapResult = SetupResult;
+const bootstrapSession = createBootstrapSession<BootstrapResult>();
 
-let bootstrapPromise: Promise<BootstrapResult> | null = null;
-let bootstrappedWorldName: string | null = null;
-let bootstrappedChain: string | null = null;
-let cachedSetupResult: BootstrapResult | null = null;
-let gameRendererCleanup: (() => void) | null = null;
+type MutableDojoConfig = typeof dojoConfig & {
+  toriiUrl?: string;
+  rpcUrl?: string;
+  manifest?: unknown;
+};
 
 /**
  * Get the cached setup result if bootstrap has already completed.
  * Returns null if bootstrap hasn't run or is still in progress.
  */
 export const getCachedSetupResult = (): BootstrapResult | null => {
-  return cachedSetupResult;
+  return bootstrapSession.getCachedResult();
 };
 
 const deriveWorldFromPath = (): string | null => {
@@ -75,80 +79,118 @@ const shouldBypassNoAccountModal = (): boolean => {
 };
 
 const handleNoAccount = (modalContent: ReactNode) => {
-  // Don't show account required modal in spectate mode
   if (shouldBypassNoAccountModal()) {
     console.log("[bootstrap] Skipping account modal - spectate mode");
     return;
   }
+
   const uiStore = useUIStore.getState();
   uiStore.setModal(null, false);
   uiStore.setModal(modalContent, true);
 };
 
 const runBootstrap = async (): Promise<BootstrapResult> => {
-  const uiStore = useUIStore.getState();
-  const syncingStore = useSyncStore.getState();
-
   console.log("[STARTING DOJO SETUP]");
+  const stores = resolveBootstrapStores();
+  const worldContext = await resolveBootstrapWorldContext();
+  const shardParams = await initializeShardContext(worldContext.chain, worldContext.profile);
+  configureDojoRuntime(worldContext, shardParams);
+  const setupResult = await runDojoSetup();
+  await runInitialWorldSync(setupResult, stores, shardParams, worldContext.chain);
+  configureGameSystems(setupResult, worldContext.chain);
+  await startGameRenderer(setupResult);
+  inject();
+  return setupResult;
+};
+export const resetBootstrap = () => {
+  console.log("[BOOTSTRAP] Resetting bootstrap state");
+  cancelActiveBootstrapSubscriptions();
+  bootstrapSession.reset();
+  clearBootstrapWorldData();
+  resetBootstrapUiState();
+};
 
-  // 0) Resolve world profile: prefer URL, then active selection, then prompt
+export const bootstrapGame = async (): Promise<BootstrapResult> => {
+  const selection = resolveBootstrapSelection();
+  resetBootstrapForSelectionChange(selection);
+  try {
+    return await bootstrapSession.run(selection, runBootstrap);
+  } catch (error) {
+    bootstrapSession.clearFailure();
+    captureSystemError(error, {
+      error_type: "dojo_setup",
+      setup_phase: "bootstrap",
+      context: "Unhandled error during Dojo bootstrap",
+    });
+    throw error;
+  }
+};
+
+type BootstrapStores = {
+  syncingStore: ReturnType<typeof useSyncStore.getState>;
+  uiStore: ReturnType<typeof useUIStore.getState>;
+};
+
+type BootstrapWorldContext = {
+  chain: Chain;
+  profile: WorldProfile;
+  toriiUrl: string;
+};
+
+const resolveBootstrapStores = (): BootstrapStores => ({
+  syncingStore: useSyncStore.getState(),
+  uiStore: useUIStore.getState(),
+});
+
+const resolveBootstrapSelection = (): BootstrapSelection => {
+  const currentWorld = getActiveWorld();
+  return {
+    chain: currentWorld?.chain ?? null,
+    worldName: currentWorld?.name ?? null,
+  };
+};
+
+const resetBootstrapForSelectionChange = (selection: BootstrapSelection) => {
+  const resetReason = bootstrapSession.getResetReason(selection);
+  if (!resetReason) {
+    return;
+  }
+
+  const previousSelection = bootstrapSession.getTrackedSelection();
+
+  if (resetReason === "chain-changed") {
+    console.log(
+      `[BOOTSTRAP] Chain changed from "${previousSelection.chain}" to "${selection.chain}", resetting and re-bootstrapping...`,
+    );
+  } else {
+    console.log(
+      `[BOOTSTRAP] World changed from "${previousSelection.worldName}" to "${selection.worldName}", re-bootstrapping...`,
+    );
+  }
+
+  resetBootstrap();
+};
+
+const resolveBootstrapWorldContext = async (): Promise<BootstrapWorldContext> => {
   const chain = resolveChain(env.VITE_PUBLIC_CHAIN! as Chain);
-  const pathWorld = deriveWorldFromPath();
+  const profile = await resolveBootstrapWorldProfile(chain);
+
+  return {
+    chain,
+    profile,
+    toriiUrl: resolveBootstrapToriiUrl(chain, profile),
+  };
+};
+
+const resolveBootstrapWorldProfile = async (chain: Chain): Promise<WorldProfile> => {
+  const profileFromPath = await resolveWorldProfileFromPath(chain);
+  const activeProfile = profileFromPath ?? getActiveWorld();
+  const refreshedProfile = await refreshWorldProfileIfNeeded(chain, activeProfile);
+
+  let profile = refreshedProfile ?? (await ensureActiveWorldProfileWithUI(chain));
+
+  // If entering a shard session, resolve the shard-specific profile.
   const shardSession = parseShardUrlParams(window.location.search);
-
-  let profile: any = null;
-  if (pathWorld) {
-    try {
-      profile = await buildWorldProfile(chain, pathWorld);
-    } catch (err) {
-      console.error("[bootstrap] Failed to apply world from URL", err);
-    }
-  }
-
-  if (!profile) profile = getActiveWorld();
-  let shouldReloadAfterProfileRefresh = false;
-  if (profile) {
-    const previousRpcUrl = profile.rpcUrl;
-    const previousChain = profile.chain;
-    const shouldRefreshProfile = () => {
-      if (profile.chain && profile.chain !== chain) return true;
-      if (!profile.rpcUrl) return true;
-      const canUseEnvRpc = hasPublicNodeUrl && isRpcUrlCompatibleForChain(chain, env.VITE_PUBLIC_NODE_URL);
-      if (canUseEnvRpc) {
-        if (!profile.rpcUrl) return true;
-        const normalizedProfileRpc = normalizeRpcUrl(profile.rpcUrl);
-        const normalizedEnvRpc = normalizeRpcUrl(env.VITE_PUBLIC_NODE_URL);
-        if (normalizedProfileRpc !== normalizedEnvRpc && normalizedProfileRpc.includes(`/x/${profile.name}/katana`)) {
-          return true;
-        }
-        return false;
-      }
-      if (chain === "slot" || chain === "slottest") {
-        return !profile.rpcUrl.includes(`/x/${profile.name}/katana`);
-      }
-      if (chain === "mainnet" || chain === "sepolia") {
-        return profile.rpcUrl.includes("/katana") || !profile.rpcUrl.includes(`/x/starknet/${chain}`);
-      }
-      return false;
-    };
-
-    if (shouldRefreshProfile()) {
-      try {
-        profile = await buildWorldProfile(chain, profile.name);
-        shouldReloadAfterProfileRefresh =
-          !profile ||
-          !previousRpcUrl ||
-          profile.rpcUrl !== previousRpcUrl ||
-          (previousChain && profile.chain !== previousChain);
-      } catch (err) {
-        console.error("[bootstrap] Failed to refresh world profile rpcUrl", err);
-      }
-    }
-  }
-  if (shouldReloadAfterProfileRefresh) {
-    console.log("[bootstrap] World profile refreshed, continuing bootstrap without page reload");
-  }
-  if (!profile) profile = await ensureActiveWorldProfileWithUI(chain);
   if (shardSession !== null) {
     profile = await resolveProfileForShardSession({
       chain,
@@ -157,87 +199,171 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
     });
   }
 
-  // 1) Patch manifest with factory-provided addresses and world address
-  const baseManifest = getGameManifest(chain);
-  const patchedManifest = patchManifestWithFactory(
-    baseManifest as any,
+  return profile;
+};
+
+const resolveWorldProfileFromPath = async (chain: Chain): Promise<WorldProfile | null> => {
+  const pathWorld = deriveWorldFromPath();
+  if (!pathWorld) {
+    return null;
+  }
+
+  try {
+    return await buildWorldProfile(chain, pathWorld);
+  } catch (error) {
+    console.error("[bootstrap] Failed to apply world from URL", error);
+    return null;
+  }
+};
+
+const refreshWorldProfileIfNeeded = async (
+  chain: Chain,
+  profile: WorldProfile | null,
+): Promise<WorldProfile | null> => {
+  if (!profile || !shouldRefreshWorldProfile(chain, profile)) {
+    return profile;
+  }
+
+  try {
+    const refreshedProfile = await buildWorldProfile(chain, profile.name);
+    if (didWorldProfileRefreshChange(profile, refreshedProfile)) {
+      console.log("[bootstrap] World profile refreshed, continuing bootstrap without page reload");
+    }
+    return refreshedProfile;
+  } catch (error) {
+    console.error("[bootstrap] Failed to refresh world profile rpcUrl", error);
+    return profile;
+  }
+};
+
+const shouldRefreshWorldProfile = (chain: Chain, candidate: WorldProfile): boolean => {
+  if (candidate.chain && candidate.chain !== chain) {
+    return true;
+  }
+
+  if (!candidate.rpcUrl) {
+    return true;
+  }
+
+  const canUseEnvRpc = hasPublicNodeUrl && isRpcUrlCompatibleForChain(chain, env.VITE_PUBLIC_NODE_URL);
+  if (canUseEnvRpc) {
+    const normalizedProfileRpc = normalizeRpcUrl(candidate.rpcUrl);
+    const normalizedEnvRpc = normalizeRpcUrl(env.VITE_PUBLIC_NODE_URL);
+
+    if (normalizedProfileRpc !== normalizedEnvRpc && normalizedProfileRpc.includes(`/x/${candidate.name}/katana`)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  if (chain === "slot" || chain === "slottest") {
+    return !candidate.rpcUrl.includes(`/x/${candidate.name}/katana`);
+  }
+
+  if (chain === "mainnet" || chain === "sepolia") {
+    return candidate.rpcUrl.includes("/katana") || !candidate.rpcUrl.includes(`/x/starknet/${chain}`);
+  }
+
+  return false;
+};
+
+const didWorldProfileRefreshChange = (previousProfile: WorldProfile, refreshedProfile: WorldProfile): boolean => {
+  return (
+    !previousProfile.rpcUrl ||
+    refreshedProfile.rpcUrl !== previousProfile.rpcUrl ||
+    (previousProfile.chain !== undefined && refreshedProfile.chain !== previousProfile.chain)
+  );
+};
+
+const resolveShardSession = () => {
+  return parseShardUrlParams(window.location.search);
+};
+
+const initializeShardContext = async (chain: Chain, profile: WorldProfile): Promise<ShardSessionParams | null> => {
+  const shardSession = resolveShardSession();
+  const shardStore = useShardStore.getState();
+  const runtimeContext = resolveRuntimeContext(window.location.href, shardSession);
+  shardStore.setRuntimeContext(runtimeContext);
+
+  if (runtimeContext.kind !== "shard") {
+    shardStore.clearShardMode();
+    return null;
+  }
+
+  const shardSessionParams = {
+    ...runtimeContext.shard,
+    mainUrl: resolveMainGameReturnUrl(runtimeContext),
+  };
+
+  // Check for stale sessions (shard no longer exists → 404).
+  try {
+    const shardParts = shardSessionParams.shardId.split("@");
+    const staleCheckUrl = `${shardSessionParams.operatorUrl}/shard/${shardParts[0]}/${shardParts[1]}`;
+    const staleCheckResponse = await fetch(staleCheckUrl).catch(() => null);
+    if (staleCheckResponse?.status === 404) {
+      const mainGameReturnUrl = resolveMainGameReturnUrl(runtimeContext);
+      shardStore.clearShardMode();
+      window.location.assign(mainGameReturnUrl);
+      throw new Error("[bootstrap] stale shard session detected; redirecting to main game view: " + mainGameReturnUrl);
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("stale shard session")) {
+      throw error;
+    }
+    console.warn("[bootstrap] stale shard check failed, proceeding:", error);
+  }
+
+  shardStore.enterShardMode(shardSessionParams, runtimeContext);
+  return shardSessionParams;
+};
+
+type ShardSessionParams = {
+  shardId: string;
+  operatorUrl: string;
+  rpcUrl: string;
+  toriiUrl: string;
+  mainUrl: string;
+};
+
+const configureDojoRuntime = (
+  { chain, profile, toriiUrl }: BootstrapWorldContext,
+  shardParams?: ShardSessionParams | null,
+) => {
+  const mutableDojoConfig = dojoConfig as MutableDojoConfig;
+
+  mutableDojoConfig.toriiUrl = toriiUrl;
+  mutableDojoConfig.rpcUrl = resolveBootstrapRpcUrl(chain, profile);
+  mutableDojoConfig.manifest = patchManifestWithFactory(
+    getGameManifest(chain),
     profile.worldAddress,
     profile.contractsBySelector,
   );
 
-  const shardStore = useShardStore.getState();
-  // Read shard context from URL only.
-  // This prevents stale sessionStorage in the main tab from forcing shard mode.
-  const runtimeContext = resolveRuntimeContext(window.location.href, shardSession);
-  shardStore.setRuntimeContext(runtimeContext);
-
-  const shardSessionParams =
-    runtimeContext.kind === "shard"
-      ? {
-          ...runtimeContext.shard,
-          mainUrl: resolveMainGameReturnUrl(runtimeContext),
-        }
-      : null;
-
-  if (shardSessionParams !== null) {
-    // Shard transport readiness is guaranteed by the operator's protocol:
-    // torii_ready is only emitted when Torii has indexed up to the fork block
-    // and bootstrap invariants are satisfied. No polling needed here.
-    // Only check for stale sessions (shard no longer exists → 404).
-    try {
-      const shardParts = shardSessionParams.shardId.split("@");
-      // Per-shard lookup: /shard/{game}/{onchain_id} → 200 if active, 404 if gone.
-      const staleCheckUrl = `${shardSessionParams.operatorUrl}/shard/${shardParts[0]}/${shardParts[1]}`;
-      const staleCheckResponse = await fetch(staleCheckUrl).catch(() => null);
-      if (staleCheckResponse?.status === 404) {
-        const mainGameReturnUrl = resolveMainGameReturnUrl(runtimeContext);
-        shardStore.clearShardMode();
-        window.location.assign(mainGameReturnUrl);
-        throw new Error(
-          "[bootstrap] stale shard session detected; redirecting to main game view: " + mainGameReturnUrl,
-        );
-      }
-    } catch (error) {
-      if (error instanceof Error && error.message.includes("stale shard session")) {
-        throw error;
-      }
-      // Non-critical: if the stale check fails, proceed anyway — shard may still work.
-      console.warn("[bootstrap] stale shard check failed, proceeding:", error);
-    }
-    shardStore.enterShardMode(shardSessionParams, runtimeContext);
-  } else {
-    shardStore.clearShardMode();
+  // Shard mode override: use shard-specific transport URLs.
+  if (shardParams) {
+    mutableDojoConfig.rpcUrl = normalizeRpcUrl(shardParams.rpcUrl);
+    mutableDojoConfig.toriiUrl = shardParams.toriiUrl;
   }
 
-  // 2) Update global dojoConfig in place (shared object reference)
-  //    - Torii base URL and manifest are used by setup() downstream
-  //    - For local chain, use environment variables directly
-  // torii-wasm@1.7.0 has a single `toriiUrl` for both HTTP queries and gRPC-web
-  // subscriptions. Torii serves both protocols on every port, so we use the HTTP
-  // URL everywhere. The separate VITE_PUBLIC_TORII_GRPC is no longer needed —
-  // routing subscriptions through a different nginx location was causing silent
-  // stream drops (subscription callbacks stopped firing after initial sync).
-  const preferredToriiUrl = chain === "local" || hasExplicitToriiUrl ? env.VITE_PUBLIC_TORII : profile.toriiBaseUrl;
-  const preferredRpcUrl = normalizeRpcUrl(
-    chain === "local" || hasExplicitNodeUrl ? env.VITE_PUBLIC_NODE_URL : (profile.rpcUrl ?? env.VITE_PUBLIC_NODE_URL),
-  );
+  const effectiveToriiUrl = shardParams ? shardParams.toriiUrl : toriiUrl;
+  setSqlApiBaseUrl(`${effectiveToriiUrl}/sql`);
+};
 
-  // ToriiClient uses this single URL for getEntities (HTTP) + onEntityUpdated (gRPC-web).
-  (dojoConfig as any).toriiUrl = preferredToriiUrl;
-  (dojoConfig as any).rpcUrl = preferredRpcUrl;
-  (dojoConfig as any).manifest = patchedManifest;
+const resolveBootstrapToriiUrl = (chain: Chain, profile: WorldProfile): string => {
+  return chain === "local" ? env.VITE_PUBLIC_TORII : profile.toriiBaseUrl;
+};
 
-  // 2b) Shard mode override, validated by sharding protocol parser.
-  if (shardSessionParams !== null) {
-    (dojoConfig as any).rpcUrl = normalizeRpcUrl(shardSessionParams.rpcUrl);
-    // Use shard HTTP Torii URL (not gRPC) — same port serves both protocols.
-    (dojoConfig as any).toriiUrl = shardSessionParams.toriiUrl;
+const resolveBootstrapRpcUrl = (chain: Chain, profile: WorldProfile): string => {
+  if (chain === "local") {
+    return env.VITE_PUBLIC_NODE_URL;
   }
 
-  // 3) Point SQL API to the same Torii HTTP URL.
-  const toriiHttpUrl = shardSessionParams !== null ? shardSessionParams.toriiUrl : preferredToriiUrl;
-  setSqlApiBaseUrl(`${toriiHttpUrl}/sql`);
+  return profile.rpcUrl ?? env.VITE_PUBLIC_NODE_URL;
+};
 
+const runDojoSetup = async (): Promise<BootstrapResult> => {
+  markGameEntryMilestone("setup-started");
   const setupResult = await setup(
     { ...dojoConfig },
     {
@@ -260,145 +386,66 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
     },
   );
   console.log("[DOJO SETUP COMPLETED]");
-
-  const initialSyncResult = await initialSync(setupResult, uiStore, syncingStore.setInitialSyncProgress, {
-    // Local worlds should fail fast on protocol/schema drift to avoid entering
-    // a partially hydrated game state (disabled construction, zeroed timers).
-    enforceProtocolChecks: shardSessionParams !== null || chain === "local",
-  });
-
-  console.log("[INITIAL SYNC COMPLETED]");
-
-  configManager.setDojo(setupResult.components, ETERNUM_CONFIG());
-  let mapCenterOffset = initialSyncResult.worldConfigMapCenterOffset;
-  if (mapCenterOffset === null) {
-    try {
-      mapCenterOffset = await fetchWorldConfigMapCenterOffset();
-    } catch (error) {
-      console.warn("[bootstrap] Failed to fetch world config map_center_offset fallback", error);
-    }
-  }
-  if (mapCenterOffset !== null) {
-    const manager = configManager as any;
-    const expectedMapCenter = 2_147_483_646 - Number(mapCenterOffset ?? 0);
-    let method = "none";
-
-    if (typeof manager.setMapCenterFromOffset === "function") {
-      manager.setMapCenterFromOffset(mapCenterOffset);
-      method = "setMapCenterFromOffset";
-    } else if (typeof manager.setMapCenter === "function") {
-      manager.setMapCenter(expectedMapCenter);
-      method = "setMapCenter";
-    } else if (manager && typeof manager === "object") {
-      // Fallback for stale/older runtime shape where setter methods are missing.
-      (manager as { mapCenter?: number }).mapCenter = expectedMapCenter;
-      method = "direct_mapCenter_field";
-    }
-
-    let appliedMapCenter = Number(manager.getMapCenter?.());
-    let forcedFallback = false;
-    if (
-      Number.isFinite(appliedMapCenter) &&
-      appliedMapCenter !== expectedMapCenter &&
-      typeof manager.setMapCenter === "function"
-    ) {
-      manager.setMapCenter(expectedMapCenter);
-      appliedMapCenter = Number(manager.getMapCenter?.());
-      forcedFallback = true;
-    }
-
-    console.log("[bootstrap] mapCenter applied", {
-      mapCenterOffset,
-      expectedMapCenter,
-      appliedMapCenter,
-      method,
-      forcedFallback,
-    });
-  } else {
-    console.log("[bootstrap] mapCenter unchanged", { mapCenter: configManager.getMapCenter(), mapCenterOffset });
-  }
-
-  // Store the cleanup function so we can call it when navigating away
-  gameRendererCleanup = initializeGameRenderer(setupResult, env.VITE_PUBLIC_GRAPHICS_DEV == true);
-
-  inject();
-
+  markGameEntryMilestone("setup-completed");
   return setupResult;
 };
 
-/**
- * Clean up the game renderer to prevent memory leaks.
- * This should be called before navigating away from the game.
- */
-const cleanupGameRenderer = () => {
-  if (gameRendererCleanup) {
-    console.log("[BOOTSTRAP] Cleaning up GameRenderer");
-    gameRendererCleanup();
-    gameRendererCleanup = null;
-  }
+const runInitialWorldSync = async (
+  setupResult: BootstrapResult,
+  stores: BootstrapStores,
+  shardParams?: ShardSessionParams | null,
+  chain?: Chain,
+) => {
+  const initialSyncStartedAt = performance.now();
+  markGameEntryMilestone("initial-sync-started");
+  await initialSync(setupResult, stores.uiStore, stores.syncingStore.setInitialSyncProgress, {
+    // Shard and local worlds should fail fast on protocol/schema drift to avoid entering
+    // a partially hydrated game state (disabled construction, zeroed timers).
+    enforceProtocolChecks: shardParams !== null || chain === "local",
+  });
+  markGameEntryMilestone("initial-sync-completed");
+  recordGameEntryDuration("initial-sync", performance.now() - initialSyncStartedAt);
+  console.log("[INITIAL SYNC COMPLETED]");
 };
 
-/**
- * Reset the bootstrap state to allow re-bootstrapping without a page reload.
- * Used when switching between worlds on the same chain.
- */
-export const resetBootstrap = () => {
-  console.log("[BOOTSTRAP] Resetting bootstrap state");
+const configureGameSystems = (setupResult: BootstrapResult, chain: Chain) => {
+  configManager.setDojo(setupResult.components, ETERNUM_CONFIG({ chain, components: setupResult.components }));
+};
 
-  // Cancel the global entity stream subscription first so the old Torii
-  // client stops writing stale data into RECS while we clean up.
+const startGameRenderer = async (setupResult: BootstrapResult) => {
+  bootstrapSession.replaceRendererCleanup(
+    await initializeGameRenderer(setupResult, env.VITE_PUBLIC_GRAPHICS_DEV == true),
+  );
+};
+
+const cancelActiveBootstrapSubscriptions = () => {
   cancelEntityStreamSubscription();
+};
 
-  // CRITICAL: Clean up the GameRenderer first to prevent memory leaks
-  // (this also shuts down the ToriiStreamManager spatial subscription)
-  cleanupGameRenderer();
-
-  // Clear ALL entities from the RECS world so the next game starts with
-  // a clean slate. The RECS world is a module-level singleton that persists
-  // across bootstraps — without this, stale entities from the previous game
-  // (structures, explorers, tiles, etc.) remain and contaminate the new game.
+const clearBootstrapWorldData = () => {
   const entities = [...world.getEntities()];
   for (const entity of entities) {
     world.deleteEntity(entity);
   }
-  // Also clear the components array. defineContractComponents(world) always
-  // pushes NEW component objects into world.components. Without this, the
-  // array grows with duplicates (old + new) on every re-bootstrap. The
-  // setEntities() helper uses `.find()` on world.components by model name,
-  // so it would match the OLD (orphaned) component first — writing data
-  // that the new React hooks never see.
+
+  // `world.components` is append-only across contract redefinition, so a re-bootstrap
+  // must clear it or new writes can target orphaned component instances.
   world.components.length = 0;
   console.log(`[BOOTSTRAP] Cleared ${entities.length} entities and component registry from RECS world`);
 
-  // Clear the MapDataStore SQL cache and destroy the singleton so the next
-  // bootstrap creates a fresh instance with the new world's sqlApi reference.
   MapDataStore.clearIfExists();
-
-  // Drain any pending queued Torii fetch requests that would write
-  // old-world data into the now-cleared RECS world.
   clearSubscriptionQueue();
-
-  // Reset sync subscription flags so that lazy-loaded data (Market,
-  // Hyperstructure, Guild, Quest) is re-fetched for the new world.
   useSyncStore.getState().resetSubscriptions();
+};
 
-  bootstrapPromise = null;
-  bootstrappedWorldName = null;
-  bootstrappedChain = null;
-  cachedSetupResult = null;
-
-  // Reset structure selection and game-specific UI state
+const resetBootstrapUiState = () => {
   const uiStore = useUIStore.getState();
   uiStore.setStructureEntityId(0, { spectator: false, worldMapPosition: undefined });
   uiStore.setSelectableArmies([]);
 
-  // Clear cached player data (names, structure-to-address maps, etc.)
   usePlayerStore.getState().clearPlayerData();
-
-  // Clear old-world transactions from the notification UI
   useTransactionStore.getState().clearAllTransactions();
 
-  // Stop settlement location polling and clear cached locations
   const settlementState = useSettlementStore.getState();
   if (settlementState.pollingIntervalId) {
     clearInterval(settlementState.pollingIntervalId);
@@ -406,6 +453,7 @@ export const resetBootstrap = () => {
   if (settlementState.pollingTimeoutId) {
     clearTimeout(settlementState.pollingTimeoutId);
   }
+
   useSettlementStore.setState({
     pollingIntervalId: null,
     pollingTimeoutId: null,
@@ -414,51 +462,4 @@ export const resetBootstrap = () => {
     selectedLocation: null,
     selectedCoords: null,
   });
-};
-
-export const bootstrapGame = async (): Promise<BootstrapResult> => {
-  // Check if we need to re-bootstrap for a different world
-  const currentWorld = getActiveWorld();
-  const currentWorldName = currentWorld?.name ?? null;
-  const currentChain = currentWorld?.chain ?? null;
-
-  // If chain changed, reset and re-bootstrap in-app.
-  if (bootstrapPromise && bootstrappedChain && currentChain && bootstrappedChain !== currentChain) {
-    console.log(
-      `[BOOTSTRAP] Chain changed from "${bootstrappedChain}" to "${currentChain}", resetting and re-bootstrapping...`,
-    );
-    resetBootstrap();
-  }
-
-  // If only world changed (same chain), reset and re-bootstrap without reload
-  if (bootstrapPromise && bootstrappedWorldName !== currentWorldName) {
-    console.log(
-      `[BOOTSTRAP] World changed from "${bootstrappedWorldName}" to "${currentWorldName}", re-bootstrapping...`,
-    );
-    resetBootstrap();
-  }
-
-  if (!bootstrapPromise) {
-    bootstrappedWorldName = currentWorldName;
-    bootstrappedChain = currentChain;
-    bootstrapPromise = runBootstrap().then((result) => {
-      cachedSetupResult = result;
-      return result;
-    });
-  }
-
-  try {
-    return await bootstrapPromise;
-  } catch (error) {
-    bootstrapPromise = null;
-    bootstrappedWorldName = null;
-    bootstrappedChain = null;
-    cachedSetupResult = null;
-    captureSystemError(error, {
-      error_type: "dojo_setup",
-      setup_phase: "bootstrap",
-      context: "Unhandled error during Dojo bootstrap",
-    });
-    throw error;
-  }
 };
