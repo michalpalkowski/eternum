@@ -54,11 +54,21 @@ export const ShardAdminPanel = () => {
     previousResolvedShardingContractAddressRef.current = resolvedShardingContractAddress;
   }, [resolvedShardingContractAddress]);
 
-  const { phase, error, errorCode, errorDiagnostic, requestShard, recoverShard, openShardTab, reset, targetShardId, initStepLabel } =
-    useShardRequest((account as ExecutableAccount | null) ?? null, operatorUrl, {
-      worldAddress,
-      shardingContractAddress,
-    });
+  const {
+    phase,
+    error,
+    errorCode,
+    errorDiagnostic,
+    requestShard,
+    recoverShard,
+    openShardTab,
+    reset,
+    targetShardId,
+    initStepLabel,
+  } = useShardRequest((account as ExecutableAccount | null) ?? null, operatorUrl, {
+    worldAddress,
+    shardingContractAddress,
+  });
   const explorerEntities = useEntityQuery([Has(components.ExplorerTroops)]);
   const tradeEntities = useEntityQuery([Has(components.Trade)]);
   const autoOpenRecoveredShardRef = useRef(false);
@@ -209,7 +219,9 @@ export const ShardAdminPanel = () => {
           </button>
         )}
         {phase === "waiting" && targetShardId !== null && (
-          <span className="text-xs text-amber-300 animate-pulse">{initStepLabel ?? `Tracking shard: ${targetShardId}`}</span>
+          <span className="text-xs text-amber-300 animate-pulse">
+            {initStepLabel ?? `Tracking shard: ${targetShardId}`}
+          </span>
         )}
       </div>
 

@@ -22,6 +22,41 @@ const buildLatestFeaturesFeed = (features: LatestFeature[]) =>
 
 const allLatestFeatures: LatestFeature[] = [
   {
+    date: "2026-04-08",
+    title: "Transition Release Fail-Safe",
+    description:
+      "Scene handoff now guarantees the transition loader is released even if camera post-setup hooks fail, preventing sessions from getting stuck on the Charting the World overlay after world-route updates.",
+    type: "fix",
+  },
+  {
+    date: "2026-04-08",
+    title: "Transition Protocol Ownership",
+    description:
+      "Scene transitions now own and deterministically close the loading handoff lifecycle, so entering the world no longer inherits stale transition overlays even when intermediate scene switches are superseded.",
+    type: "fix",
+  },
+  {
+    date: "2026-04-08",
+    title: "Transition Teardown Guard",
+    description:
+      "Loading overlays now reliably clear when scene renderer teardown happens mid-transition, preventing game sessions from staying stuck on the Charting the World screen after remounts.",
+    type: "fix",
+  },
+  {
+    date: "2026-04-08",
+    title: "Scene Startup Recovery",
+    description:
+      "When the initial local-view scene fails to initialize, the client now falls back to world map and releases the transition loader so sessions no longer get trapped on a black screen or endless handoff loading.",
+    type: "fix",
+  },
+  {
+    date: "2026-04-08",
+    title: "Local Torii Routing Fix",
+    description:
+      "Local worlds now keep prediction-market controller bootstrap calls on the configured local Torii endpoint unless you explicitly override it, preventing Cartridge fallback errors from blocking startup.",
+    type: "fix",
+  },
+  {
     date: "2026-04-07",
     title: "Landing Hub Refresh",
     description:

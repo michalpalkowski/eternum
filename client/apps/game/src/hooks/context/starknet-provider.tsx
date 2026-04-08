@@ -196,9 +196,12 @@ const createDeployerConnector = (rpcUrl: string): Connector | null => {
   const fakeWallet: any = {
     request: async (call: any) => {
       switch (call.type) {
-        case "wallet_requestAccounts": return [address];
-        case "wallet_getPermissions": return ["accounts"];
-        case "wallet_requestChainId": return await provider.getChainId();
+        case "wallet_requestAccounts":
+          return [address];
+        case "wallet_getPermissions":
+          return ["accounts"];
+        case "wallet_requestChainId":
+          return await provider.getChainId();
         case "wallet_addInvokeTransaction":
           return await account.execute(
             call.params.calls.map((c: any) => ({
@@ -207,11 +210,16 @@ const createDeployerConnector = (rpcUrl: string): Connector | null => {
               calldata: c.calldata,
             })),
           );
-        case "wallet_signTypedData": return await account.signMessage(call.params);
-        case "wallet_supportedSpecs": return [];
-        case "wallet_supportedWalletApi": return [];
-        case "wallet_switchStarknetChain": return true;
-        default: throw new Error(`Unsupported wallet call: ${call.type}`);
+        case "wallet_signTypedData":
+          return await account.signMessage(call.params);
+        case "wallet_supportedSpecs":
+          return [];
+        case "wallet_supportedWalletApi":
+          return [];
+        case "wallet_switchStarknetChain":
+          return true;
+        default:
+          throw new Error(`Unsupported wallet call: ${call.type}`);
       }
     },
     on: () => {},
@@ -328,7 +336,15 @@ export function StarknetProvider({ children }: { children: React.ReactNode }) {
       }
       provider={jsonRpcProvider({ rpc })}
       paymasterProvider={isLocal ? paymasterRpcProvider({ rpc: paymasterRpc }) : undefined}
-      connectors={isLocal ? predeployedConnectors : isLocalWorld && deployerConnector ? [deployerConnector] : controllerConnector ? [controllerConnector] : []}
+      connectors={
+        isLocal
+          ? predeployedConnectors
+          : isLocalWorld && deployerConnector
+            ? [deployerConnector]
+            : controllerConnector
+              ? [controllerConnector]
+              : []
+      }
       explorer={voyager}
       autoConnect
       queryClient={queryClient}

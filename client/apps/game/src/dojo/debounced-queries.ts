@@ -61,7 +61,11 @@ class RequestQueue {
       }
       const batchMs = performance.now() - t0;
       if (batchMs > 500) {
-        perfEvent("subscriptionQueue:slowBatch", { batchSize: batch.length, durationMs: Math.round(batchMs), remaining: this.queue.length });
+        perfEvent("subscriptionQueue:slowBatch", {
+          batchSize: batch.length,
+          durationMs: Math.round(batchMs),
+          remaining: this.queue.length,
+        });
       }
 
       if (this.queue.length > 0) {

@@ -14,7 +14,6 @@ describe("resolveGameRouteView", () => {
     expect(resolveGameRouteView({ phase: "avatar", hasSetupResult: false, hasAccount: true })).toBe("redirect");
   });
 
-
   it("keeps loading when shard or shard-return context is present, even in onboarding phases", () => {
     expect(
       resolveGameRouteView({ phase: "world-select", hasSetupResult: false, hasAccount: false, hasShardContext: true }),

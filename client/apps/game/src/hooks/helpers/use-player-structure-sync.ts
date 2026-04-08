@@ -82,9 +82,7 @@ export const usePlayerStructureSync = () => {
   // Use the original player address for ownership queries — in shard mode,
   // account.address is MASTER_ADDRESS (TX signer) which doesn't own any structures.
   const playerAddress = useAccountStore((state) => state.playerAddress);
-  const playerStructures = usePlayerStructures(
-    playerAddress ? ContractAddress(playerAddress) : undefined,
-  );
+  const playerStructures = usePlayerStructures(playerAddress ? ContractAddress(playerAddress) : undefined);
 
   const subscriptionRef = useRef<{ cancel: () => void } | null>(null);
   const ownerStructureSubscriptionRef = useRef<{ cancel: () => void } | null>(null);
@@ -392,13 +390,8 @@ export const usePlayerStructureSync = () => {
         await getStructuresDataFromTorii(toriiClient, toriiComponents, structuresToSync);
 
         if (!cancelled) {
-          const {
-            hydratedIds,
-            missingIds,
-            missingStructureIds,
-            missingResourceIds,
-            missingStructureBuildingsIds,
-          } = resolveHydratedPlayerStructureModelIds(claimedStructureIds);
+          const { hydratedIds, missingIds, missingStructureIds, missingResourceIds, missingStructureBuildingsIds } =
+            resolveHydratedPlayerStructureModelIds(claimedStructureIds);
           clearMissingStructureCooldown(hydratedIds);
           applyMissingStructureCooldown(missingIds);
           hydratedIds.forEach((entityId) => syncedStructureIds.current.add(entityId));
@@ -529,13 +522,8 @@ export const usePlayerStructureSync = () => {
         await getStructuresDataFromTorii(toriiClient, toriiComponents, structuresToSync);
 
         if (syncEpochAtRequestStart === accountSyncEpochRef.current) {
-          const {
-            hydratedIds,
-            missingIds,
-            missingStructureIds,
-            missingResourceIds,
-            missingStructureBuildingsIds,
-          } = resolveHydratedPlayerStructureModelIds(structuresToSyncIds);
+          const { hydratedIds, missingIds, missingStructureIds, missingResourceIds, missingStructureBuildingsIds } =
+            resolveHydratedPlayerStructureModelIds(structuresToSyncIds);
           clearMissingStructureCooldown(hydratedIds);
           applyMissingStructureCooldown(missingIds);
           hydratedIds.forEach((entityId) => syncedStructureIds.current.add(entityId));
@@ -545,13 +533,13 @@ export const usePlayerStructureSync = () => {
             syncDiag("newly-seen-sync-complete", {
               accountAddress: accountAddress ?? null,
               structureIds: hydratedIds,
-                structureIdsCsv: hydratedIds.join(","),
-                missingStructureIds: missingIds,
-                missingStructureIdsCsv: missingIds.join(","),
-                missingStructureModelIdsCsv: missingStructureIds.join(","),
-                missingResourceModelIdsCsv: missingResourceIds.join(","),
-                missingStructureBuildingsModelIdsCsv: missingStructureBuildingsIds.join(","),
-              });
+              structureIdsCsv: hydratedIds.join(","),
+              missingStructureIds: missingIds,
+              missingStructureIdsCsv: missingIds.join(","),
+              missingStructureModelIdsCsv: missingStructureIds.join(","),
+              missingResourceModelIdsCsv: missingResourceIds.join(","),
+              missingStructureBuildingsModelIdsCsv: missingStructureBuildingsIds.join(","),
+            });
           }
           logMissingMaterialization("newly-seen", missingIds);
           scheduleMissingModelRetry("newly-seen", missingIds);

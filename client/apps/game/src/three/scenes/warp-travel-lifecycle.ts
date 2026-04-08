@@ -29,24 +29,32 @@ async function activateWarpTravelLifecycle(
   adapter: WarpTravelLifecycleAdapter,
   phase: "initial" | "resume",
 ): Promise<void> {
+  console.log(`[WarpTravel] activateLifecycle START phase=${phase}`);
   adapter.moveCameraToSceneLocation();
   adapter.attachLabelGroupsToScene();
   adapter.attachManagerLabels();
   adapter.registerStoreSubscriptions();
   adapter.setupCameraZoomHandler();
+  console.log(`[WarpTravel] sync setup done, calling refreshScene...`);
 
   try {
     await adapter.refreshScene();
+    console.log(`[WarpTravel] refreshScene resolved`);
   } catch (error) {
+    console.log(`[WarpTravel] refreshScene THREW:`, error);
     adapter.reportSetupError?.(error, phase);
   }
 
   if (phase === "initial") {
+    console.log(`[WarpTravel] calling onInitialSetupComplete...`);
     await adapter.onInitialSetupComplete?.();
+    console.log(`[WarpTravel] activateLifecycle DONE (initial)`);
     return;
   }
 
+  console.log(`[WarpTravel] calling onResumeComplete...`);
   await adapter.onResumeComplete?.();
+  console.log(`[WarpTravel] activateLifecycle DONE (resume)`);
 }
 
 export async function runWarpTravelSetupLifecycle(
@@ -62,13 +70,16 @@ export async function runWarpTravelSetupLifecycle(
 
   if (!nextState.hasInitialized) {
     adapter.onInitialSetupStart?.();
+    const reusingPromise = Boolean(nextState.initialSetupPromise);
     if (!nextState.initialSetupPromise) {
       nextState.initialSetupPromise = activateWarpTravelLifecycle(adapter, "initial");
     }
+    console.log(`[WarpTravel] awaiting initialSetupPromise (reused=${reusingPromise})`);
 
     try {
       await nextState.initialSetupPromise;
       nextState.hasInitialized = true;
+      console.log(`[WarpTravel] initialSetupPromise resolved`);
     } finally {
       nextState.initialSetupPromise = null;
     }
@@ -76,6 +87,7 @@ export async function runWarpTravelSetupLifecycle(
     return nextState;
   }
 
+  console.log(`[WarpTravel] already initialized, running resume`);
   adapter.onResumeStart?.();
   await activateWarpTravelLifecycle(adapter, "resume");
   return nextState;

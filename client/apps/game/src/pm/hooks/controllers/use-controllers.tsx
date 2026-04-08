@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { BigNumberish } from "starknet";
 
 import { normalizeAvatarAddress, normalizeAvatarUsername } from "@/hooks/use-player-avatar";
+import { isLocalWorldEnvironment } from "../../../../env";
 import { useDojoSdk } from "../dojo/use-dojo-sdk";
 
 type ControllersProviderProps = {
@@ -19,6 +20,10 @@ type ControllersProviderState = {
 };
 
 const ControllersProviderContext = createContext<ControllersProviderState | undefined>(undefined);
+
+const shouldSkipControllersFetch = (): boolean => {
+  return isLocalWorldEnvironment();
+};
 
 export function ControllersProvider({ children, ...props }: ControllersProviderProps) {
   const { sdk } = useDojoSdk();
@@ -48,6 +53,10 @@ export function ControllersProvider({ children, ...props }: ControllersProviderP
 
   const refreshControllers = useCallback(async () => {
     if (!sdk) return;
+    if (shouldSkipControllersFetch()) {
+      setControllers([]);
+      return;
+    }
 
     setIsLoading(true);
     try {

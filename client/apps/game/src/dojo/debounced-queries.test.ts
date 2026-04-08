@@ -33,15 +33,11 @@ describe("debounced query queue", () => {
     const onComplete = vi.fn();
     let settled = false;
 
-    const pending = debouncedGetEntitiesFromTorii(
-      {} as any,
-      [] as any,
-      [1],
-      ["s1_eternum-Structure"],
-      onComplete,
-    ).then(() => {
-      settled = true;
-    });
+    const pending = debouncedGetEntitiesFromTorii({} as any, [] as any, [1], ["s1_eternum-Structure"], onComplete).then(
+      () => {
+        settled = true;
+      },
+    );
 
     await Promise.resolve();
     await Promise.resolve();
@@ -62,13 +58,7 @@ describe("debounced query queue", () => {
 
     const onComplete = vi.fn();
 
-    await debouncedGetEntitiesFromTorii(
-      {} as any,
-      [] as any,
-      [1],
-      ["s1_eternum-Structure"],
-      onComplete,
-    );
+    await debouncedGetEntitiesFromTorii({} as any, [] as any, [1], ["s1_eternum-Structure"], onComplete);
 
     expect(onComplete).toHaveBeenCalledTimes(1);
     consoleErrorSpy.mockRestore();

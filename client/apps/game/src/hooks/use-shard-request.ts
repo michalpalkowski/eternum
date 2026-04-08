@@ -202,9 +202,9 @@ const resolveExecuteNonce = async (account: ExecutableAccount): Promise<string |
   }
 
   if (
-    typeof account.provider?.getNonceForAddress === "function"
-    && typeof account.address === "string"
-    && account.address.length > 0
+    typeof account.provider?.getNonceForAddress === "function" &&
+    typeof account.address === "string" &&
+    account.address.length > 0
   ) {
     const getNonceForAddress = account.provider.getNonceForAddress;
     const address = account.address;
@@ -219,11 +219,7 @@ const resolveExecuteNonce = async (account: ExecutableAccount): Promise<string |
   for (let attempt = 0; attempt <= EXECUTE_NONCE_RETRIES; attempt += 1) {
     for (const readNonce of nonceReaders) {
       try {
-        const rawNonce = await withTimeout(
-          readNonce(),
-          EXECUTE_NONCE_TIMEOUT_MS,
-          "resolve execute nonce",
-        );
+        const rawNonce = await withTimeout(readNonce(), EXECUTE_NONCE_TIMEOUT_MS, "resolve execute nonce");
         return normalizeFeltToHex(rawNonce, "execute_nonce");
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
@@ -766,9 +762,9 @@ const isNoRecoverableShardError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.toLowerCase();
   return (
-    normalized.includes("no recoverable shard")
-    || normalized.includes("does not report a recoverable shard")
-    || normalized.includes("failed to fetch shard status: http 404")
+    normalized.includes("no recoverable shard") ||
+    normalized.includes("does not report a recoverable shard") ||
+    normalized.includes("failed to fetch shard status: http 404")
   );
 };
 

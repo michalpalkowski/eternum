@@ -77,7 +77,6 @@ const toWorldMapPosition = (position: PositionLike): { col: number; row: number 
 
 const useNavigateToHexView = () => {
   const showBlankOverlay = useUIStore((state) => state.setShowBlankOverlay);
-  const setIsLoadingScreenEnabled = useUIStore((state) => state.setIsLoadingScreenEnabled);
   const setPreviewBuilding = useUIStore((state) => state.setPreviewBuilding);
   const { handleUrlChange } = useQuery();
 
@@ -85,7 +84,6 @@ const useNavigateToHexView = () => {
     const normalized = position.getNormalized();
     const url = buildPlaySceneUrl("hex", normalized.x, normalized.y);
 
-    setIsLoadingScreenEnabled(true);
     showBlankOverlay(false);
     setPreviewBuilding(null);
     handleUrlChange(url);
@@ -95,13 +93,11 @@ const useNavigateToHexView = () => {
 export const useNavigateToMapView = () => {
   const showBlankOverlay = useUIStore((state) => state.setShowBlankOverlay);
   const setPreviewBuilding = useUIStore((state) => state.setPreviewBuilding);
-  const { handleUrlChange, isMapView } = useQuery();
-  const setIsLoadingScreenEnabled = useUIStore((state) => state.setIsLoadingScreenEnabled);
+  const { handleUrlChange } = useQuery();
 
   return (position: Position) => {
-    if (!isMapView) {
-      setIsLoadingScreenEnabled(true);
-    }
+    // Scene transitions own the transition loader lifecycle.
+    // Navigation only updates route and onboarding overlay state.
     showBlankOverlay(false);
     setPreviewBuilding(null);
     const normalized = position.getNormalized();

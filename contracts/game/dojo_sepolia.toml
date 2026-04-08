@@ -8,9 +8,9 @@ rpc_url = "https://api.cartridge.gg/x/starknet/sepolia/rpc/v0_9"
 
 [lib_versions]
 "s1_eternum-combat_library" = "0_1_12"
-"s1_eternum-rng_library" = "0_1_12"
+"s1_eternum-rng_library" = "0_1_15"
 "s1_eternum-biome_library" = "0_1_12"
-"s1_eternum-structure_creation_library" = "0_1_12"
+"s1_eternum-structure_creation_library" = "0_1_15"
 
 
 [world]

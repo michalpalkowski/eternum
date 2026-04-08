@@ -8,6 +8,7 @@ import { getPredictionMarketChain, getPredictionMarketConfigForChain } from "@/p
 import { useConfig } from "@/pm/providers";
 import { GLOBAL_TORII_BY_CHAIN } from "@/config/global-chain";
 import Panel from "@/ui/design-system/atoms/panel";
+import { env, hasExplicitGlobalToriiUrl, isLocalWorldEnvironment, resolveGlobalToriiUrl } from "../../../../env";
 import {
   DojoSdkProviderInitialized,
   MarketStatusFilter,
@@ -41,6 +42,17 @@ const MARKET_FILTERS_ALL: MarketFiltersParams = {
   oracle: "All",
 };
 
+const resolveMarketsToriiUrl = (chain: PredictionMarketChain, fallbackToriiUrl: string): string => {
+  const isLocalWorld = isLocalWorldEnvironment();
+  if (isLocalWorld) {
+    return resolveGlobalToriiUrl();
+  }
+  if (hasExplicitGlobalToriiUrl) {
+    return env.VITE_PUBLIC_GLOBAL_TORII;
+  }
+  return GLOBAL_TORII_BY_CHAIN[chain] ?? fallbackToriiUrl;
+};
+
 export const MarketsProviders = ({
   children,
   chain,
@@ -52,11 +64,12 @@ export const MarketsProviders = ({
 }) => {
   const resolvedChain = chain ?? getPredictionMarketChain();
   const config = getPredictionMarketConfigForChain(resolvedChain);
+  const toriiUrl = resolveMarketsToriiUrl(resolvedChain, config.toriiUrl);
   return (
     <QueryClientProvider client={pmQueryClient}>
       <DojoSdkProviderInitialized
         chain={resolvedChain}
-        toriiUrl={GLOBAL_TORII_BY_CHAIN[resolvedChain] ?? config.toriiUrl}
+        toriiUrl={toriiUrl}
         worldAddress={config.worldAddress}
         fallback={loadingFallback}
       >

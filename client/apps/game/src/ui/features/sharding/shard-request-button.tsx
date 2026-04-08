@@ -81,8 +81,18 @@ const ShardButton = ({
   components: any;
 }) => {
   const operatorUrl = env.VITE_PUBLIC_SHARD_OPERATOR_URL;
-  const { phase, error, errorCode, errorDiagnostic, targetShardId, initStepLabel, requestShard, recoverShard, openShardTab, reset } =
-    useShardRequest(account, operatorUrl ?? "");
+  const {
+    phase,
+    error,
+    errorCode,
+    errorDiagnostic,
+    targetShardId,
+    initStepLabel,
+    requestShard,
+    recoverShard,
+    openShardTab,
+    reset,
+  } = useShardRequest(account, operatorUrl ?? "");
   const explorerEntities = useEntityQuery([Has(components.ExplorerTroops)]);
   const tradeEntities = useEntityQuery([Has(components.Trade)]);
   const autoOpenRecoveredShardRef = useRef(false);
@@ -151,7 +161,8 @@ const ShardButton = ({
     }
   };
 
-  const isRecoverableError = phase === "error" && (targetShardId !== null || error?.toLowerCase().includes("locked by shard"));
+  const isRecoverableError =
+    phase === "error" && (targetShardId !== null || error?.toLowerCase().includes("locked by shard"));
 
   const label = (() => {
     switch (phase) {
@@ -177,7 +188,9 @@ const ShardButton = ({
       >
         {label}
       </button>
-      {operatorUrl === undefined && <span className="text-red-400 text-xs">Missing VITE_PUBLIC_SHARD_OPERATOR_URL</span>}
+      {operatorUrl === undefined && (
+        <span className="text-red-400 text-xs">Missing VITE_PUBLIC_SHARD_OPERATOR_URL</span>
+      )}
       {error !== null && (
         <div className="text-red-400 text-xs leading-relaxed">
           <div>
@@ -209,7 +222,9 @@ const ShardButton = ({
           Reset
         </button>
       )}
-      {phase === "waiting" && <span className="text-amber-300 text-xs animate-pulse">{initStepLabel ?? "Waiting for operator..."}</span>}
+      {phase === "waiting" && (
+        <span className="text-amber-300 text-xs animate-pulse">{initStepLabel ?? "Waiting for operator..."}</span>
+      )}
     </div>
   );
 };
@@ -303,7 +318,9 @@ const SettleButton = ({ account }: { account: ExecutableAccount | null }) => {
           </span>
         )}
       </div>
-      {phase === "waiting" && stepLabel !== null && <span className="text-amber-300 text-xs animate-pulse">{stepLabel}</span>}
+      {phase === "waiting" && stepLabel !== null && (
+        <span className="text-amber-300 text-xs animate-pulse">{stepLabel}</span>
+      )}
     </div>
   );
 };

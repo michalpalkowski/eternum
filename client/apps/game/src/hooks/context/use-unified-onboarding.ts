@@ -76,7 +76,6 @@ export const useUnifiedOnboarding = (_backgroundImage: string): UnifiedOnboardin
   // UI state
   const showBlankOverlay = useUIStore((state) => state.showBlankOverlay);
   const setShowBlankOverlay = useUIStore((state) => state.setShowBlankOverlay);
-  const setIsLoadingScreenEnabled = useUIStore((state) => state.setIsLoadingScreenEnabled);
 
   // In shard mode, skip the initial onboarding overlay so the player goes straight to game.
   // Module-level flag (not useRef) because useUnifiedOnboarding is called from multiple
@@ -91,16 +90,6 @@ export const useUnifiedOnboarding = (_backgroundImage: string): UnifiedOnboardin
       setShowBlankOverlay(false);
     }
   }, [isShardMode, showBlankOverlay, setShowBlankOverlay]);
-
-  // In shard mode we skip the entry overlay, so no component is left to clear
-  // the transition loading screen. Once bootstrap is ready, force it off.
-  useEffect(() => {
-    if (!isShardMode || showBlankOverlay || bootstrap.status !== "ready") {
-      return;
-    }
-
-    setIsLoadingScreenEnabled(false);
-  }, [isShardMode, showBlankOverlay, bootstrap.status, setIsLoadingScreenEnabled]);
 
   // Check URL for spectate mode
   const urlSpectateMode =

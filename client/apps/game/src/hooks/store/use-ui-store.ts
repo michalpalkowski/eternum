@@ -266,7 +266,9 @@ export const useUIStore = create(
     closeContextMenu: () => set({ contextMenu: null, contextMenuStack: [] }),
     showRealmsFlags: true,
     setShowRealmsFlags: (show) => set({ showRealmsFlags: show }),
-    isLoadingScreenEnabled: true,
+    // Transition loader is protocol-driven by scene transitions.
+    // Keep it disabled by default so onboarding handoff cannot inherit a stale global loading flag.
+    isLoadingScreenEnabled: false,
     setIsLoadingScreenEnabled: (enabled) => set({ isLoadingScreenEnabled: enabled }),
     modalContent: null,
     toggleModal: (content) => {

@@ -41,7 +41,9 @@ const resolveBuildingCostsFromComponents = (
     return undefined;
   }
 
-  const costListIdRaw = useSimpleCost ? categoryConfig.simple_erection_cost_id : categoryConfig.complex_erection_cost_id;
+  const costListIdRaw = useSimpleCost
+    ? categoryConfig.simple_erection_cost_id
+    : categoryConfig.complex_erection_cost_id;
   const costListId = BigInt(costListIdRaw ?? 0);
   const costListCount = useSimpleCost
     ? Number(categoryConfig.simple_erection_cost_count ?? 0)

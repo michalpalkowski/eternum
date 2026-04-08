@@ -1,11 +1,27 @@
 import { prefetchPlayAssets } from "@/ui/utils/prefetch-play-assets";
 
 type GameRouteModule = typeof import("./game-route");
+type GameRouteLazyModule = Pick<GameRouteModule, "default">;
+
+export const resolveGameRouteLazyModule = (module: GameRouteModule): GameRouteLazyModule => {
+  if (typeof module.default === "function") {
+    return { default: module.default };
+  }
+
+  const moduleWithNamedRoute = module as GameRouteModule & {
+    GameRoute?: GameRouteModule["default"];
+  };
+  if (typeof moduleWithNamedRoute.GameRoute === "function") {
+    return { default: moduleWithNamedRoute.GameRoute };
+  }
+
+  throw new Error("Game route module must export a default component compatible with React.lazy");
+};
 
 export const createPlayEntryRoutePrimer = ({
   preloadGameRouteModule,
 }: {
-  preloadGameRouteModule: () => Promise<GameRouteModule>;
+  preloadGameRouteModule: () => Promise<GameRouteLazyModule>;
 }) => {
   return () => {
     const idleCallback = (
@@ -48,11 +64,11 @@ export const createPlayEntryAssetPrimer = ({ prefetchPlayAssets }: { prefetchPla
   };
 };
 
-let gameRoutePreloadPromise: Promise<GameRouteModule> | null = null;
+let gameRoutePreloadPromise: Promise<GameRouteLazyModule> | null = null;
 
-export const preloadGameRouteModule = (): Promise<GameRouteModule> => {
+export const preloadGameRouteModule = (): Promise<GameRouteLazyModule> => {
   if (!gameRoutePreloadPromise) {
-    gameRoutePreloadPromise = import("./game-route");
+    gameRoutePreloadPromise = import("./game-route").then(resolveGameRouteLazyModule);
   }
 
   return gameRoutePreloadPromise;

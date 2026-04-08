@@ -146,7 +146,11 @@ export const getStructuresDataFromTorii = async (
 // For own structures, usePlayerStructureSync keeps data fresh so we only fetch if missing.
 // For non-owned structures, always re-fetch since no subscription covers them and data may be stale.
 export const ensureStructureSynced = async (
-  components: { Structure?: Component<any, any, any>; Resource?: Component<any, any, any>; StructureBuildings?: Component<any, any, any> },
+  components: {
+    Structure?: Component<any, any, any>;
+    Resource?: Component<any, any, any>;
+    StructureBuildings?: Component<any, any, any>;
+  },
   toriiClient: ToriiClient,
   contractComponents: Component<Schema, Metadata, undefined>[],
   structureEntityId: ID,
@@ -346,15 +350,7 @@ export const getHyperstructureFromTorii = async <S extends Schema>(
   };
 
   const structurePromise = timedAsync("query:hyperstructure:structures", () =>
-    getEntities(
-      client,
-      structureQuery,
-      components as any,
-      [],
-      ["s1_eternum-Structure"],
-      EVENT_QUERY_LIMIT,
-      false,
-    ),
+    getEntities(client, structureQuery, components as any, [], ["s1_eternum-Structure"], EVENT_QUERY_LIMIT, false),
   );
 
   const hyperstructureQuery = {
@@ -395,15 +391,7 @@ export const getHyperstructureFromTorii = async <S extends Schema>(
   ];
 
   const hyperstructurePromise = timedAsync("query:hyperstructure:models", () =>
-    getEntities(
-      client,
-      hyperstructureQuery,
-      components as any,
-      [],
-      hyperstructureModels,
-      EVENT_QUERY_LIMIT,
-      false,
-    ),
+    getEntities(client, hyperstructureQuery, components as any, [], hyperstructureModels, EVENT_QUERY_LIMIT, false),
   );
 
   return Promise.all([hyperstructurePromise, structurePromise]);
@@ -589,24 +577,27 @@ export const getMapFromToriiExact = async <S extends Schema>(
   minRow: number,
   maxRow: number,
 ) => {
-  const tileRows = (await (sqlApi as any).fetchTileRowsInBounds(
-    minCol,
-    maxCol,
-    minRow,
-    maxRow,
-  )) as Array<{ internalEntityId: string; alt: boolean; col: number; row: number; data: string }>;
+  const tileRows = (await (sqlApi as any).fetchTileRowsInBounds(minCol, maxCol, minRow, maxRow)) as Array<{
+    internalEntityId: string;
+    alt: boolean;
+    col: number;
+    row: number;
+    data: string;
+  }>;
   if (tileRows.length === 0) {
     return;
   }
 
   const uniqueRows = Array.from(
-    tileRows.reduce<Map<string, { internalEntityId: string; alt: boolean; col: number; row: number; data: string }>>(
-      (acc, row) => {
-        acc.set(row.internalEntityId, row);
-        return acc;
-      },
-      new Map<string, { internalEntityId: string; alt: boolean; col: number; row: number; data: string }>(),
-    ).values(),
+    tileRows
+      .reduce<Map<string, { internalEntityId: string; alt: boolean; col: number; row: number; data: string }>>(
+        (acc, row) => {
+          acc.set(row.internalEntityId, row);
+          return acc;
+        },
+        new Map<string, { internalEntityId: string; alt: boolean; col: number; row: number; data: string }>(),
+      )
+      .values(),
   );
 
   for (let index = 0; index < uniqueRows.length; index += TILE_ROWS_SYNC_BATCH_SIZE) {

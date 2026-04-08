@@ -86,17 +86,14 @@ export class ShardRequestDiagnosticError extends Error {
   }
 }
 
-export const createShardRequestDiagnostic = (
-  input: ShardRequestDiagnosticInput,
-): ShardRequestDiagnostic => ({
+export const createShardRequestDiagnostic = (input: ShardRequestDiagnosticInput): ShardRequestDiagnostic => ({
   code: input.code,
   stage: input.stage,
   kind: input.kind,
   summary: input.summary,
   hint: input.hint,
   details: input.details ?? null,
-  context:
-    input.context !== undefined && Object.keys(input.context).length > 0 ? { ...input.context } : null,
+  context: input.context !== undefined && Object.keys(input.context).length > 0 ? { ...input.context } : null,
   capturedAt: new Date().toISOString(),
 });
 
@@ -104,10 +101,7 @@ export const throwShardRequestDiagnostic = (input: ShardRequestDiagnosticInput):
   throw new ShardRequestDiagnosticError(createShardRequestDiagnostic(input));
 };
 
-export const rethrowShardRequestDiagnostic = (
-  error: unknown,
-  fallback: ShardRequestDiagnosticInput,
-): never => {
+export const rethrowShardRequestDiagnostic = (error: unknown, fallback: ShardRequestDiagnosticInput): never => {
   throw new ShardRequestDiagnosticError(toShardRequestDiagnostic(error, fallback));
 };
 
@@ -134,8 +128,7 @@ export const toShardRequestDiagnostic = (
 
   return createShardRequestDiagnostic({
     ...fallback,
-    details:
-      fallback.details !== undefined ? fallback.details : details !== fallback.summary ? details : null,
+    details: fallback.details !== undefined ? fallback.details : details !== fallback.summary ? details : null,
   });
 };
 
@@ -175,10 +168,7 @@ export const clearCapturedShardRequestDiagnostic = () => {
   }
 };
 
-export const logShardRequestDiagnostic = (
-  diagnostic: ShardRequestDiagnostic,
-  level: "warn" | "error" = "error",
-) => {
+export const logShardRequestDiagnostic = (diagnostic: ShardRequestDiagnostic, level: "warn" | "error" = "error") => {
   const label = `[ShardRequest:${diagnostic.stage}/${diagnostic.kind}]`;
   if (level === "warn") {
     console.warn(label, diagnostic.summary, diagnostic);

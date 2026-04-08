@@ -629,8 +629,13 @@ export default class GameRenderer {
       targetScene === this.sceneManager.getCurrentScene() &&
       (targetScene === SceneName.WorldMap || (targetScene === SceneName.FastTravel && this.fastTravelScene))
     ) {
-      this.sceneManager.moveCameraForScene();
-      this.transitionManager?.fadeIn();
+      try {
+        this.sceneManager.moveCameraForScene();
+      } catch (error) {
+        console.error("[GameRenderer] Failed to move camera for active scene URL change", error);
+      } finally {
+        this.transitionManager?.fadeIn();
+      }
     } else {
       this.sceneManager.switchScene(targetScene);
     }

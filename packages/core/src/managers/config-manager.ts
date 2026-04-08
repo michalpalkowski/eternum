@@ -565,8 +565,7 @@ export class ClientConfigManager {
 
   getSeasonMainGameStartAt() {
     return this.getValueOrDefault(() => {
-      const startMainAt = this.getWorldConfig()
-        ?.season_config.start_main_at;
+      const startMainAt = this.getWorldConfig()?.season_config.start_main_at;
 
       return startMainAt;
     }, 0);
@@ -910,13 +909,10 @@ export class ClientConfigManager {
   }
 
   getBuildingConfig() {
-    return this.getValueOrDefault(
-      () => this.getWorldConfig()?.building_config,
-      {
-        base_population: 0,
-        base_cost_percent_increase: 0,
-      },
-    );
+    return this.getValueOrDefault(() => this.getWorldConfig()?.building_config, {
+      base_population: 0,
+      base_cost_percent_increase: 0,
+    });
   }
 
   getBlitzConfig() {
@@ -1062,10 +1058,7 @@ export class ClientConfigManager {
 
   getBasePopulationCapacity(): number {
     return this.getValueOrDefault(() => {
-      return (
-        this.getWorldConfig()?.building_config
-          ?.base_population ?? 0
-      );
+      return this.getWorldConfig()?.building_config?.base_population ?? 0;
     }, 0);
   }
 

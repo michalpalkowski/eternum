@@ -58,12 +58,7 @@ export interface ShardProtocolStatus {
  * Terminal protocol phases — a shard in one of these phases will not progress
  * further without external intervention (manual retry, new request, etc.).
  */
-const TERMINAL_PROTOCOL_PHASES: ReadonlySet<string> = new Set([
-  "completed",
-  "failed",
-  "rejected",
-  "suspended",
-]);
+const TERMINAL_PROTOCOL_PHASES: ReadonlySet<string> = new Set(["completed", "failed", "rejected", "suspended"]);
 
 /** Returns true when the protocol phase indicates the shard may still be progressing. */
 export const isRecoverableProtocolPhase = (protocol: ShardProtocolStatus): boolean =>
@@ -110,8 +105,7 @@ export type InitStreamEvent =
   | { readonly type: "shard_initializing"; readonly shardId: string; readonly stepLabel: string | null }
   | { readonly type: "gameplay_active"; readonly shardId: string };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
 
 const parseHttpUrl = (rawUrl: string, fieldName: string, errorCode: ShardProtocolErrorCode): string => {
   const value = rawUrl.trim();
@@ -160,22 +154,14 @@ const parseBoolean = (value: unknown, fieldName: string, errorCode: ShardProtoco
   return value;
 };
 
-const parseOptionalString = (
-  value: unknown,
-  fieldName: string,
-  errorCode: ShardProtocolErrorCode,
-): string | null => {
+const parseOptionalString = (value: unknown, fieldName: string, errorCode: ShardProtocolErrorCode): string | null => {
   if (value === undefined || value === null) {
     return null;
   }
   return parseNonEmptyString(value, fieldName, errorCode);
 };
 
-const parseOptionalHttpUrl = (
-  value: unknown,
-  fieldName: string,
-  errorCode: ShardProtocolErrorCode,
-): string | null => {
+const parseOptionalHttpUrl = (value: unknown, fieldName: string, errorCode: ShardProtocolErrorCode): string | null => {
   const parsed = parseOptionalString(value, fieldName, errorCode);
   return parsed === null ? null : parseHttpUrl(parsed, fieldName, errorCode);
 };
@@ -220,10 +206,7 @@ export const parseShardUrlParams = (search: string): ShardSessionParams | null =
   if (rawOperatorUrl === null) missingFields.push("shard_operator");
 
   if (missingFields.length > 0) {
-    throw new ShardProtocolError(
-      "INVALID_SHARD_QUERY",
-      `Missing shard query params: ${missingFields.join(", ")}`,
-    );
+    throw new ShardProtocolError("INVALID_SHARD_QUERY", `Missing shard query params: ${missingFields.join(", ")}`);
   }
 
   const rpcUrl = rawRpcUrl;
@@ -247,8 +230,7 @@ export const parseShardUrlParams = (search: string): ShardSessionParams | null =
     toriiGrpcUrl: parsedToriiGrpcUrl,
     shardId: parseNonEmptyString(shardId, "shard_id", "INVALID_SHARD_QUERY"),
     operatorUrl: parseHttpUrl(operatorUrl, "shard_operator", "INVALID_SHARD_QUERY"),
-    mainUrl:
-      rawMainUrl === null ? null : parseHttpUrl(rawMainUrl, "shard_main", "INVALID_SHARD_QUERY"),
+    mainUrl: rawMainUrl === null ? null : parseHttpUrl(rawMainUrl, "shard_main", "INVALID_SHARD_QUERY"),
   };
 };
 
@@ -421,7 +403,10 @@ export const parseTransportHealthFromStatusResponse = (payload: unknown): ShardT
 
   const transport = payload.transport;
   if (!isRecord(transport)) {
-    throw new ShardProtocolError("INVALID_OPERATOR_STATUS", "Operator transport response must contain transport object");
+    throw new ShardProtocolError(
+      "INVALID_OPERATOR_STATUS",
+      "Operator transport response must contain transport object",
+    );
   }
 
   const rawStatus = parseNonEmptyString(transport.status, "transport.status", "INVALID_OPERATOR_STATUS");

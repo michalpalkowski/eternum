@@ -17,13 +17,13 @@ const DISTRIBUTOR_ROLE: felt252 = selector!("DISTRIBUTOR_ROLE");
 #[starknet::contract]
 pub mod EternumVillagePassMock {
     use core::num::traits::Zero;
-    use openzeppelin::access::accesscontrol::{AccessControlComponent, DEFAULT_ADMIN_ROLE};
-    use openzeppelin::introspection::src5::SRC5Component;
-    use openzeppelin::token::erc721::ERC721Component;
-    use openzeppelin::token::erc721::extensions::ERC721EnumerableComponent;
-    use openzeppelin::token::erc721::interface::{IERC721Metadata, IERC721MetadataCamelOnly};
-    use openzeppelin::upgrades::UpgradeableComponent;
-    use openzeppelin::upgrades::interface::IUpgradeable;
+    use openzeppelin_access::accesscontrol::{AccessControlComponent, DEFAULT_ADMIN_ROLE};
+    use openzeppelin_introspection::src5::SRC5Component;
+    use openzeppelin_token::erc721::ERC721Component;
+    use openzeppelin_token::erc721::extensions::ERC721EnumerableComponent;
+    use openzeppelin_token::erc721::interface::{IERC721Metadata, IERC721MetadataCamelOnly};
+    use openzeppelin_upgrades::UpgradeableComponent;
+    use openzeppelin_upgrades::interface::IUpgradeable;
     use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
     use starknet::{ClassHash, ContractAddress};
     use super::{DISTRIBUTOR_ROLE, MINTER_ROLE, UPGRADER_ROLE};

@@ -2,13 +2,20 @@ import { shortString } from "starknet";
 import { normalizeSelector, nameToPaddedFelt } from "./normalize";
 import { FACTORY_QUERIES, buildApiUrl, fetchWithErrorHandling } from "@bibliothecadao/torii";
 import type { FactoryContractRow } from "./types";
+import { env } from "../../../env";
 
 interface WorldDeployment {
   worldAddress: string | null;
   rpcUrl: string | null;
 }
 
+interface RealtimeWorldDeploymentResponse {
+  worldAddress?: string | null;
+  rpcUrl?: string | null;
+}
+
 const WORLD_DEPLOYED_LIST_QUERY = "SELECT name, address FROM [wf-WorldDeployed] LIMIT 1000;";
+const REALTIME_REQUEST_TIMEOUT_MS = 5_000;
 
 // Use shared SQL utils from @bibliothecadao/torii
 
@@ -45,6 +52,29 @@ export const isToriiAvailable = async (toriiBaseUrl: string): Promise<boolean> =
   }
 };
 
+/**
+ * Fetch bulk world availability from realtime-server.
+ * Returns `{ [worldName]: boolean }` and gracefully degrades to `{}`.
+ */
+export const fetchBulkAvailability = async (realtimeServerUrl: string): Promise<Record<string, boolean>> => {
+  if (!realtimeServerUrl) {
+    return {};
+  }
+
+  try {
+    const response = await fetch(`${trimTrailingSlash(realtimeServerUrl)}/api/availability/worlds`, {
+      signal: AbortSignal.timeout(REALTIME_REQUEST_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      return {};
+    }
+    const payload = (await response.json()) as unknown;
+    return normalizeAvailabilityPayload(payload);
+  } catch {
+    return {};
+  }
+};
+
 const normalizeAddress = (value: unknown): string | null => {
   if (value == null) return null;
   if (typeof value === "string") return value;
@@ -58,11 +88,29 @@ const normalizeString = (value: unknown): string | null => {
   return trimmed ? trimmed : null;
 };
 
+const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, "");
+
+const normalizeAvailabilityPayload = (payload: unknown): Record<string, boolean> => {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return {};
+  }
+
+  const entries = Object.entries(payload as Record<string, unknown>);
+  const normalized: Record<string, boolean> = {};
+  for (const [worldName, rawValue] of entries) {
+    if (typeof rawValue === "boolean") {
+      normalized[worldName] = rawValue;
+    }
+  }
+  return normalized;
+};
+
 const decodePaddedFeltAscii = (hex: string): string | null => {
   const normalizedHex = normalizeString(hex);
   if (!normalizedHex) return null;
 
-  const feltHex = normalizedHex.startsWith("0x") || normalizedHex.startsWith("0X") ? normalizedHex.slice(2) : normalizedHex;
+  const feltHex =
+    normalizedHex.startsWith("0x") || normalizedHex.startsWith("0X") ? normalizedHex.slice(2) : normalizedHex;
   if (feltHex.length === 0 || feltHex === "0") {
     return null;
   }
@@ -175,11 +223,47 @@ const extractWorldAddressFromRow = (row: Record<string, unknown>): string | null
   );
 };
 
+const resolveWorldDeploymentFromRealtime = async (worldName: string): Promise<WorldDeployment | null> => {
+  const realtimeBaseUrl = env.VITE_PUBLIC_REALTIME_URL;
+  if (!realtimeBaseUrl) {
+    return null;
+  }
+
+  try {
+    const chain = env.VITE_PUBLIC_CHAIN;
+    const response = await fetch(
+      `${trimTrailingSlash(realtimeBaseUrl)}/api/world-deployments/${chain}/${encodeURIComponent(worldName)}`,
+      {
+        signal: AbortSignal.timeout(REALTIME_REQUEST_TIMEOUT_MS),
+      },
+    );
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = (await response.json()) as RealtimeWorldDeploymentResponse;
+    const worldAddress = normalizeAddress(payload.worldAddress);
+    const rpcUrl = normalizeString(payload.rpcUrl);
+    if (!worldAddress && !rpcUrl) {
+      return null;
+    }
+
+    return { worldAddress, rpcUrl };
+  } catch {
+    return null;
+  }
+};
+
 export const resolveWorldDeploymentFromFactory = async (
   factorySqlBaseUrl: string,
   worldName: string,
 ): Promise<WorldDeployment | null> => {
   if (!factorySqlBaseUrl) return null;
+
+  const realtimeDeployment = await resolveWorldDeploymentFromRealtime(worldName);
+  if (realtimeDeployment) {
+    return realtimeDeployment;
+  }
 
   const paddedName = nameToPaddedFelt(worldName);
   const query = FACTORY_QUERIES.WORLD_DEPLOYED_BY_PADDED_NAME(paddedName);

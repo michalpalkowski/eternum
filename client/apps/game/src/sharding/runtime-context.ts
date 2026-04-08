@@ -144,10 +144,7 @@ const canonicalizeMainGameUrl = (
   return `${fallbackUrl.origin}${relativePath}`;
 };
 
-export const resolveRuntimeContext = (
-  href: string,
-  shardSession?: ShardSessionParams | null,
-): RuntimeContext => {
+export const resolveRuntimeContext = (href: string, shardSession?: ShardSessionParams | null): RuntimeContext => {
   const currentUrl = new URL(href);
   const playBasePath = resolvePlayBasePath(currentUrl.pathname);
 
@@ -173,10 +170,7 @@ export const resolveRuntimeContextFromWindow = (): RuntimeContext => {
   return resolveRuntimeContext(window.location.href);
 };
 
-export const resolveMainGameReturnUrl = (
-  context: RuntimeContext,
-  overrideState?: RuntimeNavigationState,
-): string => {
+export const resolveMainGameReturnUrl = (context: RuntimeContext, overrideState?: RuntimeNavigationState): string => {
   if (context.kind === "shard") {
     return canonicalizeMainGameUrl(context.mainGameReturnUrl, context.currentUrl, overrideState);
   }

@@ -607,7 +607,10 @@ export class ResourceManager {
 
   public getStoreCapacityKg(): { capacityKg: number; capacityUsedKg: number; quantity: number } {
     const resource = this._getResource()!;
-    const structureBuildings = resolveComponentByNumericEntityId(this.components.StructureBuildings, this.entityId || 0)?.value;
+    const structureBuildings = resolveComponentByNumericEntityId(
+      this.components.StructureBuildings,
+      this.entityId || 0,
+    )?.value;
     const packBuildingCounts = [
       structureBuildings?.packed_counts_1 || 0n,
       structureBuildings?.packed_counts_2 || 0n,

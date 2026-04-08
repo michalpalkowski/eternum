@@ -83,9 +83,7 @@ export const useShardHealthGuard = () => {
         consecutiveFailuresRef.current = 0;
 
         if (!isRecoverableProtocolPhase(ourShard.protocol)) {
-          console.warn(
-            `[shard-health-guard] Shard ${shardId} entered terminal phase: ${ourShard.protocol.phase}`,
-          );
+          console.warn(`[shard-health-guard] Shard ${shardId} entered terminal phase: ${ourShard.protocol.phase}`);
           handleShardGone(`terminal_phase:${ourShard.protocol.phase}`);
         }
       } catch (error) {

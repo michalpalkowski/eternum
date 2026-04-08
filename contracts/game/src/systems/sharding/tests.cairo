@@ -1,12 +1,15 @@
 use dojo::model::{Model, ModelStorage};
 use dojo::utils::entity_id_from_keys;
-use dojo::world::{IWorldDispatcherTrait, WorldStorage, WorldStorageTrait};
+use dojo::world::{
+    IShardingSettlementDispatcherTrait, IWorldDispatcherTrait, WorldStorage, WorldStorageTrait,
+};
 use dojo_snf_test::{
     ContractDef, ContractDefTrait, NamespaceDef, TestResource, WorldStorageTestTrait,
     spawn_test_world,
 };
 use snforge_std::{
-    start_cheat_caller_address, stop_cheat_caller_address,
+    start_cheat_account_contract_address_global, start_cheat_caller_address,
+    stop_cheat_caller_address, test_address,
 };
 use starknet::ContractAddress;
 use crate::alias::ID;
@@ -56,12 +59,13 @@ fn namespace_def() -> NamespaceDef {
 fn contract_defs() -> Span<ContractDef> {
     [
         ContractDefTrait::new(DEFAULT_NS(), @"sharding_systems")
-            .with_writer_of([dojo::utils::bytearray_hash(DEFAULT_NS())].span()),
+            .with_writer_of([dojo::utils::bytearray_hash(DEFAULT_NS()), 0].span()),
     ]
         .span()
 }
 
 fn setup_world() -> WorldStorage {
+    start_cheat_account_contract_address_global(test_address());
     let mut world = spawn_test_world([namespace_def()].span());
     world.sync_perms_and_inits(contract_defs());
     world.dispatcher.uuid();
@@ -174,13 +178,16 @@ fn test_register_policies() {
     let sharding_disp = dojo::world::world_sharding::IShardingSettlementDispatcher { contract_address: world.dispatcher.contract_address };
     let (default_encoded, overrides) = sharding_disp.get_shard_policy(market_selector);
     assert!(default_encoded == 2, "Market default should be Add(2), got {}", default_encoded);
-    assert!(overrides.len() == 0, "Market should have no field overrides");
+    assert!(core::array::SpanTrait::len(overrides) == 0, "Market should have no field overrides");
 
     // Verify Structure has Set default (1) with Lock override on owner.
     let structure_selector = Model::<Structure>::selector(ns_hash);
     let (struct_default, struct_overrides) = sharding_disp.get_shard_policy(structure_selector);
     assert!(struct_default == 1, "Structure default should be Set(1), got {}", struct_default);
-    assert!(struct_overrides.len() == 1, "Structure should have 1 field override");
+    assert!(
+        core::array::SpanTrait::len(struct_overrides) == 2,
+        "Structure should have 2 field overrides",
+    );
 }
 
 // ── Entity lock blocks writes ───────────────────────────────────────
@@ -312,7 +319,8 @@ fn test_exclusive_related_entity_blocks_write() {
 }
 
 #[test]
-fn test_finish_shard_unlocks_exclusive_and_shared() {
+#[should_panic]
+fn test_finish_shard_keeps_exclusive_lock_until_settlement_or_cancel() {
     let mut world = setup_world();
     let exclusive_id: ID = 42;
     let shared_id: ID = 99;
@@ -330,9 +338,10 @@ fn test_finish_shard_unlocks_exclusive_and_shared() {
     dispatcher.finish_shard(1);
     stop_cheat_caller_address(system_addr);
 
-    // Both entities should be writable again after finish.
-    ResourceImpl::write_balance(ref world, exclusive_id, 1, 50);
+    // Shared entities remain writable, because they were never exclusively locked.
     ResourceImpl::write_balance(ref world, shared_id, 1, 150);
-    assert!(ResourceImpl::read_balance(ref world, exclusive_id, 1) == 50, "exclusive unlocked");
-    assert!(ResourceImpl::read_balance(ref world, shared_id, 1) == 150, "shared unlocked");
+    assert!(ResourceImpl::read_balance(ref world, shared_id, 1) == 150, "shared remains writable");
+
+    // Exclusive entities remain locked until settlement/cancel.
+    ResourceImpl::write_balance(ref world, exclusive_id, 1, 50);
 }

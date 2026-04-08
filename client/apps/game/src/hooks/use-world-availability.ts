@@ -15,7 +15,7 @@ import { getRpcUrlForChain } from "@/ui/features/admin/constants";
 import type { Chain } from "@contracts";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { RpcProvider } from "starknet";
-import { env } from "../../env";
+import { env, isLocalWorldEnvironment } from "../../env";
 
 const WORLD_CONFIG_TABLE = "s1_eternum-WorldConfig";
 const HYPERSTRUCTURE_GLOBALS_TABLE = "s1_eternum-HyperstructureGlobals";
@@ -78,7 +78,14 @@ const calculateHyperstructuresLeft = (maxRingCount: number, createdCount: number
   return Math.max(0, total - createdCount);
 };
 
-const buildToriiBaseUrl = (worldName: string) => `https://api.cartridge.gg/x/${worldName}/torii`;
+const isLocalWorldChain = (chain?: Chain) => chain === "local" || isLocalWorldEnvironment();
+
+const buildToriiBaseUrl = (worldName: string, chain?: Chain) => {
+  if (isLocalWorldChain(chain)) {
+    return env.VITE_PUBLIC_TORII;
+  }
+  return `https://api.cartridge.gg/x/${worldName}/torii`;
+};
 
 const parseMaybeHexToNumber = (v: unknown): number | null => {
   if (v == null) return null;
@@ -251,6 +258,7 @@ const fetchPlayerHasSettledRealm = async (toriiBaseUrl: string, playerAddress: s
 
 const fetchPrizeDistributionAddress = async (worldName: string, chain: Chain): Promise<string | null> => {
   try {
+    if (isLocalWorldChain(chain)) return null;
     const factorySqlBaseUrl = getFactorySqlBaseUrl(chain);
     if (!factorySqlBaseUrl) return null;
 
@@ -482,7 +490,7 @@ const checkWorldAvailability = async (
   playerAddress?: string | null,
   bulkAvailability?: Record<string, boolean>,
 ): Promise<{ isAvailable: boolean; meta: WorldConfigMeta | null }> => {
-  const toriiBaseUrl = buildToriiBaseUrl(worldName);
+  const toriiBaseUrl = buildToriiBaseUrl(worldName, chain);
 
   // Use bulk availability if available, otherwise fall back to direct probe
   const isAvailable =

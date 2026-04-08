@@ -234,11 +234,7 @@ export class SqlApi {
           return null;
         }
         const alt =
-          typeof row.alt === "boolean"
-            ? row.alt
-            : typeof row.alt === "number"
-              ? row.alt !== 0
-              : row.alt === "1";
+          typeof row.alt === "boolean" ? row.alt : typeof row.alt === "number" ? row.alt !== 0 : row.alt === "1";
         return {
           internalEntityId: row.internal_entity_id,
           alt,
@@ -248,9 +244,7 @@ export class SqlApi {
         };
       })
       .filter(
-        (
-          row,
-        ): row is { internalEntityId: string; alt: boolean; col: number; row: number; data: string } =>
+        (row): row is { internalEntityId: string; alt: boolean; col: number; row: number; data: string } =>
           row !== null && typeof row.internalEntityId === "string" && row.internalEntityId.length > 0,
       );
   }
@@ -833,8 +827,7 @@ export class SqlApi {
    * Returns null when row is missing.
    */
   async fetchWorldConfigMapCenterOffset(): Promise<number | null> {
-    const query =
-      "SELECT map_center_offset FROM `s1_eternum-WorldConfig` WHERE config_id = 4294967295 LIMIT 1";
+    const query = "SELECT map_center_offset FROM `s1_eternum-WorldConfig` WHERE config_id = 4294967295 LIMIT 1";
     const url = buildApiUrl(this.baseUrl, query);
     const results = await fetchWithErrorHandling<WorldConfigRow>(url, "Failed to fetch world config map center offset");
     const firstResult = extractFirstOrNull(results);

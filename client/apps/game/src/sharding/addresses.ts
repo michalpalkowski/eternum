@@ -10,4 +10,3 @@ export const normalizeHexAddress = (value: string): string | null => {
     return null;
   }
 };
-

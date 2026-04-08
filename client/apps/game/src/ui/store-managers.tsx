@@ -438,9 +438,7 @@ const AutoRegisterPointsStoreManager = () => {
 
 const PlayerStructuresStoreManager = () => {
   const playerAddress = useAccountStore((state) => state.playerAddress);
-  const playerStructures = usePlayerStructures(
-    playerAddress ? ContractAddress(playerAddress) : undefined,
-  );
+  const playerStructures = usePlayerStructures(playerAddress ? ContractAddress(playerAddress) : undefined);
   const setPlayerStructures = useUIStore((state) => state.setPlayerStructures);
 
   // Sync structure-scoped models (Resource, StructureBuildings, ProductionBoostBonus)
@@ -479,7 +477,8 @@ const ButtonStateStoreManager = () => {
     const nowSeconds = Date.now() / 1000;
     const seasonStartTime = Number(env.VITE_PUBLIC_SEASON_START_TIME);
     const seasonHasStarted =
-      env.VITE_PUBLIC_CHAIN === "local" || import.meta.env.VITE_PUBLIC_LOCAL_WORLD === "true" ||
+      env.VITE_PUBLIC_CHAIN === "local" ||
+      import.meta.env.VITE_PUBLIC_LOCAL_WORLD === "true" ||
       !Number.isFinite(seasonStartTime) ||
       seasonStartTime <= 0 ||
       seasonStartTime < nowSeconds;
@@ -560,7 +559,12 @@ const SeasonTimerStoreManager = () => {
 
     const startMainAt = Number(worldConfig?.season_config?.start_main_at);
     setSeasonStartMainAt(Number.isFinite(startMainAt) && startMainAt > 0 ? startMainAt : null);
-  }, [setGameEndAt, setSeasonStartMainAt, worldConfig?.season_config?.end_at, worldConfig?.season_config?.start_main_at]);
+  }, [
+    setGameEndAt,
+    setSeasonStartMainAt,
+    worldConfig?.season_config?.end_at,
+    worldConfig?.season_config?.start_main_at,
+  ]);
   return null;
 };
 

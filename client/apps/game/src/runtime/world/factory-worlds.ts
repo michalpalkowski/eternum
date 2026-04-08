@@ -3,10 +3,23 @@ import type { Chain } from "@contracts";
 import { extractContractAddress, extractNameFelt, decodePaddedFeltAscii, fetchFactoryRows } from "./factory-sql";
 import { getFactorySqlBaseUrl } from "./factory-endpoints";
 import type { FactoryIndexedWorld } from "./types";
+import { env } from "../../../env";
 
 const FACTORY_WORLDS_QUERY = `SELECT name, address FROM [wf-WorldDeployed] LIMIT 1000;`;
+const isLocalWorldMode = () => import.meta.env.VITE_PUBLIC_LOCAL_WORLD === "true";
+
+const resolveLocalWorldName = (): string | null => {
+  const worldName = env.VITE_PUBLIC_SLOT?.trim();
+  return worldName ? worldName : null;
+};
 
 export const listFactoryWorlds = async (chain: Chain): Promise<FactoryIndexedWorld[]> => {
+  if (chain === "local" || isLocalWorldMode()) {
+    const worldName = resolveLocalWorldName();
+    if (!worldName) return [];
+    return [{ name: worldName, chain, worldAddress: null }];
+  }
+
   const factorySqlBaseUrl = getFactorySqlBaseUrl(chain);
   if (!factorySqlBaseUrl) return [];
 

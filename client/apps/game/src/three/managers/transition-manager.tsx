@@ -42,6 +42,11 @@ export class TransitionManager {
       clearTimeout(this.fadeTimeoutId);
       this.fadeTimeoutId = null;
     }
+    // Renderer/scene teardown can happen mid-transition (e.g. remounts, route swaps).
+    // Ensure we never leave the global transition overlay latched on.
+    const { setIsLoadingScreenEnabled, setTooltip } = useUIStore.getState();
+    setIsLoadingScreenEnabled(false);
+    setTooltip(null);
     this.isDestroyed = true;
   }
 }

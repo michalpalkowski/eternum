@@ -122,7 +122,7 @@ export const ShardBanner = () => {
           {phase === "calling"
             ? "Sending..."
             : phase === "waiting"
-              ? stepLabel ?? "Settling..."
+              ? (stepLabel ?? "Settling...")
               : phase === "error"
                 ? "Retry"
                 : "Settle"}

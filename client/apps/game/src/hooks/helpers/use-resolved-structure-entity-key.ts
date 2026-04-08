@@ -68,12 +68,7 @@ export const useResolvedStructureEntityKey = (
 
   return useMemo(
     () =>
-      resolveStructureEntityKey(
-        structureEntityId,
-        components.Structure,
-        knownStructureEntities,
-        structuresWithKeys,
-      ),
+      resolveStructureEntityKey(structureEntityId, components.Structure, knownStructureEntities, structuresWithKeys),
     [components.Structure, knownStructureEntities, structureEntityId, structuresWithKeys],
   );
 };

@@ -13,6 +13,7 @@ export class SceneManager {
   private transitionInProgress = false;
   private transitionRequestToken = 0;
   private pendingSceneName: SceneName | undefined = undefined;
+  private readonly initialFailureFallbackScene = SceneName.WorldMap;
   constructor(private transitionManager: TransitionManager) {}
 
   getCurrentScene() {
@@ -41,14 +42,17 @@ export class SceneManager {
       pendingSceneName: this.pendingSceneName,
     });
 
+    console.log(`[SceneManager] switchScene(${sceneName}) inProgress=${this.transitionInProgress} pending=${this.pendingSceneName} shouldStart=${decision.shouldStartPendingTransition} token=${decision.nextTransitionRequestToken}`);
+
     this.transitionRequestToken = decision.nextTransitionRequestToken;
     this.pendingSceneName = decision.nextPendingSceneName;
 
     if (!decision.shouldStartPendingTransition) return;
-    this.startPendingTransition();
+    if (this.startPendingTransition()) return;
+    this.transitionManager.fadeIn();
   }
 
-  private startPendingTransition() {
+  private startPendingTransition(): boolean {
     const pendingSceneName = this.pendingSceneName;
     const pendingScene = pendingSceneName ? this.scenes.get(pendingSceneName) : undefined;
     const decision = resolvePendingTransitionStart({
@@ -60,19 +64,26 @@ export class SceneManager {
     this.pendingSceneName = decision.nextPendingSceneName;
     const sceneNameToTransition = decision.sceneNameToTransition;
     const transitionToken = decision.transitionToken;
-    if (!decision.shouldStartTransition) return;
+    if (!decision.shouldStartTransition) return false;
     if (!pendingScene || !sceneNameToTransition || transitionToken === undefined) {
-      return;
+      return false;
     }
 
-    const previousScene = this.currentScene ? this.scenes.get(this.currentScene) : undefined;
-    previousScene?.deactivateInputSurface?.();
-    previousScene?.onSwitchOff(sceneNameToTransition);
+    try {
+      const previousScene = this.currentScene ? this.scenes.get(this.currentScene) : undefined;
+      previousScene?.deactivateInputSurface?.();
+      previousScene?.onSwitchOff(sceneNameToTransition);
 
-    this.transitionInProgress = true;
-    this.transitionManager.fadeOut(async () => {
-      await this.completeTransition(sceneNameToTransition, pendingScene, transitionToken);
-    });
+      this.transitionInProgress = true;
+      this.transitionManager.fadeOut(async () => {
+        await this.completeTransition(sceneNameToTransition, pendingScene, transitionToken);
+      });
+      return true;
+    } catch (error) {
+      this.transitionInProgress = false;
+      console.error("[SceneManager] Failed to start pending scene transition", error);
+      return false;
+    }
   }
 
   private async completeTransition(sceneName: SceneName, scene: HexagonScene, transitionToken: number) {
@@ -86,31 +97,75 @@ export class SceneManager {
       });
 
     try {
-      if (resolveFinalizePlan().isSuperseded) return;
+      if (resolveFinalizePlan().isSuperseded) {
+        console.log(`[SceneManager] completeTransition(${sceneName}) SUPERSEDED before setup`);
+        return;
+      }
 
       if (scene.setup) {
+        console.log(`[SceneManager] completeTransition(${sceneName}) calling setup()...`);
         await scene.setup();
+        console.log(`[SceneManager] completeTransition(${sceneName}) setup() resolved`);
       }
-      if (resolveFinalizePlan().isSuperseded) return;
+      if (resolveFinalizePlan().isSuperseded) {
+        console.log(`[SceneManager] completeTransition(${sceneName}) SUPERSEDED after setup`);
+        return;
+      }
 
       this._updateCurrentScene(sceneName);
       scene.activateInputSurface?.();
       setupSucceeded = true;
     } catch (error) {
       console.error(`[SceneManager] Failed to set up scene ${sceneName}`, error);
+      if (!previousSceneName) {
+        this.queueInitialFailureFallback(sceneName);
+      }
     } finally {
       const finalizePlan = resolveFinalizePlan();
-      if (finalizePlan.shouldRunPostSetupEffects && (setupSucceeded || previousSceneName !== undefined)) {
-        this.moveCameraForScene();
-        this.transitionManager.fadeIn();
-      }
-
       this.transitionInProgress = false;
+      this.runPostSetupEffectsSafely({
+        shouldRunPostSetupEffects: finalizePlan.shouldRunPostSetupEffects,
+        setupSucceeded,
+        hadPreviousScene: previousSceneName !== undefined,
+      });
 
       if (finalizePlan.shouldStartPendingTransition) {
-        this.startPendingTransition();
+        console.log(`[SceneManager] completeTransition(${sceneName}) chaining to pending transition`);
+        if (this.startPendingTransition()) {
+          return;
+        }
       }
+
+      // Transition protocol invariant: every started fade-out must eventually release
+      // the transition overlay once the transition chain reaches a terminal state.
+      console.log(`[SceneManager] completeTransition(${sceneName}) calling fadeIn()`);
+      this.transitionManager.fadeIn();
     }
+  }
+
+  private runPostSetupEffectsSafely(input: {
+    shouldRunPostSetupEffects: boolean;
+    setupSucceeded: boolean;
+    hadPreviousScene: boolean;
+  }) {
+    if (!input.shouldRunPostSetupEffects) return;
+    if (!input.setupSucceeded && !input.hadPreviousScene) return;
+
+    try {
+      this.moveCameraForScene();
+    } catch (error) {
+      console.error("[SceneManager] Failed to apply post-setup scene effects", error);
+    }
+  }
+
+  private queueInitialFailureFallback(failedSceneName: SceneName): boolean {
+    if (this.pendingSceneName) return false;
+    if (failedSceneName === this.initialFailureFallbackScene) return false;
+    if (!this.scenes.has(this.initialFailureFallbackScene)) return false;
+
+    this.transitionRequestToken += 1;
+    this.pendingSceneName = this.initialFailureFallbackScene;
+    return true;
   }
 
   moveCameraForScene() {

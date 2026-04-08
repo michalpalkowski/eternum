@@ -16,10 +16,7 @@ import {
   type ShardProtocolStatus,
 } from "./protocol";
 
-const protocol = (
-  phase: string,
-  overrides?: Partial<Omit<ShardProtocolStatus, "phase">>,
-): Record<string, unknown> => ({
+const protocol = (phase: string, overrides?: Partial<Omit<ShardProtocolStatus, "phase">>): Record<string, unknown> => ({
   phase,
   ready: false,
   retriable: false,
@@ -65,8 +62,11 @@ describe("sharding protocol", () => {
   });
 
   it("includes field names in URL validation errors", () => {
-    expect(() => parseShardUrlParams("?shard_rpc=   &shard_torii=http://localhost:8080&shard_id=0xabc@1&shard_operator=http://localhost:3001"))
-      .toThrowError(/shard_rpc must not be empty/);
+    expect(() =>
+      parseShardUrlParams(
+        "?shard_rpc=   &shard_torii=http://localhost:8080&shard_id=0xabc@1&shard_operator=http://localhost:3001",
+      ),
+    ).toThrowError(/shard_rpc must not be empty/);
   });
 
   it("resolves shard session from query before session storage", () => {
@@ -163,13 +163,69 @@ describe("sharding protocol", () => {
   });
 
   it("identifies terminal vs recoverable protocol phases", () => {
-    expect(isRecoverableProtocolPhase({ phase: "provisioning", ready: false, retriable: false, errorCode: null, errorMessage: null })).toBe(true);
-    expect(isRecoverableProtocolPhase({ phase: "gameplay_active", ready: true, retriable: false, errorCode: null, errorMessage: null })).toBe(true);
-    expect(isRecoverableProtocolPhase({ phase: "retry_pending", ready: false, retriable: true, errorCode: null, errorMessage: null })).toBe(true);
-    expect(isRecoverableProtocolPhase({ phase: "failed", ready: false, retriable: false, errorCode: null, errorMessage: null })).toBe(false);
-    expect(isRecoverableProtocolPhase({ phase: "rejected", ready: false, retriable: false, errorCode: null, errorMessage: null })).toBe(false);
-    expect(isRecoverableProtocolPhase({ phase: "suspended", ready: false, retriable: false, errorCode: null, errorMessage: null })).toBe(false);
-    expect(isRecoverableProtocolPhase({ phase: "completed", ready: false, retriable: false, errorCode: null, errorMessage: null })).toBe(false);
+    expect(
+      isRecoverableProtocolPhase({
+        phase: "provisioning",
+        ready: false,
+        retriable: false,
+        errorCode: null,
+        errorMessage: null,
+      }),
+    ).toBe(true);
+    expect(
+      isRecoverableProtocolPhase({
+        phase: "gameplay_active",
+        ready: true,
+        retriable: false,
+        errorCode: null,
+        errorMessage: null,
+      }),
+    ).toBe(true);
+    expect(
+      isRecoverableProtocolPhase({
+        phase: "retry_pending",
+        ready: false,
+        retriable: true,
+        errorCode: null,
+        errorMessage: null,
+      }),
+    ).toBe(true);
+    expect(
+      isRecoverableProtocolPhase({
+        phase: "failed",
+        ready: false,
+        retriable: false,
+        errorCode: null,
+        errorMessage: null,
+      }),
+    ).toBe(false);
+    expect(
+      isRecoverableProtocolPhase({
+        phase: "rejected",
+        ready: false,
+        retriable: false,
+        errorCode: null,
+        errorMessage: null,
+      }),
+    ).toBe(false);
+    expect(
+      isRecoverableProtocolPhase({
+        phase: "suspended",
+        ready: false,
+        retriable: false,
+        errorCode: null,
+        errorMessage: null,
+      }),
+    ).toBe(false);
+    expect(
+      isRecoverableProtocolPhase({
+        phase: "completed",
+        ready: false,
+        retriable: false,
+        errorCode: null,
+        errorMessage: null,
+      }),
+    ).toBe(false);
   });
 
   it("parses transport health payload", () => {

@@ -94,8 +94,10 @@ describe("useShardRequest", () => {
     latestState = null;
     useShardStore.getState().clearMainShardRequestState();
     sessionStorage.clear();
-    delete (window as Window & { __ETERNUM_LAST_SHARD_REQUEST_RECEIPT__?: unknown }).__ETERNUM_LAST_SHARD_REQUEST_RECEIPT__;
-    delete (window as Window & { __ETERNUM_LAST_SHARD_REQUEST_DIAGNOSTIC__?: unknown }).__ETERNUM_LAST_SHARD_REQUEST_DIAGNOSTIC__;
+    delete (window as Window & { __ETERNUM_LAST_SHARD_REQUEST_RECEIPT__?: unknown })
+      .__ETERNUM_LAST_SHARD_REQUEST_RECEIPT__;
+    delete (window as Window & { __ETERNUM_LAST_SHARD_REQUEST_DIAGNOSTIC__?: unknown })
+      .__ETERNUM_LAST_SHARD_REQUEST_DIAGNOSTIC__;
 
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -152,13 +154,13 @@ describe("useShardRequest", () => {
     const execute = vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" });
     const account: ExecutableAccount = {
       execute,
-      waitForTransaction: vi
-        .fn<NonNullable<ExecutableAccount["waitForTransaction"]>>()
-        .mockResolvedValue(buildReceipt({
+      waitForTransaction: vi.fn<NonNullable<ExecutableAccount["waitForTransaction"]>>().mockResolvedValue(
+        buildReceipt({
           gameAddress: "0xabc123",
           shardContractAddress: "0x1234abcd",
           onchainShardId: "0x9",
-        })),
+        }),
+      ),
     };
 
     fetchMock
@@ -214,26 +216,29 @@ describe("useShardRequest", () => {
     await act(async () => Promise.resolve());
 
     expect(execute).toHaveBeenCalledTimes(1);
-    expect(execute).toHaveBeenCalledWith([
-      {
-        contractAddress: "0x1234abcd",
-        entrypoint: "request_shard_realm",
-        calldata: ["42", "2", "7", "8", "0"],
-      },
-    ], { tip: "0x0" });
+    expect(execute).toHaveBeenCalledWith(
+      [
+        {
+          contractAddress: "0x1234abcd",
+          entrypoint: "request_shard_realm",
+          calldata: ["42", "2", "7", "8", "0"],
+        },
+      ],
+      { tip: "0x0" },
+    );
   });
 
   it("uses request_shard with merged exclusive related ids for multi-entity requests", async () => {
     const execute = vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" });
     const account: ExecutableAccount = {
       execute,
-      waitForTransaction: vi
-        .fn<NonNullable<ExecutableAccount["waitForTransaction"]>>()
-        .mockResolvedValue(buildReceipt({
+      waitForTransaction: vi.fn<NonNullable<ExecutableAccount["waitForTransaction"]>>().mockResolvedValue(
+        buildReceipt({
           gameAddress: "0xabc123",
           shardContractAddress: "0x1234abcd",
           onchainShardId: "0x9",
-        })),
+        }),
+      ),
     };
 
     fetchMock
@@ -289,13 +294,16 @@ describe("useShardRequest", () => {
     await act(async () => Promise.resolve());
 
     expect(execute).toHaveBeenCalledTimes(1);
-    expect(execute).toHaveBeenCalledWith([
-      {
-        contractAddress: "0x1234abcd",
-        entrypoint: "request_shard",
-        calldata: ["4", "42", "43", "7", "8", "0"],
-      },
-    ], { tip: "0x0" });
+    expect(execute).toHaveBeenCalledWith(
+      [
+        {
+          contractAddress: "0x1234abcd",
+          entrypoint: "request_shard",
+          calldata: ["4", "42", "43", "7", "8", "0"],
+        },
+      ],
+      { tip: "0x0" },
+    );
   });
 
   it("fails fast when hyperstructure related ids are provided", async () => {
@@ -388,13 +396,13 @@ describe("useShardRequest", () => {
   it("fails fast when shard status response is invalid while polling", async () => {
     const account: ExecutableAccount = {
       execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" }),
-      waitForTransaction: vi
-        .fn<NonNullable<ExecutableAccount["waitForTransaction"]>>()
-        .mockResolvedValue(buildReceipt({
+      waitForTransaction: vi.fn<NonNullable<ExecutableAccount["waitForTransaction"]>>().mockResolvedValue(
+        buildReceipt({
           gameAddress: "0xabc123",
           shardContractAddress: "0x1234abcd",
           onchainShardId: "0x9",
-        })),
+        }),
+      ),
     };
 
     fetchMock
@@ -510,8 +518,10 @@ describe("useShardRequest", () => {
         extractedEventCount: 0,
       }),
     );
-    expect(sessionStorage.getItem("__eternum_last_shard_request_receipt__")).toContain("\"txHash\":\"0x111\"");
-    expect((window as Window & { __ETERNUM_LAST_SHARD_REQUEST_RECEIPT__?: unknown }).__ETERNUM_LAST_SHARD_REQUEST_RECEIPT__).toEqual(
+    expect(sessionStorage.getItem("__eternum_last_shard_request_receipt__")).toContain('"txHash":"0x111"');
+    expect(
+      (window as Window & { __ETERNUM_LAST_SHARD_REQUEST_RECEIPT__?: unknown }).__ETERNUM_LAST_SHARD_REQUEST_RECEIPT__,
+    ).toEqual(
       expect.objectContaining({
         txHash: "0x111",
       }),
@@ -600,15 +610,13 @@ describe("useShardRequest", () => {
 
     const account: ExecutableAccount = {
       execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" }),
-      waitForTransaction: vi
-        .fn<NonNullable<ExecutableAccount["waitForTransaction"]>>()
-        .mockResolvedValue(
-          buildReceipt({
-            gameAddress: "0xdef456",
-            shardContractAddress: "0x1234abcd",
-            onchainShardId: "0x9",
-          }),
-        ),
+      waitForTransaction: vi.fn<NonNullable<ExecutableAccount["waitForTransaction"]>>().mockResolvedValue(
+        buildReceipt({
+          gameAddress: "0xdef456",
+          shardContractAddress: "0x1234abcd",
+          onchainShardId: "0x9",
+        }),
+      ),
     };
 
     fetchMock
@@ -773,13 +781,13 @@ describe("useShardRequest", () => {
   it("waits for healthy transport of the requested shard id", async () => {
     const account: ExecutableAccount = {
       execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" }),
-      waitForTransaction: vi
-        .fn<NonNullable<ExecutableAccount["waitForTransaction"]>>()
-        .mockResolvedValue(buildReceipt({
+      waitForTransaction: vi.fn<NonNullable<ExecutableAccount["waitForTransaction"]>>().mockResolvedValue(
+        buildReceipt({
           gameAddress: "0xabc123",
           shardContractAddress: "0x1234abcd",
           onchainShardId: "0x9",
-        })),
+        }),
+      ),
     };
 
     fetchMock
@@ -887,13 +895,13 @@ describe("useShardRequest", () => {
   it("recovers polling for an already requested shard after an operator-side error", async () => {
     const account: ExecutableAccount = {
       execute: vi.fn<ExecutableAccount["execute"]>().mockResolvedValue({ transaction_hash: "0x111" }),
-      waitForTransaction: vi
-        .fn<NonNullable<ExecutableAccount["waitForTransaction"]>>()
-        .mockResolvedValue(buildReceipt({
+      waitForTransaction: vi.fn<NonNullable<ExecutableAccount["waitForTransaction"]>>().mockResolvedValue(
+        buildReceipt({
           gameAddress: "0xabc123",
           shardContractAddress: "0x1234abcd",
           onchainShardId: "0x9",
-        })),
+        }),
+      ),
     };
 
     fetchMock

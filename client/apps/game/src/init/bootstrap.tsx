@@ -269,7 +269,6 @@ const runBootstrap = async (): Promise<BootstrapResult> => {
 
   console.log("[INITIAL SYNC COMPLETED]");
 
-
   configManager.setDojo(setupResult.components, ETERNUM_CONFIG());
   let mapCenterOffset = initialSyncResult.worldConfigMapCenterOffset;
   if (mapCenterOffset === null) {

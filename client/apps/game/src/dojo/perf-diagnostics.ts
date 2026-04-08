@@ -221,7 +221,7 @@ if (typeof window !== "undefined") {
   // Intercept fetch to log gRPC-web subscription lifecycle.
   const origFetch = window.fetch.bind(window);
   window.fetch = ((...args: Parameters<typeof fetch>) => {
-    const url = typeof args[0] === "string" ? args[0] : (args[0] as Request)?.url ?? "";
+    const url = typeof args[0] === "string" ? args[0] : ((args[0] as Request)?.url ?? "");
     if (!url.includes("Subscribe") && !url.includes("subscribe")) {
       return origFetch(...args);
     }

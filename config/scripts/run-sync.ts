@@ -62,7 +62,16 @@ function resolveConfigDirectory(): string {
 }
 
 function resolveBunExecutable(): string {
-  return process.platform === "win32" ? "bun.exe" : "bun";
+  const executableName = process.platform === "win32" ? "bun.exe" : "bun";
+  const execPathBasename = path.basename(process.execPath).toLowerCase();
+  if (execPathBasename === "bun" || execPathBasename === "bun.exe") {
+    return process.execPath;
+  }
+  const explicitBunBin = process.env.BUN_BIN?.trim();
+  if (explicitBunBin) {
+    return explicitBunBin;
+  }
+  return executableName;
 }
 
 function resolveEnvFilePath(configDirectory: string, network: NetworkType, gameType: GameType): string {

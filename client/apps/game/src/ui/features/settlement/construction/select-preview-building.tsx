@@ -154,10 +154,7 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
   const selectedStructureEntity = useResolvedStructureEntityKey(entityId, playerStructures);
 
   const realm = selectedStructureEntity ? getRealmInfo(selectedStructureEntity, dojo.setup.components) : undefined;
-  const structureBuildings = useComponentValue(
-    dojo.setup.components.StructureBuildings,
-    selectedStructureEntity,
-  );
+  const structureBuildings = useComponentValue(dojo.setup.components.StructureBuildings, selectedStructureEntity);
   const resourceData = useComponentValue(dojo.setup.components.Resource, selectedStructureEntity);
   const currentTime = useMemo(() => Date.now(), [timerTick]);
   const currentTimeRef = useRef(currentTime);
@@ -754,7 +751,7 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
                   resourceId === ResourcesIds.Adamantine);
               const canBuild = !isLaborLockedResource && hasBalance && realm?.hasCapacity && hasEnoughPopulation;
               const disabledReason = isWriteBlocked
-                ? writeBlockReason ?? undefined
+                ? (writeBlockReason ?? undefined)
                 : isRealmFull
                   ? "Realm full"
                   : isLaborLockedResource
@@ -864,7 +861,7 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
                     ? hasBalance
                     : hasBalance && realm?.hasCapacity && hasEnoughPopulation;
                 const disabledReason = isWriteBlocked
-                  ? writeBlockReason ?? undefined
+                  ? (writeBlockReason ?? undefined)
                   : isRealmFull
                     ? "Realm full"
                     : undefined;
@@ -1035,7 +1032,7 @@ export const SelectPreviewBuildingMenu = ({ className, entityId }: { className?:
                             const canBuild =
                               !isTierLockedInSimpleMode && hasBalance && realm?.hasCapacity && hasEnoughPopulation;
                             const disabledReason = isWriteBlocked
-                              ? writeBlockReason ?? undefined
+                              ? (writeBlockReason ?? undefined)
                               : isRealmFull
                                 ? "Realm full"
                                 : isTierLockedInSimpleMode && info?.tier

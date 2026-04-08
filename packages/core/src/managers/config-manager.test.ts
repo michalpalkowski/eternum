@@ -20,7 +20,8 @@ vi.mock("@dojoengine/recs", () => ({
 }));
 
 vi.mock("@dojoengine/utils", () => ({
-  getEntityIdFromKeys: (keys: Array<bigint | number>) => `direct:${keys.map((key) => BigInt(key).toString()).join(":")}`,
+  getEntityIdFromKeys: (keys: Array<bigint | number>) =>
+    `direct:${keys.map((key) => BigInt(key).toString()).join(":")}`,
 }));
 
 describe("ClientConfigManager", () => {

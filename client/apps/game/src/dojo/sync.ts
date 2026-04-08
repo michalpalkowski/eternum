@@ -112,7 +112,11 @@ const applyMapCenterOffset = (mapCenterOffset: number): void => {
 
   let appliedMapCenter = Number(manager.getMapCenter?.());
   let forcedFallback = false;
-  if (Number.isFinite(appliedMapCenter) && appliedMapCenter !== expectedMapCenter && typeof manager.setMapCenter === "function") {
+  if (
+    Number.isFinite(appliedMapCenter) &&
+    appliedMapCenter !== expectedMapCenter &&
+    typeof manager.setMapCenter === "function"
+  ) {
     manager.setMapCenter(expectedMapCenter);
     appliedMapCenter = Number(manager.getMapCenter?.());
     forcedFallback = true;
@@ -384,10 +388,7 @@ export const syncEntitiesDebounced = async (
   };
 };
 
-const startGlobalEntityStreamSubscription = (
-  setup: SetupResult,
-  logging: boolean,
-): void => {
+const startGlobalEntityStreamSubscription = (setup: SetupResult, logging: boolean): void => {
   const attempt = entityStreamSubscriptionAttempt;
   void syncEntitiesDebounced(setup.network.toriiClient, setup, GLOBAL_STREAM_CLAUSE, logging)
     .then((subscription) => {
@@ -438,9 +439,7 @@ const ensureWorldConfigReady = async (
     worldConfigEntities = runQuery([Has(worldConfigComponent)]);
     const worldConfigEntity = Array.from(worldConfigEntities)[0];
     worldConfig =
-      worldConfigEntity !== undefined
-        ? getComponentValue(worldConfigComponent, worldConfigEntity as Entity)
-        : null;
+      worldConfigEntity !== undefined ? getComponentValue(worldConfigComponent, worldConfigEntity as Entity) : null;
 
     if (worldConfig) {
       break;
@@ -473,7 +472,13 @@ const ensureWorldConfigReady = async (
       `[sync] Protocol violation (error_code=schema_shape_mismatch): WorldConfig.map_center_offset is not numeric (${String(worldConfig.map_center_offset)})`,
     );
   }
-  if (!Number.isFinite(startMainAt) || !Number.isFinite(endAt) || startMainAt <= 0 || endAt <= 0 || endAt <= startMainAt) {
+  if (
+    !Number.isFinite(startMainAt) ||
+    !Number.isFinite(endAt) ||
+    startMainAt <= 0 ||
+    endAt <= 0 ||
+    endAt <= startMainAt
+  ) {
     throw new Error(
       `[sync] Protocol violation (error_code=world_config_timer_fields_missing): invalid season timing (start_main_at=${String(worldConfig.season_config?.start_main_at)}, end_at=${String(worldConfig.season_config?.end_at)})`,
     );
@@ -499,9 +504,7 @@ const ensureBootstrapConfigModelsReady = async (setup: SetupResult): Promise<voi
     component: contractComponents[name],
   }));
 
-  const missingComponents = requiredModels
-    .filter((entry) => entry.component === undefined)
-    .map((entry) => entry.name);
+  const missingComponents = requiredModels.filter((entry) => entry.component === undefined).map((entry) => entry.name);
   if (missingComponents.length > 0) {
     throw new Error(
       `[sync] Protocol violation (error_code=schema_shape_mismatch): missing required config components (${missingComponents.join(", ")})`,
@@ -713,9 +716,7 @@ export const initialSync = async (
   }
 
   try {
-    await timedAsync("initialSync:ensureBootstrapConfig", () =>
-      ensureBootstrapConfigModelsReady(setup),
-    );
+    await timedAsync("initialSync:ensureBootstrapConfig", () => ensureBootstrapConfigModelsReady(setup));
   } catch (error) {
     if (enforceProtocolChecks) {
       throw error;
@@ -742,11 +743,7 @@ export const initialSync = async (
   if (structureComponent) {
     const structureEntityCountBeforeSpatialHydration = runQuery([Has(structureComponent)]).size;
     const hydrationResult = await timedAsync("initialSync:spatialHydration", () =>
-      hydrateSpatialStructuresFromSqlSnapshot(
-        setup,
-        contractComponents,
-        structureEntityCountBeforeSpatialHydration,
-      ),
+      hydrateSpatialStructuresFromSqlSnapshot(setup, contractComponents, structureEntityCountBeforeSpatialHydration),
     );
     const structureEntityCountAfterSpatialHydration = runQuery([Has(structureComponent)]).size;
 
@@ -790,4 +787,3 @@ const resubscribeEntityStream = async (
     reportProgress: false,
   });
 };
-

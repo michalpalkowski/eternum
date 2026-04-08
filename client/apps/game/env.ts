@@ -251,6 +251,30 @@ const storedChain = getSelectedChain();
 export const hasExplicitChain = _rawEnv.VITE_PUBLIC_CHAIN !== undefined;
 export const hasExplicitNodeUrl = _rawEnv.VITE_PUBLIC_NODE_URL !== undefined;
 export const hasExplicitToriiUrl = _rawEnv.VITE_PUBLIC_TORII !== undefined;
+export const hasExplicitGlobalToriiUrl = _rawEnv.VITE_PUBLIC_GLOBAL_TORII !== undefined;
+
+const LOCAL_ENDPOINT_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+const isLocalEndpointUrl = (value: string): boolean => {
+  try {
+    const { hostname } = new URL(value);
+    return LOCAL_ENDPOINT_HOSTS.has(hostname) || hostname.endsWith(".localhost");
+  } catch {
+    return value.includes("localhost") || value.includes("127.0.0.1");
+  }
+};
+
+export const isLocalWorldEnvironment = (): boolean =>
+  env.VITE_PUBLIC_CHAIN === "local" ||
+  _rawEnv.VITE_PUBLIC_LOCAL_WORLD === "true" ||
+  isLocalEndpointUrl(env.VITE_PUBLIC_TORII);
+
+export const resolveGlobalToriiUrl = (): string => {
+  if (isLocalWorldEnvironment()) {
+    return env.VITE_PUBLIC_TORII;
+  }
+  return env.VITE_PUBLIC_GLOBAL_TORII;
+};
 
 // Respect persisted chain selection only when the launcher did not explicitly pin one.
 if (storedChain && env.VITE_PUBLIC_CHAIN !== "local" && !hasExplicitChain) {

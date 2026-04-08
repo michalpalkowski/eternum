@@ -109,7 +109,10 @@ export const useShardStore = create<ShardState>()((set) => ({
       mainShardRequestError: null,
     });
   },
-  enterShardMode: ({ shardId, operatorUrl, rpcUrl, toriiUrl, toriiGrpcUrl, mainUrl }, runtimeContext?: RuntimeContext | null) => {
+  enterShardMode: (
+    { shardId, operatorUrl, rpcUrl, toriiUrl, toriiGrpcUrl, mainUrl },
+    runtimeContext?: RuntimeContext | null,
+  ) => {
     const canonicalMainGameReturnUrl = resolveCanonicalMainGameReturnUrl({ mainUrl }, runtimeContext);
 
     sessionStorage.setItem(

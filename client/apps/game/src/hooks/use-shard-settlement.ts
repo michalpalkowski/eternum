@@ -3,11 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Call } from "starknet";
 import { dojoConfig } from "../../dojo-config";
 import { normalizeHexAddress } from "@/sharding/addresses";
-import {
-  extractGameContractFromShardId,
-  parseShardIdParts,
-  parseSettlementStreamEvent,
-} from "@/sharding/protocol";
+import { extractGameContractFromShardId, parseShardIdParts, parseSettlementStreamEvent } from "@/sharding/protocol";
 import type { ExecutableAccount } from "@/sharding/types";
 
 export type ShardSettlementPhase = "idle" | "calling" | "waiting" | "complete" | "error";

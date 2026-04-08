@@ -166,6 +166,53 @@ describe("SceneManager transition baseline", () => {
     expect(errorSpy).toHaveBeenCalledWith("[SceneManager] Failed to set up scene hex", brokenSetupError);
   });
 
+  it("falls back to world map when initial scene setup fails before any scene is active", async () => {
+    const fadeOutCallbacks: Array<() => void | Promise<void>> = [];
+    const transitionManager = {
+      fadeOut: vi.fn((callback: () => void | Promise<void>) => {
+        fadeOutCallbacks.push(callback);
+      }),
+      fadeIn: vi.fn(),
+    };
+
+    const sceneManager = new SceneManager(transitionManager as unknown as TransitionManager);
+    const worldMapSetup = vi.fn(async () => {});
+    const brokenSetupError = new Error("setup failed");
+    const brokenSetup = vi.fn(async () => {
+      throw brokenSetupError;
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    sceneManager.addScene(SceneName.WorldMap, {
+      setup: worldMapSetup,
+      onSwitchOff: vi.fn(),
+      moveCameraToURLLocation: vi.fn(),
+    } as unknown as HexagonScene);
+
+    sceneManager.addScene(SceneName.Hexception, {
+      setup: brokenSetup,
+      onSwitchOff: vi.fn(),
+      moveCameraToURLLocation: vi.fn(),
+    } as unknown as HexagonScene);
+
+    sceneManager.switchScene(SceneName.Hexception);
+    expect(transitionManager.fadeOut).toHaveBeenCalledTimes(1);
+
+    await fadeOutCallbacks[0]();
+
+    expect(brokenSetup).toHaveBeenCalledTimes(1);
+    expect(sceneManager.getCurrentScene()).toBeUndefined();
+    expect(transitionManager.fadeIn).not.toHaveBeenCalled();
+    expect(transitionManager.fadeOut).toHaveBeenCalledTimes(2);
+    expect(errorSpy).toHaveBeenCalledWith("[SceneManager] Failed to set up scene hex", brokenSetupError);
+
+    await fadeOutCallbacks[1]();
+
+    expect(worldMapSetup).toHaveBeenCalledTimes(1);
+    expect(sceneManager.getCurrentScene()).toBe(SceneName.WorldMap);
+    expect(transitionManager.fadeIn).toHaveBeenCalledTimes(1);
+  });
+
   it("activates input on the current scene and deactivates it on switch-off", async () => {
     const fadeOutCallbacks: Array<() => void | Promise<void>> = [];
     const transitionManager = {
@@ -206,5 +253,107 @@ describe("SceneManager transition baseline", () => {
     expect(deactivateWorldMapInput).toHaveBeenCalledTimes(1);
     expect(activateHexInput).toHaveBeenCalledTimes(1);
     expect(deactivateHexInput).not.toHaveBeenCalled();
+  });
+
+  it("releases transition overlay when post-setup camera effects throw", async () => {
+    const fadeOutCallbacks: Array<() => void | Promise<void>> = [];
+    const transitionManager = {
+      fadeOut: vi.fn((callback: () => void | Promise<void>) => {
+        fadeOutCallbacks.push(callback);
+      }),
+      fadeIn: vi.fn(),
+    };
+    const moveCameraError = new Error("camera move failed");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const sceneManager = new SceneManager(transitionManager as unknown as TransitionManager);
+    sceneManager.addScene(SceneName.WorldMap, {
+      setup: vi.fn(async () => {}),
+      onSwitchOff: vi.fn(),
+      moveCameraToURLLocation: vi.fn(() => {
+        throw moveCameraError;
+      }),
+    } as unknown as HexagonScene);
+
+    sceneManager.switchScene(SceneName.WorldMap);
+    await fadeOutCallbacks[0]();
+
+    expect(sceneManager.getCurrentScene()).toBe(SceneName.WorldMap);
+    expect(transitionManager.fadeIn).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith("[SceneManager] Failed to apply post-setup scene effects", moveCameraError);
+  });
+
+  it("releases transition overlay when a superseded transition completes without a pending successor", async () => {
+    const fadeOutCallbacks: Array<() => void | Promise<void>> = [];
+    const transitionManager = {
+      fadeOut: vi.fn((callback: () => void | Promise<void>) => {
+        fadeOutCallbacks.push(callback);
+      }),
+      fadeIn: vi.fn(),
+    };
+
+    const sceneManager = new SceneManager(transitionManager as unknown as TransitionManager);
+    sceneManager.addScene(SceneName.WorldMap, {
+      setup: vi.fn(async () => {}),
+      onSwitchOff: vi.fn(),
+      moveCameraToURLLocation: vi.fn(),
+    } as unknown as HexagonScene);
+
+    sceneManager.switchScene(SceneName.WorldMap);
+    expect(transitionManager.fadeOut).toHaveBeenCalledTimes(1);
+
+    // Emulate an out-of-band supersede where no pending scene remains.
+    // The overlay still must be released when this transition chain ends.
+    const sceneManagerAny = sceneManager as unknown as {
+      transitionRequestToken: number;
+      pendingSceneName: SceneName | undefined;
+    };
+    sceneManagerAny.transitionRequestToken = 2;
+    sceneManagerAny.pendingSceneName = undefined;
+
+    await fadeOutCallbacks[0]();
+
+    expect(transitionManager.fadeIn).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases transition overlay when chained transition startup throws", async () => {
+    const fadeOutCallbacks: Array<() => void | Promise<void>> = [];
+    const transitionManager = {
+      fadeOut: vi.fn((callback: () => void | Promise<void>) => {
+        fadeOutCallbacks.push(callback);
+      }),
+      fadeIn: vi.fn(),
+    };
+    const switchOffError = new Error("switch-off failed");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const sceneManager = new SceneManager(transitionManager as unknown as TransitionManager);
+    sceneManager.addScene(SceneName.WorldMap, {
+      setup: vi.fn(async () => {}),
+      onSwitchOff: vi.fn((nextSceneName?: SceneName) => {
+        if (nextSceneName === SceneName.WorldMap) {
+          throw switchOffError;
+        }
+      }),
+      moveCameraToURLLocation: vi.fn(),
+    } as unknown as HexagonScene);
+    sceneManager.addScene(SceneName.Hexception, {
+      setup: vi.fn(async () => {}),
+      onSwitchOff: vi.fn(),
+      moveCameraToURLLocation: vi.fn(),
+    } as unknown as HexagonScene);
+
+    sceneManager.switchScene(SceneName.WorldMap);
+    await fadeOutCallbacks[0]();
+
+    sceneManager.switchScene(SceneName.Hexception);
+    sceneManager.switchScene(SceneName.WorldMap);
+
+    await fadeOutCallbacks[1]();
+
+    expect(sceneManager.getCurrentScene()).toBe(SceneName.WorldMap);
+    expect(transitionManager.fadeOut).toHaveBeenCalledTimes(2);
+    expect(transitionManager.fadeIn).toHaveBeenCalledTimes(2);
+    expect(errorSpy).toHaveBeenCalledWith("[SceneManager] Failed to start pending scene transition", switchOffError);
   });
 });

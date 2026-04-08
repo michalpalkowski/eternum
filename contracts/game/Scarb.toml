@@ -21,8 +21,11 @@ cubit = { git = "https://github.com/credence0x/cubit.git", branch = "feat/cairo-
 snforge_std = "0.51.2"
 assert_macros = "2.13"
 dojo_snf_test = { git = "https://github.com/michalpalkowski/dojo", branch = "feature/sharding" }
-openzeppelin_token = "2.0.0"
-openzeppelin = "2.0.0"
+openzeppelin_access = { git = "https://github.com/OpenZeppelin/cairo-contracts.git", tag = "v2.0.0" }
+openzeppelin_introspection = { git = "https://github.com/OpenZeppelin/cairo-contracts.git", tag = "v2.0.0" }
+openzeppelin_token = { git = "https://github.com/OpenZeppelin/cairo-contracts.git", tag = "v2.0.0" }
+openzeppelin_upgrades = { git = "https://github.com/OpenZeppelin/cairo-contracts.git", tag = "v2.0.0" }
+openzeppelin_utils = { git = "https://github.com/OpenZeppelin/cairo-contracts.git", tag = "v2.0.0" }
 
 [patch."https://github.com/michalpalkowski/dojo"]
 dojo = { path = "../../../dojo/crates/dojo/core" }

@@ -97,6 +97,12 @@ pub mod season {
     mod tests;
 }
 
+pub mod sharding {
+    pub mod contracts;
+    #[cfg(test)]
+    mod tests;
+}
+
 pub mod utils {
     pub mod bitcoin_mine;
     pub mod blitz_exploration;
